@@ -271,3 +271,120 @@ If Open BLT releases additional open source projects, the bread/grain naming con
 - Or shift to sandwich components: **Pickle** (a sharp utility tool), **Mustard** (a spicy add-on), etc.
 
 This is entirely optional and should only be pursued if it feels natural. Forced theme naming is worse than no theme.
+
+---
+
+## 8. Design Tokens (v1)
+
+These tokens define Rye's baseline visual system for web properties: warm, grounded, and technical.
+
+```css
+/* Rye Design Tokens v1 */
+:root {
+    /* Typography */
+    --font-display: "Space Grotesk", "Segoe UI", sans-serif;
+    --font-body: "Source Sans 3", "Segoe UI", sans-serif;
+    --font-mono: "IBM Plex Mono", "SFMono-Regular", monospace;
+
+    --text-xs: 0.75rem;   /* 12 */
+    --text-sm: 0.875rem;  /* 14 */
+    --text-md: 1rem;      /* 16 */
+    --text-lg: 1.125rem;  /* 18 */
+    --text-xl: 1.375rem;  /* 22 */
+    --text-2xl: clamp(1.75rem, 3vw, 2.5rem);
+    --text-3xl: clamp(2.25rem, 4.5vw, 3.75rem);
+
+    --lh-tight: 1.15;
+    --lh-copy: 1.6;
+
+    /* Spacing (4px base) */
+    --space-1: 0.25rem;
+    --space-2: 0.5rem;
+    --space-3: 0.75rem;
+    --space-4: 1rem;
+    --space-5: 1.5rem;
+    --space-6: 2rem;
+    --space-7: 3rem;
+    --space-8: 4rem;
+
+    /* Radius */
+    --radius-sm: 0.5rem;
+    --radius-md: 0.875rem;
+    --radius-lg: 1.25rem;
+    --radius-pill: 999px;
+
+    /* Brand Palette */
+    --rye-cream: #f5efe3;
+    --rye-sand: #e8dbc3;
+    --rye-amber: #b7792b;
+    --rye-rust: #8d4f1d;
+    --rye-char: #1f1b16;
+    --rye-slate: #4d463b;
+    --rye-moss: #4f6451;
+
+    /* Semantic Colors */
+    --color-bg: var(--rye-cream);
+    --color-surface: #fffaf1;
+    --color-surface-2: #f2e6d2;
+    --color-text: var(--rye-char);
+    --color-text-muted: #6b6255;
+    --color-border: #d8c8af;
+
+    --color-brand: var(--rye-amber);
+    --color-brand-strong: var(--rye-rust);
+    --color-brand-soft: #edd6b6;
+    --color-accent: var(--rye-moss);
+
+    --color-success: #2f7a48;
+    --color-warning: #a26316;
+    --color-danger: #b23a2f;
+
+    /* Elevation */
+    --shadow-sm: 0 1px 2px rgba(31, 27, 22, 0.08);
+    --shadow-md: 0 8px 24px rgba(31, 27, 22, 0.12);
+    --shadow-lg: 0 18px 50px rgba(31, 27, 22, 0.16);
+
+    /* Motion */
+    --ease-standard: cubic-bezier(0.2, 0.8, 0.2, 1);
+    --dur-fast: 140ms;
+    --dur-med: 260ms;
+    --dur-slow: 420ms;
+
+    /* Layout */
+    --container-max: 72rem; /* 1152px */
+}
+
+[data-theme="dark"] {
+    --color-bg: #16130f;
+    --color-surface: #1e1a15;
+    --color-surface-2: #262017;
+    --color-text: #f3eadb;
+    --color-text-muted: #c7b89f;
+    --color-border: #3a3125;
+
+    --color-brand: #d2954c;
+    --color-brand-strong: #e1ad6d;
+    --color-brand-soft: #3a2b17;
+    --color-accent: #7ea082;
+
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+    --shadow-md: 0 10px 28px rgba(0, 0, 0, 0.45);
+    --shadow-lg: 0 20px 56px rgba(0, 0, 0, 0.55);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    :root {
+        --dur-fast: 1ms;
+        --dur-med: 1ms;
+        --dur-slow: 1ms;
+    }
+}
+```
+
+### 8.1 Usage Rules
+
+1. Use `--color-brand` only for primary CTAs and active states.
+2. Use `--font-mono` for code, schema excerpts, and database-focused surfaces.
+3. Keep body copy on `--text-md` with `--lh-copy` for readability.
+4. Use only opacity/transform animations with motion duration tokens.
+5. Respect `prefers-reduced-motion` for all interactive effects.

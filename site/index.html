@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Rye UI Showcase</title>
+    <meta
+      name="description"
+      content="Rye design token and component showcase with light and dark mode."
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="bg-grain" aria-hidden="true"></div>
+    <header class="site-header">
+      <div class="container nav-row">
+        <a class="brand" href="#">
+          <span class="brand-mark">RYE</span>
+          <span class="brand-sub">Agent-native data model</span>
+        </a>
+        <div class="nav-actions">
+          <a class="btn btn-ghost" href="#">Docs</a>
+          <a class="btn btn-primary" href="#">Get Started</a>
+          <button class="theme-toggle" id="theme-toggle" type="button" aria-live="polite">
+            <span id="theme-label">Dark mode</span>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <main class="container">
+      <section class="hero">
+        <p class="kicker">Your data. Your database. Your rules.</p>
+        <h1>Rye Component Showcase</h1>
+        <p class="lede">
+          A modern, warm, technical interface built from Rye v1 tokens. This page demonstrates
+          core UI primitives, typography, data surfaces, and state components in light and dark themes.
+        </p>
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="#">Primary Action</a>
+          <a class="btn btn-secondary" href="#">Secondary Action</a>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Typography</h2>
+        <div class="typography-grid">
+          <div>
+            <p class="text-3xl">Display 3XL</p>
+            <p class="text-2xl">Display 2XL</p>
+            <p class="text-xl">Heading XL</p>
+            <p class="text-lg">Body LG</p>
+            <p class="text-md">Body MD</p>
+            <p class="text-sm">Body SM</p>
+            <p class="text-xs">Body XS</p>
+          </div>
+          <div class="code-surface">
+            <p class="mono-label">Monospace Sample</p>
+            <pre><code>SELECT * FROM current_assertions
+WHERE subject_node_id = 'node-abc123'
+ORDER BY asserted_at DESC;</code></pre>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Buttons and Badges</h2>
+        <div class="row-wrap">
+          <button class="btn btn-primary" type="button">Primary</button>
+          <button class="btn btn-secondary" type="button">Secondary</button>
+          <button class="btn btn-ghost" type="button">Ghost</button>
+          <button class="btn btn-danger" type="button">Danger</button>
+        </div>
+        <div class="row-wrap">
+          <span class="badge badge-brand">Agent-native</span>
+          <span class="badge badge-accent">Open Source</span>
+          <span class="badge badge-muted">PostgreSQL</span>
+          <span class="badge badge-success">Healthy</span>
+          <span class="badge badge-warning">At Risk</span>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Cards</h2>
+        <div class="card-grid">
+          <article class="card">
+            <h3>Core Model</h3>
+            <p>Six core tables with temporal assertions and immutable event history.</p>
+            <a href="#" class="inline-link">Read schema</a>
+          </article>
+          <article class="card">
+            <h3>Security</h3>
+            <p>Session-context RLS, field redaction, and policy-driven agent controls.</p>
+            <a href="#" class="inline-link">View policies</a>
+          </article>
+          <article class="card">
+            <h3>Conformance</h3>
+            <p>Normative core contract, implementation checklist, and test matrix.</p>
+            <a href="#" class="inline-link">Open checklist</a>
+          </article>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Alerts and Form Inputs</h2>
+        <div class="alerts">
+          <div class="alert alert-success">Deployment complete. Materialized views refreshed.</div>
+          <div class="alert alert-warning">Warning: RLS policy overhead above 20%.</div>
+          <div class="alert alert-danger">Error: unauthorized assertion update blocked.</div>
+        </div>
+        <form class="form-grid" action="#" method="post">
+          <label>
+            Workspace Name
+            <input type="text" placeholder="Rye Production" />
+          </label>
+          <label>
+            Environment
+            <select>
+              <option>Development</option>
+              <option>Staging</option>
+              <option>Production</option>
+            </select>
+          </label>
+          <label class="wide">
+            Notes
+            <textarea rows="4" placeholder="Add implementation notes"></textarea>
+          </label>
+        </form>
+      </section>
+
+      <section class="panel">
+        <h2>Data Table</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Entity</th>
+                <th>Code</th>
+                <th>Status</th>
+                <th>Updated</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Opportunity</td>
+                <td><code>OPP-2602-0042</code></td>
+                <td><span class="badge badge-muted">Title Review</span></td>
+                <td>2026-02-16</td>
+              </tr>
+              <tr>
+                <td>Task</td>
+                <td><code>TSK-2602-0118</code></td>
+                <td><span class="badge badge-warning">Blocked</span></td>
+                <td>2026-02-15</td>
+              </tr>
+              <tr>
+                <td>Project</td>
+                <td><code>PRJ-2602-0003</code></td>
+                <td><span class="badge badge-success">On Track</span></td>
+                <td>2026-02-14</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Color Tokens</h2>
+        <div class="swatch-grid">
+          <div class="swatch"><span style="background: var(--rye-cream)"></span><code>--rye-cream</code></div>
+          <div class="swatch"><span style="background: var(--rye-sand)"></span><code>--rye-sand</code></div>
+          <div class="swatch"><span style="background: var(--rye-amber)"></span><code>--rye-amber</code></div>
+          <div class="swatch"><span style="background: var(--rye-rust)"></span><code>--rye-rust</code></div>
+          <div class="swatch"><span style="background: var(--rye-char)"></span><code>--rye-char</code></div>
+          <div class="swatch"><span style="background: var(--rye-moss)"></span><code>--rye-moss</code></div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="container">
+        <p>Rye UI Showcase. Static-first and deployable on Cloudflare, Vercel, Netlify, S3, or any CDN.</p>
+      </div>
+    </footer>
+
+    <script src="./script.js"></script>
+  </body>
+</html>

@@ -114,6 +114,7 @@ ORDER BY asserted_at;
 
 ## Next Steps
 
+- [Core Contract and Conformance Kit](../model/core-contract-and-conformance.md) — baseline checklist and test matrix before production use
 - [SaaS Customer Operations](saas-customer-operations.md) — if you run a SaaS company
 - [Product Development](product-development.md) — if you're tracking features, bugs, and releases
 - [Recruiting Pipeline](recruiting-pipeline.md) — if you're hiring

@@ -80,6 +80,7 @@ Supporting tables handle security, integration, and deduplication:
 
 ## 6. Related Documents
 
+- [Core Contract and Conformance Kit](core-contract-and-conformance.md) — Normative contract, implementation checklist, and test matrix
 - [Schema Reference](schema.md) — Table definitions and DDL
 - [Functions Reference](functions.md) — Utility functions and query patterns
 - [Security](security.md) — RLS policies and field-level redaction
