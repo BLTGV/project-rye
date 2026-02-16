@@ -145,7 +145,7 @@ body {
 }
 
 .nav-row {
-  min-height: 4.5rem;
+  min-height: 4.9rem;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -167,13 +167,13 @@ body {
 }
 
 .brand-logo {
-  height: 48px;
+  height: 52px;
   width: auto;
-  max-width: 168px;
+  max-width: 176px;
 }
 
 .brand-sub {
-  font-size: 0.94rem;
+  font-size: 0.92rem;
   color: var(--color-text-muted);
   letter-spacing: 0.01em;
 }
