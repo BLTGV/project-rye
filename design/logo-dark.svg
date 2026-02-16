@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 100">
+  <defs>
+    <style>
+      .node { fill: #d2954c; }
+      .node-ring { fill: none; stroke: #e1ad6d; stroke-width: 1.5; opacity: 0.45; }
+      .stem { stroke: #c9b192; stroke-width: 2.8; stroke-linecap: round; fill: none; }
+      .edge { stroke: #d2954c; stroke-linecap: round; }
+      .awn  { stroke: #c9b192; stroke-width: 2; stroke-linecap: round; }
+      .wordmark {
+        font-family: 'Space Grotesk', 'Segoe UI', system-ui, sans-serif;
+        font-size: 56px;
+        font-weight: 700;
+        fill: #f3eadb;
+        letter-spacing: -0.5px;
+      }
+    </style>
+  </defs>
+
+  <g transform="translate(14, 6)">
+    <path class="stem" d="M 36,90 Q 33,50 28,4"/>
+
+    <line class="awn" x1="28" y1="4" x2="18" y2="-8"/>
+    <line class="awn" x1="28" y1="4" x2="38" y2="-8"/>
+
+    <line class="edge" x1="36" y1="76" x2="19" y2="55" stroke-width="2.2" opacity="0.62"/>
+    <line class="edge" x1="19" y1="55" x2="42" y2="36" stroke-width="2.2" opacity="0.62"/>
+    <line class="edge" x1="42" y1="36" x2="24" y2="18" stroke-width="2.2" opacity="0.62"/>
+    <line class="edge" x1="36" y1="76" x2="42" y2="36" stroke-width="1.6" opacity="0.38"/>
+    <line class="edge" x1="19" y1="55" x2="24" y2="18" stroke-width="1.6" opacity="0.38"/>
+
+    <circle class="node-ring" cx="36" cy="76" r="12"/>
+    <circle class="node-ring" cx="19" cy="55" r="11"/>
+    <circle class="node-ring" cx="42" cy="36" r="10"/>
+    <circle class="node-ring" cx="24" cy="18" r="9"/>
+
+    <circle class="node" cx="36" cy="76" r="8.5"/>
+    <circle class="node" cx="19" cy="55" r="8"/>
+    <circle class="node" cx="42" cy="36" r="7.5"/>
+    <circle class="node" cx="24" cy="18" r="7"/>
+  </g>
+
+  <text class="wordmark" x="80" y="72">rye</text>
+</svg>

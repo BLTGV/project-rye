@@ -3,6 +3,7 @@
   var root = document.documentElement;
   var toggle = document.getElementById("theme-toggle");
   var label = document.getElementById("theme-label");
+  var logo = document.getElementById("brand-logo");
 
   function systemPrefersDark() {
     return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
@@ -19,6 +20,11 @@
     window.localStorage.setItem(storageKey, theme);
     if (label) {
       label.textContent = theme === "dark" ? "Light mode" : "Dark mode";
+    }
+    if (logo) {
+      var darkSrc = logo.getAttribute("data-logo-dark");
+      var lightSrc = logo.getAttribute("data-logo-light");
+      logo.src = theme === "dark" ? darkSrc : lightSrc;
     }
   }
 

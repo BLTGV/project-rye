@@ -163,6 +163,11 @@ body {
   letter-spacing: 0.08em;
 }
 
+.brand-logo {
+  height: 42px;
+  width: auto;
+}
+
 .brand-sub {
   font-size: var(--text-sm);
   color: var(--color-text-muted);

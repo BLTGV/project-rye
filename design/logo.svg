@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 100">
+  <defs>
+    <style>
+      .node { fill: #8d4f1d; }
+      .node-ring { fill: none; stroke: #b7792b; stroke-width: 1.5; opacity: 0.5; }
+      .stem { stroke: #6b3f14; stroke-width: 2.8; stroke-linecap: round; fill: none; }
+      .edge { stroke: #8d4f1d; stroke-linecap: round; }
+      .awn  { stroke: #6b3f14; stroke-width: 2; stroke-linecap: round; }
+      .wordmark {
+        font-family: 'Space Grotesk', 'Segoe UI', system-ui, sans-serif;
+        font-size: 56px;
+        font-weight: 700;
+        fill: #1f1b16;
+        letter-spacing: -0.5px;
+      }
+    </style>
+  </defs>
+
+  <!-- Mark: rye grain head as connected graph nodes -->
+  <g transform="translate(14, 6)">
+    <!-- Stem (subtle curve) -->
+    <path class="stem" d="M 36,90 Q 33,50 28,4"/>
+
+    <!-- Awns at the tip -->
+    <line class="awn" x1="28" y1="4" x2="18" y2="-8"/>
+    <line class="awn" x1="28" y1="4" x2="38" y2="-8"/>
+
+    <!-- Graph edges between nodes -->
+    <line class="edge" x1="36" y1="76" x2="19" y2="55" stroke-width="2.2" opacity="0.6"/>
+    <line class="edge" x1="19" y1="55" x2="42" y2="36" stroke-width="2.2" opacity="0.6"/>
+    <line class="edge" x1="42" y1="36" x2="24" y2="18" stroke-width="2.2" opacity="0.6"/>
+    <!-- Cross-edges (graph character) -->
+    <line class="edge" x1="36" y1="76" x2="42" y2="36" stroke-width="1.6" opacity="0.35"/>
+    <line class="edge" x1="19" y1="55" x2="24" y2="18" stroke-width="1.6" opacity="0.35"/>
+
+    <!-- Node rings (subtle glow for depth) -->
+    <circle class="node-ring" cx="36" cy="76" r="12"/>
+    <circle class="node-ring" cx="19" cy="55" r="11"/>
+    <circle class="node-ring" cx="42" cy="36" r="10"/>
+    <circle class="node-ring" cx="24" cy="18" r="9"/>
+
+    <!-- Nodes (kernels / graph vertices) -->
+    <circle class="node" cx="36" cy="76" r="8.5"/>
+    <circle class="node" cx="19" cy="55" r="8"/>
+    <circle class="node" cx="42" cy="36" r="7.5"/>
+    <circle class="node" cx="24" cy="18" r="7"/>
+  </g>
+
+  <!-- Wordmark -->
+  <text class="wordmark" x="80" y="72">rye</text>
+</svg>
