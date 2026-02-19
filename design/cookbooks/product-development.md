@@ -86,7 +86,7 @@ INSERT INTO nodes (node_type, label, properties, attrs) VALUES (
         "detection": "customer_report",
         "status_page_posted": true
     }',
-    '{"teams": ["engineering", "support"]}'
+    '{"teams": ["engineering", "support"], "classification": "internal"}'
 );
 
 -- Link incident to the release that caused it
@@ -103,17 +103,46 @@ FROM nodes incident, nodes customer
 WHERE incident.label = 'CSV export timeout in production'
   AND customer.label IN ('Acme Corp', 'Globex Inc');
 
--- Incident timeline events
-INSERT INTO events (event_type, occurred_at, summary, properties, actor_system)
-VALUES
-    ('incident_update', '2024-03-20T14:35:00Z', 'Incident acknowledged, investigating',
-     '{"action": "acknowledged"}', 'user:bob'),
-    ('incident_update', '2024-03-20T15:10:00Z', 'Root cause identified: unbounded query in export path',
-     '{"action": "root_cause_found", "root_cause": "Missing LIMIT on export query for large datasets"}', 'user:bob'),
-    ('incident_update', '2024-03-20T16:00:00Z', 'Hotfix deployed (v2.4.2), monitoring',
-     '{"action": "fix_deployed", "fix_version": "2.4.2"}', 'user:bob'),
-    ('incident_update', '2024-03-20T17:00:00Z', 'Incident resolved, no recurrence',
-     '{"action": "resolved"}', 'user:bob');
+-- Incident timeline events (each linked to the incident node as a participant)
+SELECT record_event(
+    p_event_type := 'incident_update',
+    p_summary := 'Incident acknowledged, investigating',
+    p_properties := '{"action": "acknowledged"}',
+    p_participant_ids := ARRAY[(SELECT id FROM nodes WHERE label = 'CSV export timeout in production')]::uuid[],
+    p_participant_roles := ARRAY['regarding'],
+    p_actor := 'user:bob',
+    p_occurred_at := '2024-03-20T14:35:00Z'::timestamptz
+);
+
+SELECT record_event(
+    p_event_type := 'incident_update',
+    p_summary := 'Root cause identified: unbounded query in export path',
+    p_properties := '{"action": "root_cause_found", "root_cause": "Missing LIMIT on export query for large datasets"}',
+    p_participant_ids := ARRAY[(SELECT id FROM nodes WHERE label = 'CSV export timeout in production')]::uuid[],
+    p_participant_roles := ARRAY['regarding'],
+    p_actor := 'user:bob',
+    p_occurred_at := '2024-03-20T15:10:00Z'::timestamptz
+);
+
+SELECT record_event(
+    p_event_type := 'incident_update',
+    p_summary := 'Hotfix deployed (v2.4.2), monitoring',
+    p_properties := '{"action": "fix_deployed", "fix_version": "2.4.2"}',
+    p_participant_ids := ARRAY[(SELECT id FROM nodes WHERE label = 'CSV export timeout in production')]::uuid[],
+    p_participant_roles := ARRAY['regarding'],
+    p_actor := 'user:bob',
+    p_occurred_at := '2024-03-20T16:00:00Z'::timestamptz
+);
+
+SELECT record_event(
+    p_event_type := 'incident_update',
+    p_summary := 'Incident resolved, no recurrence',
+    p_properties := '{"action": "resolved"}',
+    p_participant_ids := ARRAY[(SELECT id FROM nodes WHERE label = 'CSV export timeout in production')]::uuid[],
+    p_participant_roles := ARRAY['regarding'],
+    p_actor := 'user:bob',
+    p_occurred_at := '2024-03-20T17:00:00Z'::timestamptz
+);
 ```
 
 ---
@@ -124,7 +153,7 @@ VALUES
 INSERT INTO nodes (node_type, label, properties, attrs) VALUES (
     'release', 'v2.4.1',
     '{"version": "2.4.1", "tag": "v2.4.1", "released_at": "2024-03-19T10:00:00Z", "changelog_ref": "https://github.com/..."}',
-    '{"teams": ["engineering"]}'
+    '{"teams": ["engineering"], "classification": "internal"}'
 );
 
 -- Link issues resolved in this release
@@ -154,7 +183,7 @@ INSERT INTO nodes (node_type, label, properties, attrs) VALUES (
         "decision": "Stream CSV rows instead of buffering entire result set",
         "consequences": "Requires chunked transfer encoding, client must handle streaming response"
     }',
-    '{"teams": ["engineering"]}'
+    '{"teams": ["engineering"], "classification": "internal"}'
 );
 
 -- Link ADR to the component it applies to
@@ -256,7 +285,7 @@ Queries customers linked to incidents triggered by the v2.4.1 release, cross-ref
 
 **Agent:** "Create a post-mortem task for the CSV export incident."
 
-Creates a task linked to the incident via `originated_from`, assigns to the on-call engineer, adds `regarding` edges to the component and release, sets due date.
+Uses `create_task()` to create a task linked to the incident via `regarding` edges, assigns to the on-call engineer, and uses `record_event()` to log the task creation event with the component and release as participants.
 
 **Agent:** "What architectural decisions affect the reporting service?"
 

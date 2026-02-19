@@ -1,0 +1,4 @@
+interface:
+  display_name: "Rye Agent Ops"
+  short_description: "Operate Rye safely for LLM agent workflows"
+  default_prompt: "Use agent-safe read/write paths and preserve Rye auditability."

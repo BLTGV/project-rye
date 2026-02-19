@@ -39,23 +39,27 @@ The graph overlays your existing systems. Stripe, Intercom, and Linear remain th
 
 ```sql
 -- Import a Stripe customer as a graph node
-INSERT INTO nodes (node_type, label, external_id, external_source, properties)
-VALUES ('org', 'Acme Corp', 'cus_abc123', 'stripe',
-    '{"name": "Acme Corp", "plan": "growth", "mrr": 299, "stripe_id": "cus_abc123"}')
-ON CONFLICT (external_source, external_id)
-    WHERE external_id IS NOT NULL AND archived_at IS NULL
-DO UPDATE SET properties = nodes.properties || EXCLUDED.properties, updated_at = now();
-
--- Map it back to Stripe
-INSERT INTO node_source_map (node_id, source_schema, source_table, source_id)
-SELECT id, 'stripe', 'customers', 'cus_abc123'
-FROM nodes WHERE external_id = 'cus_abc123' AND external_source = 'stripe';
+SELECT link_record(
+    p_source_schema := 'stripe',
+    p_source_table  := 'customers',
+    p_source_id     := 'cus_abc123',
+    p_node_type     := 'org',
+    p_label         := 'Acme Corp',
+    p_properties    := '{"name": "Acme Corp", "plan": "growth", "mrr": 299, "stripe_id": "cus_abc123"}'
+);
 
 -- Import a support ticket from Intercom
-INSERT INTO nodes (node_type, label, external_id, external_source, properties)
-VALUES ('ticket', 'Cannot export CSV reports', 'conv_789', 'intercom',
-    '{"title": "Cannot export CSV reports", "channel": "chat", "priority": "high"}');
+SELECT link_record(
+    p_source_schema := 'intercom',
+    p_source_table  := 'conversations',
+    p_source_id     := 'conv_789',
+    p_node_type     := 'ticket',
+    p_label         := 'Cannot export CSV reports',
+    p_properties    := '{"title": "Cannot export CSV reports", "channel": "chat", "priority": "high"}'
+);
 ```
+
+`link_record()` creates the node and the `node_source_map` entry in one call. Each distinct `source_id` creates a new node. Calling it again with the same `(schema, table, source_id)` updates the existing node instead of creating a duplicate.
 
 ---
 
@@ -147,9 +151,9 @@ The agent queries:
 
 **Agent:** "Log that I spoke with Alice at Acme about their export issue."
 
-The agent inserts:
-1. A `phone_call` event with summary
-2. `event_participants` linking Alice, Acme, and the export ticket
+The agent calls `record_event()` with:
+1. Event type `phone_call` and summary
+2. Alice, Acme, and the export ticket as participants
 3. Optionally supersedes the `sentiment` assertion with updated stance
 
 ---

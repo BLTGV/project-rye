@@ -72,7 +72,7 @@ SELECT create_opportunity(
 INSERT INTO nodes (node_type, label, properties, attrs) VALUES (
     'person', 'Alex Rivera',
     '{"first_name": "Alex", "last_name": "Rivera", "email": "alex@example.com", "source": "referral"}',
-    '{"teams": ["recruiting"]}'
+    '{"teams": ["recruiting"], "classification": "internal"}'
 );
 
 -- Link candidate to role
@@ -93,27 +93,22 @@ Each interview is an event with structured feedback as an assertion:
 
 ```sql
 -- Log a phone screen
-WITH interview AS (
-    INSERT INTO events (event_type, occurred_at, summary, properties, actor_system)
-    VALUES (
-        'interview', '2024-03-20T14:00:00Z',
-        'Phone screen with Alex Rivera for Senior Backend Engineer',
-        '{"round": "phone_screen", "format": "video", "duration_minutes": 45}',
-        'user:jane'
-    )
-    RETURNING id
-)
-INSERT INTO event_participants (event_id, node_id, role)
-SELECT interview.id, node_id, role
-FROM interview,
-(VALUES
-    ((SELECT id FROM nodes WHERE label = 'Alex Rivera'), 'candidate'),
-    ((SELECT id FROM nodes WHERE label = 'Jane Smith'), 'interviewer'),
-    ((SELECT id FROM nodes WHERE label = 'Senior Backend Engineer' AND node_type = 'opportunity'), 'regarding')
-) AS participants(node_id, role);
+SELECT record_event(
+    p_event_type     := 'interview',
+    p_summary        := 'Phone screen with Alex Rivera for Senior Backend Engineer',
+    p_properties     := '{"round": "phone_screen", "format": "video", "duration_minutes": 45}',
+    p_participant_ids := ARRAY[
+        (SELECT id FROM nodes WHERE label = 'Alex Rivera'),
+        (SELECT id FROM nodes WHERE label = 'Jane Smith'),
+        (SELECT id FROM nodes WHERE label = 'Senior Backend Engineer' AND node_type = 'opportunity')
+    ]::uuid[],
+    p_participant_roles := ARRAY['candidate', 'interviewer', 'regarding'],
+    p_actor          := 'user:jane',
+    p_occurred_at    := '2024-03-20T14:00:00Z'::timestamptz
+);
 
--- Record interviewer feedback as an assertion
-INSERT INTO assertions (assertion_type, subject_node_id, claim, source_event_id, confidence)
+-- Record interviewer feedback as an assertion (use the event ID returned above)
+INSERT INTO assertions (assertion_type, subject_node_id, claim, confidence)
 VALUES (
     'interview_feedback',
     (SELECT id FROM nodes WHERE label = 'Alex Rivera'),
@@ -125,7 +120,6 @@ VALUES (
         "notes": "Strong candidate. Recommend technical round.",
         "interviewer": "Jane Smith"
     }',
-    (SELECT id FROM events WHERE summary LIKE '%Phone screen with Alex Rivera%' ORDER BY created_at DESC LIMIT 1),
     0.85
 );
 ```
@@ -233,4 +227,4 @@ Retrieves Alex's full assertion and event history, including previous interview 
 
 **Agent:** "Schedule a technical interview for Alex with two backend engineers."
 
-Creates interview event placeholders, links participants, creates a task ("Conduct technical interview for Alex Rivera") assigned to the interviewers.
+Uses `record_event()` to create the interview event with Alex and the two engineers as participants, then creates a task ("Conduct technical interview for Alex Rivera") assigned to the interviewers.

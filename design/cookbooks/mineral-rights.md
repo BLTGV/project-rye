@@ -38,13 +38,13 @@ Rye connects all of it. The same parcel node links to its owners, the documents 
 Use the `normalize_tmp` function (see [Functions](../model/functions.md)) to ensure consistent identifiers:
 
 ```sql
-INSERT INTO nodes (node_type, label, external_id, external_source, properties)
-VALUES (
-    'parcel',
-    'TMP 45-2-31 (Doddridge, WV)',
-    '45-2-31',
-    'county_gis',
-    '{
+SELECT link_record(
+    p_source_schema := 'county_gis',
+    p_source_table  := 'parcels',
+    p_source_id     := '45-2-31',
+    p_node_type     := 'parcel',
+    p_label         := 'TMP 45-2-31 (Doddridge, WV)',
+    p_properties    := '{
         "tmp": "45-2-31",
         "tmp_normalized": "45-2-31",
         "county": "Doddridge",
@@ -52,11 +52,10 @@ VALUES (
         "acreage": 120.5,
         "tax_district": "Grant"
     }'
-)
-ON CONFLICT (external_source, external_id)
-    WHERE external_id IS NOT NULL AND archived_at IS NULL
-DO UPDATE SET properties = nodes.properties || EXCLUDED.properties, updated_at = now();
+);
 ```
+
+`link_record()` creates the node and maps it back to the source table via `node_source_map`. Each distinct `source_id` creates a new node. Calling it again with the same `(schema, table, source_id)` updates the existing node instead of creating a duplicate.
 
 ---
 
@@ -248,4 +247,4 @@ Queries opportunity contacts, checks last touchpoint dates, surfaces `sentiment`
 
 **Agent:** "Record that I called John Smith about the Smith Tract. He's interested but wants above-market pricing."
 
-Inserts a `phone_call` event, links participants, supersedes `sentiment` assertion with `{stance: "willing_to_sell", price_expectation: "above_market"}`.
+Calls `record_event()` with John Smith and the Smith Tract opportunity as participants, then supersedes the `sentiment` assertion with `{stance: "willing_to_sell", price_expectation: "above_market"}`.

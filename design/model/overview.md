@@ -74,12 +74,13 @@ Supporting tables handle security, integration, and deduplication:
 3. **Temporal by default.** Every fact has a timestamp and provenance. You always know what you believed and when.
 4. **Agent-native.** The schema is structured for LLM agents to read, write, and traverse through natural language. Agents insert facts; they never overwrite or delete.
 5. **Convention over schema.** New entity types, relationship types, and properties require no migration. Write a new `node_type` value and it exists.
-6. **Single auth model.** Access control uses session variables (`SET LOCAL app.current_role = ...`) consistently. No mixing of session-based and database-role-based enforcement.
+6. **Single auth model.** Access control uses session variables (`SET LOCAL "app.current_role" = ...`) consistently. No mixing of session-based and database-role-based enforcement.
 
 ---
 
 ## 6. Related Documents
 
+- [Data Dictionary](../../docs/data-dictionary.md) — Every table, view, and function: what it does and why
 - [Core Contract and Conformance Kit](core-contract-and-conformance.md) — Normative contract, implementation checklist, and test matrix
 - [Schema Reference](schema.md) — Table definitions and DDL
 - [Functions Reference](functions.md) — Utility functions and query patterns

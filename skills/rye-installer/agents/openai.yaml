@@ -1,0 +1,4 @@
+interface:
+  display_name: "Rye Installer"
+  short_description: "Install and validate Rye schema deployments"
+  default_prompt: "Install Rye core/profile migrations and run verification checks."

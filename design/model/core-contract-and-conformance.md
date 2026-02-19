@@ -118,36 +118,44 @@ Legend:
 - **P1**: strongly recommended for production readiness
 - **P2**: optional/advanced
 
-| ID | Category | Priority | What to validate | Method | Pass Criteria |
-|---|---|---|---|---|---|
-| SC-01 | Schema Install | P0 | Fresh schema install works | Run migrations on empty DB | All objects created without manual intervention |
-| SC-02 | Schema Reapply | P0 | Migration behavior is deterministic | Re-run migration sequence | Expected idempotent result or explicit versioned failure |
-| SC-03 | Schema Upgrade | P0 | Forward upgrade works on realistic data | Apply `vN -> vN+1` on fixture DB | No data loss, invariants preserved |
-| FN-01 | Function Contract | P0 | Core function signatures/behavior are stable | Unit tests per function | Inputs/outputs and side effects match spec |
-| FN-02 | Supersession | P0 | Assertion supersession behavior | Insert + supersede sequence test | Exactly one active assertion per subject/type per flow |
-| FN-03 | Provenance | P0 | Writes retain actor/source traceability | Integration tests | All writes produce required provenance fields |
-| IV-01 | Integrity | P0 | No orphan references | FK/integrity checks after test flows | No broken refs in core tables |
-| IV-02 | History Safety | P0 | Historical assertions remain queryable | Point-in-time query tests | Prior assertions preserved and reconstructable |
-| EX-01 | Type Extensibility | P0 | New `node_type`/`edge_type` works without migration | Insert/query unknown types | CRUD + traversal works for new types |
-| EX-02 | Domain Overlay | P1 | Integration with external domain tables | `node_source_map` + join tests | Stable joins and deterministic mapping behavior |
-| EX-03 | Profile Isolation | P1 | CRM/PM profile does not break core | Enable/disable profile tests | Core behavior unchanged without profile tables/views |
-| SE-01 | Read Security | P0 | RLS read matrix by role/team/user | Table-driven security tests | Allowed reads succeed; disallowed reads blocked |
-| SE-02 | Write Security | P0 | Authorized writes only | Role-based mutation tests | Unauthorized writes blocked consistently |
-| SE-03 | Redaction | P0 | Field-level redaction behavior | Query redacted views across roles | Sensitive fields hidden per policy |
-| SE-04 | Policy Consistency | P1 | No policy bypasses via alternate path | Direct DML + function path tests | Equivalent enforcement across paths |
-| AG-01 | Agent Read Ops | P0 | Agent can fetch minimal context safely | Scenario tests with agent role | Returns scoped, redacted, relevant context |
-| AG-02 | Agent Write Ops | P0 | Agent can perform allowed writes only | Scenario tests via approved functions | Allowed writes succeed, forbidden writes fail |
-| AG-03 | Human Approval Gate | P1 | High-risk actions are gated | Simulated approval workflow tests | Action blocked without approval, succeeds with approval |
-| AG-04 | Agent Auditability | P1 | Agent actions are fully auditable | Event/provenance log verification | Actor, time, and target references complete |
-| QY-01 | Query Contracts | P0 | Core query outputs are deterministic | Snapshot tests for core views/functions | Stable schemas and deterministic row semantics |
-| QY-02 | Profile Queries | P1 | CRM/PM views return one-row-per-entity when promised | Fixture tests for fan-out cases | No duplicate entity rows unless documented |
-| CC-01 | Code Generation | P0 | Human-readable codes under concurrency | Parallel insert tests | No duplicates; sequence semantics preserved |
-| CC-02 | Local Sequence | P1 | Project-local sequence behavior | Parallel task create tests | No collisions; monotonic per project |
-| OP-01 | Observability | P1 | Core metrics emitted | Smoke tests against monitoring queries | Metrics available for size/latency/errors |
-| OP-02 | Performance Baseline | P1 | Baseline latency and explain plans | Benchmark fixture + plan checks | Meets documented baseline thresholds |
-| OP-03 | Scale Guardrails | P2 | Degradation behavior past baseline | Stress tests | Clear breakpoints and mitigations documented |
-| BC-01 | Backward Compatibility | P0 | Previous client workflows still function | Compatibility suite across versions | No breaking change without version bump + migration notes |
-| BC-02 | Deprecation Policy | P1 | Deprecated features remain operable through grace period | Contract tests on deprecated paths | Behavior + warnings match policy |
+| ID | Category | Priority | What to validate | Method | Pass Criteria | Covered By |
+|---|---|---|---|---|---|---|
+| SC-01 | Schema Install | P0 | Fresh schema install works | Run migrations on empty DB | All objects created without manual intervention | `docker-test.sh --reset` |
+| SC-02 | Schema Reapply | P0 | Migration behavior is deterministic | Re-run migration sequence | Expected idempotent result or explicit versioned failure | `migrate.sh` (tracks applied) |
+| SC-03 | Schema Upgrade | P0 | Forward upgrade works on realistic data | Apply `vN -> vN+1` on fixture DB | No data loss, invariants preserved | — |
+| FN-01 | Function Contract | P0 | Core function signatures/behavior are stable | Unit tests per function | Inputs/outputs and side effects match spec | `verify.sh`, S5 (merge_nodes) |
+| FN-02 | Supersession | P0 | Assertion supersession behavior | Insert + supersede sequence test | Exactly one active assertion per subject/type per flow | `02_supersession`, S7 (concurrent) |
+| FN-03 | Provenance | P0 | Writes retain actor/source traceability | Integration tests | All writes produce required provenance fields | S5 (merge provenance) |
+| IV-01 | Integrity | P0 | No orphan references | FK/integrity checks after test flows | No broken refs in core tables | FK constraints + S5 |
+| IV-02 | History Safety | P0 | Historical assertions remain queryable | Point-in-time query tests | Prior assertions preserved and reconstructable | S5 (superseded assertions) |
+| EX-01 | Type Extensibility | P0 | New `node_type`/`edge_type` works without migration | Insert/query unknown types | CRUD + traversal works for new types | `01_core_contract` |
+| EX-02 | Domain Overlay | P1 | Integration with external domain tables | `node_source_map` + join tests | Stable joins and deterministic mapping behavior | — |
+| EX-03 | Profile Isolation | P1 | CRM/PM profile does not break core | Enable/disable profile tests | Core behavior unchanged without profile tables/views | — |
+| SE-01 | Read Security | P0 | RLS read matrix by role/team/user | Table-driven security tests | Allowed reads succeed; disallowed reads blocked | S1-S4, R1-R4 |
+| SE-02 | Write Security | P0 | Authorized writes only | Role-based mutation tests | Unauthorized writes blocked consistently | S1 (agent), S3, R6, R8-R9 |
+| SE-03 | Redaction | P0 | Field-level redaction behavior | Query redacted views across roles | Sensitive fields hidden per policy | S1 (nodes_secure), S4 |
+| SE-04 | Policy Consistency | P1 | No policy bypasses via alternate path | Direct DML + function path tests | Equivalent enforcement across paths | `01_assertion_policies`, R8 |
+| AG-01 | Agent Read Ops | P0 | Agent can fetch minimal context safely | Scenario tests with agent role | Returns scoped, redacted, relevant context | S1 (agent:crm-sync), S2 (agent:pm-bot) |
+| AG-02 | Agent Write Ops | P0 | Agent can perform allowed writes only | Scenario tests via approved functions | Allowed writes succeed, forbidden writes fail | S1, S2, R6, R9 |
+| AG-03 | Human Approval Gate | P1 | High-risk actions are gated | Simulated approval workflow tests | Action blocked without approval, succeeds with approval | — |
+| AG-04 | Agent Auditability | P1 | Agent actions are fully auditable | Event/provenance log verification | Actor, time, and target references complete | S5 (log_agent_query) |
+| QY-01 | Query Contracts | P0 | Core query outputs are deterministic | Snapshot tests for core views/functions | Stable schemas and deterministic row semantics | S1-S4 (exact counts) |
+| QY-02 | Profile Queries | P1 | CRM/PM views return one-row-per-entity when promised | Fixture tests for fan-out cases | No duplicate entity rows unless documented | — |
+| CC-01 | Code Generation | P0 | Human-readable codes under concurrency | Parallel insert tests | No duplicates; sequence semantics preserved | `01_code_generation.sh` |
+| CC-02 | Local Sequence | P1 | Project-local sequence behavior | Parallel task create tests | No collisions; monotonic per project | — |
+| OP-01 | Observability | P1 | Core metrics emitted | Smoke tests against monitoring queries | Metrics available for size/latency/errors | — |
+| OP-02 | Performance Baseline | P1 | Baseline latency and explain plans | Benchmark fixture + plan checks | Meets documented baseline thresholds | — |
+| OP-03 | Scale Guardrails | P2 | Degradation behavior past baseline | Stress tests | Clear breakpoints and mitigations documented | — |
+| BC-01 | Backward Compatibility | P0 | Previous client workflows still function | Compatibility suite across versions | No breaking change without version bump + migration notes | — |
+| BC-02 | Deprecation Policy | P1 | Deprecated features remain operable through grace period | Contract tests on deprecated paths | Behavior + warnings match policy | — |
+
+### Coverage Legend
+
+- **S1-S6**: Scenario tests (`tests/scenarios/01-06_*.sql`)
+- **R1-R10**: Recommendation tests within `06_recommendations.sql`
+- **S7**: Concurrent supersession test (`07_concurrent_supersession.sh`)
+- **`01_*`, `02_*`, `03_*`**: Conformance/security/concurrency tests
+- **—**: Not yet covered by automated tests
 
 ---
 

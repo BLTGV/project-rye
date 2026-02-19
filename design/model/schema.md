@@ -6,12 +6,12 @@
 
 ## 1. Prerequisites
 
-**PostgreSQL version:** 15+ recommended. 13+ minimum (for `gen_random_uuid()` and improved JSONB performance).
+**PostgreSQL version:** 15+ required.
 
 **Required extensions:**
 
 ```sql
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";    -- UUID generation
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";     -- gen_random_uuid()
 CREATE EXTENSION IF NOT EXISTS "btree_gin";     -- Composite GIN indexes
 CREATE EXTENSION IF NOT EXISTS "pg_trgm";       -- Trigram fuzzy text search
 ```
@@ -33,7 +33,9 @@ Due to foreign key dependencies, create tables in this order:
 9. `node_source_map` (depends on `nodes`)
 10. `node_merges` (depends on `nodes`)
 11. `crm_code_counters`
-12. Views: `current_assertions`, `node_context`
+12. `assertion_type_access`
+13. `role_classification_access`
+14. Views: `current_assertions`, `node_context`
 
 ---
 
@@ -114,13 +116,15 @@ Append-only claims about nodes or edges. When a newer fact contradicts an older 
 |---|---|---|
 | `id` | `uuid` | Primary key |
 | `assertion_type` | `text NOT NULL` | Fact category |
+| `assertion_key` | `text NOT NULL DEFAULT 'default'` | Active uniqueness key (`'default'` for singleton facts) |
 | `subject_node_id` | `uuid` | FK to `nodes.id` |
 | `subject_edge_id` | `uuid` | FK to `edges.id` |
+| `subject_ref` | `text GENERATED` | Normalized subject id used for uniqueness (`n:<uuid>` or `e:<uuid>`) |
 | `claim` | `jsonb NOT NULL` | The actual fact content, GIN-indexed |
 | `asserted_at` | `timestamptz NOT NULL DEFAULT now()` | When we recorded this belief |
 | `effective_at` | `timestamptz` | When it became true in reality |
 | `superseded_at` | `timestamptz` | When a newer assertion replaced it |
-| `superseded_by` | `uuid` | FK to `assertions.id` |
+| `superseded_by` | `uuid` | FK to `assertions.id` (deferrable, initially deferred) |
 | `source_event_id` | `uuid` | FK to `events.id` — provenance |
 | `confidence` | `numeric CHECK (confidence BETWEEN 0 AND 1)` | Confidence score |
 | `attrs` | `jsonb NOT NULL DEFAULT '{}'` | System metadata |
@@ -128,7 +132,7 @@ Append-only claims about nodes or edges. When a newer fact contradicts an older 
 
 Check constraint: at least one of `subject_node_id` or `subject_edge_id` must be set.
 
-An immutability trigger prevents updates to any column except `superseded_at` and `superseded_by`. See [Functions Reference](functions.md).
+An immutability trigger prevents updates to any column except `superseded_at` and `superseded_by`. Active rows are uniquely constrained on `(subject_ref, assertion_type, assertion_key)`. See [Functions Reference](functions.md).
 
 ### 3.6 `artifacts` — Extracted Content
 
@@ -198,7 +202,31 @@ Primary key: `(node_id, source_schema, source_table)`.
 | `confidence` | `numeric` | Confidence score if auto-detected |
 | `properties` | `jsonb DEFAULT '{}'` | Merge notes |
 
-### 3.11 `crm_code_counters` — Human-Readable Code Generation
+### 3.11 `assertion_type_access` — Data-Driven Assertion Gating
+
+Controls which roles can read or write specific assertion types. Replaces hardcoded CASE statements in RLS policies.
+
+| Column | Type | Purpose |
+|---|---|---|
+| `id` | `uuid` | Primary key |
+| `assertion_type` | `text NOT NULL` | Which assertion type to gate |
+| `operation` | `text NOT NULL` | `'read'` or `'write'` |
+| `allowed_roles` | `text[] NOT NULL` | Roles that can perform the operation |
+
+Unique on `(assertion_type, operation)`. Types not in this table are unrestricted.
+
+### 3.12 `role_classification_access` — Data-Driven Role Hierarchy
+
+Maps roles to the classification levels they can access. Used by `redact_properties()`.
+
+| Column | Type | Purpose |
+|---|---|---|
+| `role_name` | `text NOT NULL` | The role |
+| `classifications` | `text[] NOT NULL` | Classification levels accessible to this role |
+
+Primary key: `role_name`. Roles not in this table default to `['public']` only.
+
+### 3.13 `crm_code_counters` — Human-Readable Code Generation
 
 | Column | Type | Purpose |
 |---|---|---|
@@ -217,7 +245,7 @@ Primary key: `(prefix, year_month)`. Concurrency-safe via `INSERT ... ON CONFLIC
 -- EXTENSIONS
 -- ============================================================================
 
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 CREATE EXTENSION IF NOT EXISTS "btree_gin";
 CREATE EXTENSION IF NOT EXISTS "pg_trgm";
 
@@ -334,13 +362,17 @@ CREATE UNIQUE INDEX idx_ep_unique ON event_participants (event_id, node_id, role
 CREATE TABLE assertions (
     id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     assertion_type  text NOT NULL,
+    assertion_key   text NOT NULL DEFAULT 'default',
     subject_node_id uuid REFERENCES nodes(id),
     subject_edge_id uuid REFERENCES edges(id),
+    subject_ref     text GENERATED ALWAYS AS (
+                        COALESCE('n:' || subject_node_id::text, 'e:' || subject_edge_id::text)
+                    ) STORED,
     claim           jsonb NOT NULL,
     asserted_at     timestamptz NOT NULL DEFAULT now(),
     effective_at    timestamptz,
     superseded_at   timestamptz,
-    superseded_by   uuid REFERENCES assertions(id),
+    superseded_by   uuid REFERENCES assertions(id) DEFERRABLE INITIALLY DEFERRED,
     source_event_id uuid REFERENCES events(id),
     confidence      numeric CHECK (confidence BETWEEN 0 AND 1),
     attrs           jsonb NOT NULL DEFAULT '{}',
@@ -359,7 +391,8 @@ CREATE INDEX idx_assertions_edge       ON assertions (subject_edge_id)
 CREATE INDEX idx_assertions_claim      ON assertions USING gin (claim);
 CREATE INDEX idx_assertions_asserted   ON assertions (asserted_at);
 CREATE INDEX idx_assertions_effective  ON assertions (effective_at);
-CREATE INDEX idx_assertions_active     ON assertions (subject_node_id, assertion_type)
+CREATE UNIQUE INDEX idx_assertions_active_unique
+                                        ON assertions (subject_ref, assertion_type, assertion_key)
                                         WHERE superseded_at IS NULL;
 
 
@@ -434,6 +467,7 @@ CREATE TABLE node_source_map (
 );
 
 CREATE INDEX idx_nsm_source ON node_source_map (source_schema, source_table, source_id);
+CREATE UNIQUE INDEX idx_nsm_source_unique ON node_source_map (source_schema, source_table, source_id);
 
 
 -- ============================================================================
@@ -475,30 +509,43 @@ SELECT *
 FROM assertions
 WHERE superseded_at IS NULL;
 
-CREATE VIEW node_context AS
+-- Uses correlated subqueries instead of LEFT JOINs to avoid
+-- Cartesian product when a node has many edges and assertions.
+CREATE OR REPLACE VIEW node_context
+WITH (security_invoker = true) AS
 SELECT
     n.id AS node_id,
     n.node_type,
     n.label,
     n.properties,
-    json_agg(DISTINCT jsonb_build_object(
-        'edge_id', eo.id, 'edge_type', eo.edge_type,
-        'target_id', eo.target_id, 'properties', eo.properties
-    )) FILTER (WHERE eo.id IS NOT NULL) AS outbound_edges,
-    json_agg(DISTINCT jsonb_build_object(
-        'edge_id', ei.id, 'edge_type', ei.edge_type,
-        'source_id', ei.source_id, 'properties', ei.properties
-    )) FILTER (WHERE ei.id IS NOT NULL) AS inbound_edges,
-    json_agg(DISTINCT jsonb_build_object(
-        'assertion_id', a.id, 'type', a.assertion_type,
-        'claim', a.claim, 'asserted_at', a.asserted_at
-    )) FILTER (WHERE a.id IS NOT NULL) AS current_assertions
+    (
+        SELECT coalesce(json_agg(jsonb_build_object(
+            'edge_id', eo.id, 'edge_type', eo.edge_type,
+            'target_id', eo.target_id, 'properties', eo.properties
+        )), '[]'::json)
+        FROM edges eo
+        WHERE eo.source_id = n.id AND eo.archived_at IS NULL
+    ) AS outbound_edges,
+    (
+        SELECT coalesce(json_agg(jsonb_build_object(
+            'edge_id', ei.id, 'edge_type', ei.edge_type,
+            'source_id', ei.source_id, 'properties', ei.properties
+        )), '[]'::json)
+        FROM edges ei
+        WHERE ei.target_id = n.id AND ei.archived_at IS NULL
+    ) AS inbound_edges,
+    (
+        SELECT coalesce(json_agg(jsonb_build_object(
+            'assertion_id', a.id, 'assertion_type', a.assertion_type,
+            'assertion_key', a.assertion_key,
+            'claim', a.claim, 'asserted_at', a.asserted_at,
+            'confidence', a.confidence
+        )), '[]'::json)
+        FROM current_assertions a
+        WHERE a.subject_node_id = n.id
+    ) AS current_assertions
 FROM nodes n
-LEFT JOIN edges eo ON eo.source_id = n.id AND eo.archived_at IS NULL
-LEFT JOIN edges ei ON ei.target_id = n.id AND ei.archived_at IS NULL
-LEFT JOIN current_assertions a ON a.subject_node_id = n.id
-WHERE n.archived_at IS NULL
-GROUP BY n.id, n.node_type, n.label, n.properties;
+WHERE n.archived_at IS NULL;
 ```
 
 ---

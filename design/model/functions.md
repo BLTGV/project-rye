@@ -36,7 +36,7 @@ CREATE TRIGGER trg_assertions_immutable
 
 ## 2. Assertion Supersession
 
-Supersedes an existing assertion and creates a replacement in a single transaction.
+Supersedes an existing assertion and creates a replacement in a single transaction. The update path is function-scoped (for example using `app.write_path` and `app.supersede_assertion_id` session flags set by the function).
 
 ```sql
 CREATE FUNCTION supersede_assertion(
@@ -45,28 +45,53 @@ CREATE FUNCTION supersede_assertion(
     p_new_subject_node_id uuid,
     p_new_subject_edge_id uuid,
     p_new_claim jsonb,
+    p_new_assertion_key text DEFAULT NULL,
     p_new_effective_at timestamptz DEFAULT NULL,
     p_new_source_event_id uuid DEFAULT NULL,
     p_new_confidence numeric DEFAULT NULL
 ) RETURNS uuid AS $$
 DECLARE
+    v_old assertions;
     v_new_id uuid;
 BEGIN
-    -- Create the new assertion
-    INSERT INTO assertions (
-        assertion_type, subject_node_id, subject_edge_id,
-        claim, effective_at, source_event_id, confidence
-    ) VALUES (
-        p_new_assertion_type, p_new_subject_node_id, p_new_subject_edge_id,
-        p_new_claim, p_new_effective_at, p_new_source_event_id, p_new_confidence
-    ) RETURNING id INTO v_new_id;
+    PERFORM set_config('app.write_path', 'supersede_assertion', true);
+    PERFORM set_config('app.supersede_assertion_id', p_old_assertion_id::text, true);
 
-    -- Supersede the old assertion (only touches superseded_at/by, passes immutability guard)
+    SELECT * INTO v_old
+    FROM assertions
+    WHERE id = p_old_assertion_id
+    FOR UPDATE;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Assertion % not found', p_old_assertion_id;
+    END IF;
+
+    IF v_old.superseded_at IS NOT NULL THEN
+        RAISE EXCEPTION 'Assertion % is already superseded', p_old_assertion_id;
+    END IF;
+
+    -- Create the new assertion
+    v_new_id := gen_random_uuid();
+
+    -- Supersede old assertion first to avoid active-key uniqueness conflicts.
     UPDATE assertions
     SET superseded_at = now(),
         superseded_by = v_new_id
     WHERE id = p_old_assertion_id
-      AND superseded_at IS NULL;  -- idempotency guard
+      AND superseded_at IS NULL;
+
+    -- Create replacement assertion with the pre-generated id.
+    INSERT INTO assertions (
+        id, assertion_type, assertion_key, subject_node_id, subject_edge_id,
+        claim, effective_at, source_event_id, confidence
+    ) VALUES (
+        v_new_id,
+        coalesce(p_new_assertion_type, v_old.assertion_type),
+        coalesce(nullif(trim(p_new_assertion_key), ''), v_old.assertion_key),
+        coalesce(p_new_subject_node_id, v_old.subject_node_id),
+        coalesce(p_new_subject_edge_id, v_old.subject_edge_id),
+        p_new_claim, p_new_effective_at, p_new_source_event_id, p_new_confidence
+    );
 
     RETURN v_new_id;
 END;
@@ -104,7 +129,9 @@ Counters reset per prefix per month. `OPP-2403-0042` is the 42nd opportunity cre
 
 ## 4. Node Merge (Deduplication)
 
-Merges a duplicate node into a canonical node by redirecting all edges, assertions, event participations, and artifacts.
+Merges a duplicate node into a canonical node by redirecting all edges, assertions, event participations, and artifacts. Records a `node_merge` event before redirecting participations so both nodes are valid participants in the audit trail.
+
+When the duplicate has active assertions that conflict with the canonical node's assertions (same type and key), the duplicate's assertions are superseded in favor of the canonical's. Non-conflicting assertions are copied to the canonical node.
 
 ```sql
 CREATE FUNCTION merge_nodes(
@@ -112,70 +139,15 @@ CREATE FUNCTION merge_nodes(
     p_canonical_id uuid,
     p_merged_by text DEFAULT 'system'
 ) RETURNS void AS $$
-BEGIN
-    -- Record the merge
-    INSERT INTO node_merges (duplicate_id, canonical_id, merged_by)
-    VALUES (p_duplicate_id, p_canonical_id, p_merged_by);
-
-    -- Redirect edges (skip if it would create a self-loop)
-    UPDATE edges SET source_id = p_canonical_id
-    WHERE source_id = p_duplicate_id AND target_id != p_canonical_id;
-    UPDATE edges SET target_id = p_canonical_id
-    WHERE target_id = p_duplicate_id AND source_id != p_canonical_id;
-
-    -- Archive edges that became self-loops
-    UPDATE edges SET archived_at = now()
-    WHERE source_id = p_canonical_id AND target_id = p_canonical_id
-      AND archived_at IS NULL;
-
-    -- Redirect assertions
-    UPDATE assertions SET subject_node_id = p_canonical_id
-    WHERE subject_node_id = p_duplicate_id;
-
-    -- Redirect event participations (skip duplicates)
-    UPDATE event_participants SET node_id = p_canonical_id
-    WHERE node_id = p_duplicate_id
-      AND NOT EXISTS (
-          SELECT 1 FROM event_participants ep2
-          WHERE ep2.event_id = event_participants.event_id
-            AND ep2.node_id = p_canonical_id
-            AND ep2.role = event_participants.role
-      );
-    -- Delete remaining duplicate participations
-    DELETE FROM event_participants
-    WHERE node_id = p_duplicate_id;
-
-    -- Redirect artifact references
-    UPDATE artifacts SET source_node_id = p_canonical_id
-    WHERE source_node_id = p_duplicate_id;
-    UPDATE artifacts
-    SET related_node_ids = array_replace(related_node_ids, p_duplicate_id, p_canonical_id)
-    WHERE p_duplicate_id = ANY(related_node_ids);
-
-    -- Transfer source mappings (delete conflicts first, then remap)
-    DELETE FROM node_source_map nsm_dup
-    WHERE nsm_dup.node_id = p_duplicate_id
-      AND EXISTS (
-          SELECT 1 FROM node_source_map nsm_can
-          WHERE nsm_can.node_id = p_canonical_id
-            AND nsm_can.source_schema = nsm_dup.source_schema
-            AND nsm_can.source_table = nsm_dup.source_table
-      );
-    UPDATE node_source_map SET node_id = p_canonical_id
-    WHERE node_id = p_duplicate_id;
-
-    -- Merge properties (canonical wins on conflicts)
-    UPDATE nodes
-    SET properties = (SELECT properties FROM nodes WHERE id = p_duplicate_id) || properties,
-        updated_at = now()
-    WHERE id = p_canonical_id;
-
-    -- Archive the duplicate
-    UPDATE nodes SET archived_at = now(), updated_at = now()
-    WHERE id = p_duplicate_id;
-END;
-$$ LANGUAGE plpgsql;
 ```
+
+Steps:
+1. Validates both nodes exist and duplicate is not archived.
+2. Records the merge in `node_merges`.
+3. Records a `node_merge` event with both nodes as participants (`canonical` and `duplicate` roles).
+4. Redirects edges, assertions (with conflict resolution), event participations, artifacts, and source mappings.
+5. Merges properties (canonical wins on conflicts).
+6. Archives the duplicate.
 
 ---
 
@@ -222,7 +194,288 @@ $$ LANGUAGE sql IMMUTABLE;
 
 ---
 
-## 7. Common Query Patterns
+## 7. Event Recording
+
+All event creation should use `record_event()`. This function pre-generates the event UUID and inserts both the event and its participants atomically, avoiding an RLS interaction where `INSERT ... RETURNING id` on the events table fails because the `event_read_policy` requires participants to exist before the event is visible.
+
+```sql
+CREATE FUNCTION record_event(
+    p_event_type text,
+    p_summary text,
+    p_properties jsonb DEFAULT '{}',
+    p_participant_ids uuid[] DEFAULT '{}',
+    p_participant_roles text[] DEFAULT '{}',
+    p_actor text DEFAULT NULL,
+    p_occurred_at timestamptz DEFAULT now()
+) RETURNS uuid;
+```
+
+Usage:
+
+```sql
+SELECT record_event(
+    p_event_type     := 'meeting',
+    p_summary        := 'Quarterly review with Acme',
+    p_properties     := '{"location": "zoom"}',
+    p_participant_ids := ARRAY['<node_uuid_1>', '<node_uuid_2>']::uuid[],
+    p_participant_roles := ARRAY['organizer', 'attendee'],
+    p_actor          := 'user:alice'
+);
+```
+
+Do NOT insert into `events` and `event_participants` separately.
+
+---
+
+## 8. Domain Table Integration
+
+### link_record — Connect a domain table row to the graph
+
+Creates a graph node and maps it back to the source table via `node_source_map`. Each distinct `source_id` creates a new node. Calling again with the same `(schema, table, source_id)` updates the existing node's properties instead of creating a duplicate.
+
+Lookup order: checks `node_source_map` first (canonical path), then falls back to `external_id`/`external_source` on the nodes table. This handles cases where the source map was created manually without setting `external_id`.
+
+A unique index on `node_source_map(source_schema, source_table, source_id)` prevents orphaned or duplicate mappings.
+
+```sql
+CREATE FUNCTION link_record(
+    p_source_schema text,
+    p_source_table text,
+    p_source_id text,
+    p_node_type text,
+    p_label text,
+    p_properties jsonb DEFAULT '{}',
+    p_source_id_type text DEFAULT 'int'
+) RETURNS uuid;
+```
+
+Usage:
+
+```sql
+SELECT link_record(
+    p_source_schema := 'public',
+    p_source_table  := 'customers',
+    p_source_id     := '42',
+    p_node_type     := 'org',
+    p_label         := 'Acme Corp',
+    p_properties    := '{"plan": "growth", "mrr": 299}'
+);
+```
+
+### link_records_batch — Bulk domain table import
+
+Processes multiple `link_record()` calls in a single function call. Accepts parallel arrays for source IDs, labels, and optionally properties.
+
+```sql
+CREATE FUNCTION link_records_batch(
+    p_source_schema text,
+    p_source_table text,
+    p_source_ids text[],
+    p_node_type text,
+    p_labels text[],
+    p_properties jsonb[] DEFAULT NULL,
+    p_source_id_type text DEFAULT 'int'
+) RETURNS uuid[];
+```
+
+Usage:
+
+```sql
+SELECT link_records_batch(
+    p_source_schema := 'public',
+    p_source_table  := 'customers',
+    p_source_ids    := ARRAY['1', '2', '3'],
+    p_node_type     := 'org',
+    p_labels        := ARRAY['Acme', 'Globex', 'Initech'],
+    p_properties    := ARRAY[
+        '{"plan": "growth"}'::jsonb,
+        '{"plan": "starter"}'::jsonb,
+        '{"plan": "enterprise"}'::jsonb
+    ]
+);
+```
+
+### track_table — Attach CDC triggers for change tracking
+
+Attaches a trigger to a domain table that records INSERT/UPDATE/DELETE as `domain_change` events for any row that has a linked graph node. Uses `record_event()` internally.
+
+```sql
+CREATE FUNCTION track_table(
+    p_schema text,
+    p_table text,
+    p_trigger_name text DEFAULT NULL
+) RETURNS void;
+```
+
+Usage:
+
+```sql
+SELECT track_table('public', 'customers');
+```
+
+Changes to linked rows produce `domain_change` events with full before/after diff in the `changed_fields` property.
+
+### capture_domain_change — CDC trigger function
+
+The trigger function called by `track_table()`. Not called directly — it runs automatically on INSERT/UPDATE/DELETE. Only fires for rows that have a linked node in `node_source_map`. Unlinked rows are silently skipped.
+
+Supports tables with any primary key column — tries `id` first, then falls back to the table's actual PK column via `pg_index` catalog lookup.
+
+---
+
+## 9. Instance Introspection
+
+Returns a summary of everything in the Rye instance — node types, edge types, assertion types, event types, tracked tables, and totals.
+
+```sql
+CREATE FUNCTION rye_catalog() RETURNS jsonb;
+```
+
+Usage:
+
+```sql
+SELECT rye_catalog();
+```
+
+An agent's first call to orient itself in a new instance.
+
+---
+
+## 10. Agent Query Logging
+
+Logs an agent's read operation for audit purposes. Delegates to `record_event()` internally.
+
+```sql
+CREATE FUNCTION log_agent_query(
+    p_agent_id text,
+    p_query_text text,
+    p_result_summary text,
+    p_nodes_referenced uuid[]
+) RETURNS uuid;
+```
+
+---
+
+## 11. Artifact Recording
+
+Creates an artifact with optional content-hash deduplication. Parallel to `record_event()` for events and `link_record()` for nodes.
+
+```sql
+CREATE FUNCTION record_artifact(
+    p_artifact_type text,
+    p_content jsonb,
+    p_source_event_id uuid DEFAULT NULL,
+    p_source_node_id uuid DEFAULT NULL,
+    p_related_node_ids uuid[] DEFAULT '{}',
+    p_location jsonb DEFAULT NULL,
+    p_content_hash text DEFAULT NULL
+) RETURNS uuid;
+```
+
+Usage:
+
+```sql
+-- Store a parsed document extract
+SELECT record_artifact(
+    p_artifact_type    := 'document_parse',
+    p_content          := '{"title": "Q4 Report", "sections": [...]}',
+    p_source_event_id  := '<parse_event_uuid>',
+    p_source_node_id   := '<document_node_uuid>',
+    p_related_node_ids := ARRAY['<mentioned_person_uuid>']::uuid[],
+    p_content_hash     := 'sha256:abc123...'
+);
+```
+
+If `p_content_hash` is provided and a matching artifact of the same type already exists, returns the existing artifact's ID without inserting a duplicate. The hash is stored in `attrs->>'content_hash'`.
+
+---
+
+## 12. Assertion Disputes
+
+### contest_assertion — Record a competing claim without superseding
+
+When new information contradicts an existing assertion but you're not certain it should replace it, use `contest_assertion()`. It creates a competing assertion alongside the original — both remain active with different `assertion_key` values. A `dispute_raised` event is recorded.
+
+```sql
+CREATE FUNCTION contest_assertion(
+    p_existing_assertion_id uuid,
+    p_new_claim jsonb,
+    p_source text,
+    p_confidence numeric DEFAULT NULL,
+    p_reason text DEFAULT NULL,
+    p_source_event_id uuid DEFAULT NULL,
+    p_actor text DEFAULT NULL
+) RETURNS uuid;
+```
+
+Usage:
+
+```sql
+-- A county filing contradicts the recorded ownership fraction
+SELECT contest_assertion(
+    p_existing_assertion_id := '<current_ownership_assertion_uuid>',
+    p_new_claim             := '{"fraction": 0.125, "basis": "county filing 2024-0892"}',
+    p_source                := 'county_filing_2024_0892',
+    p_confidence            := 0.7,
+    p_reason                := 'County filing shows different fraction than original title opinion'
+);
+```
+
+The competing assertion uses `assertion_key = 'contested:<source>'` so it doesn't violate the active uniqueness constraint. Use the `active_disputes` view to find all nodes with competing assertions.
+
+### resolve_dispute — Pick a winner and supersede losers
+
+```sql
+CREATE FUNCTION resolve_dispute(
+    p_winning_assertion_id uuid,
+    p_reason text DEFAULT NULL,
+    p_actor text DEFAULT NULL
+) RETURNS uuid;
+```
+
+Usage:
+
+```sql
+-- After review, the county filing is correct
+SELECT resolve_dispute(
+    p_winning_assertion_id := '<contested_assertion_uuid>',
+    p_reason               := 'County filing confirmed by title examiner',
+    p_actor                := 'user:alice'
+);
+```
+
+This supersedes all other active assertions for the same (subject, type). If the winner has a `contested:` key, it's promoted to a clean `default` assertion. A `dispute_resolved` event is recorded.
+
+### active_disputes — View competing assertions
+
+```sql
+SELECT * FROM active_disputes
+WHERE subject_node_id = '<node_uuid>';
+```
+
+Returns rows where a subject has multiple active assertions of the same type, with all competing claims aggregated.
+
+---
+
+## 13. Materialized View Refresh
+
+Refreshes all profile materialized views that exist in the database. Uses `CONCURRENTLY` to allow reads during refresh.
+
+```sql
+CREATE FUNCTION refresh_materialized_views() RETURNS void;
+```
+
+Usage:
+
+```sql
+SELECT refresh_materialized_views();
+```
+
+Only refreshes views that are installed — checks `pg_matviews` before each refresh. Safe to call regardless of which profiles are active.
+
+---
+
+## 14. Common Query Patterns
 
 ### Point-in-time reconstruction
 
@@ -290,42 +543,7 @@ ORDER BY g.depth, n.node_type;
 Returns a compact context for a node, ranked and limited for agent consumption:
 
 ```sql
-CREATE FUNCTION agent_node_summary(p_node_id uuid, p_max_items int DEFAULT 10)
-RETURNS jsonb AS $$
-SELECT jsonb_build_object(
-    'node', (SELECT row_to_json(n) FROM nodes n WHERE n.id = p_node_id),
-
-    'top_relationships', (
-        SELECT json_agg(r) FROM (
-            SELECT e.edge_type, e.properties, e.weight, nt.label AS target_label, nt.node_type AS target_type
-            FROM edges e
-            JOIN nodes nt ON nt.id = e.target_id
-            WHERE e.source_id = p_node_id AND e.archived_at IS NULL
-            ORDER BY e.weight DESC NULLS LAST, e.created_at DESC
-            LIMIT p_max_items
-        ) r
-    ),
-
-    'current_facts', (
-        SELECT json_agg(a) FROM (
-            SELECT a.assertion_type, a.claim, a.confidence, a.asserted_at
-            FROM current_assertions a
-            WHERE a.subject_node_id = p_node_id
-            ORDER BY a.confidence DESC NULLS LAST, a.asserted_at DESC
-            LIMIT p_max_items
-        ) a
-    ),
-
-    'recent_activity', (
-        SELECT json_agg(ev) FROM (
-            SELECT e.event_type, e.summary, e.occurred_at, ep.role
-            FROM events e
-            JOIN event_participants ep ON ep.event_id = e.id
-            WHERE ep.node_id = p_node_id
-            ORDER BY e.occurred_at DESC
-            LIMIT p_max_items
-        ) ev
-    )
-);
-$$ LANGUAGE sql STABLE;
+SELECT agent_node_summary('<node_uuid>', 15);
 ```
+
+Returns a JSONB object with `node`, `top_relationships`, `current_facts`, and `recent_activity` arrays, each limited to `p_max_items` entries. Relationships include both outbound and inbound edges with a `direction` field (`'outbound'` or `'inbound'`).

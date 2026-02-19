@@ -1,0 +1,4 @@
+interface:
+  display_name: "Rye Domain Onboarding"
+  short_description: "Add new Rye domain conventions and profiles"
+  default_prompt: "Define new domain conventions and implement profile-safe migrations."

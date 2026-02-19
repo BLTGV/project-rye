@@ -1,121 +1,199 @@
 # Quickstart
 
-## Model Anything in 5 Minutes
+## Connect Your Data in 5 Minutes
 
-This walkthrough uses generic entities. For domain-specific examples, see the other cookbooks.
+Rye sits alongside your existing tables. It doesn't replace them — it connects them. Your domain tables stay exactly as they are. Rye adds a graph layer that lets you track relationships, record events, and assert facts across all of them.
 
 ---
 
-## 1. Create Nodes
+## 1. Install Rye Into Your Database
 
-```sql
--- A person
-INSERT INTO nodes (node_type, label, properties) VALUES
-    ('person', 'Alice Chen', '{"first_name": "Alice", "last_name": "Chen", "email": "alice@example.com"}');
+Rye installs into an existing PostgreSQL 15+ database. Your tables are not touched.
 
--- A company
-INSERT INTO nodes (node_type, label, properties) VALUES
-    ('org', 'Acme Corp', '{"name": "Acme Corp", "industry": "SaaS"}');
-
--- A project
-INSERT INTO nodes (node_type, label, properties) VALUES
-    ('project', 'Q1 Launch', '{"name": "Q1 Launch", "code": "PRJ-2501-0001"}');
+```bash
+export DATABASE_URL='postgresql://user:pass@host:5432/your_existing_db'
+./scripts/install.sh --profiles crm,pm
 ```
 
-## 2. Connect Them with Edges
+Or with Docker:
 
-```sql
--- Alice works at Acme
-INSERT INTO edges (edge_type, source_id, target_id, properties, effective_from)
-SELECT 'employs', org.id, person.id, '{"title": "Engineering Lead"}', now()
-FROM nodes org, nodes person
-WHERE org.label = 'Acme Corp' AND person.label = 'Alice Chen';
-
--- Alice leads the project
-INSERT INTO edges (edge_type, source_id, target_id, properties, effective_from)
-SELECT 'project_member', person.id, project.id, '{"role": "lead"}', now()
-FROM nodes person, nodes project
-WHERE person.label = 'Alice Chen' AND project.label = 'Q1 Launch';
+```bash
+./scripts/docker-test.sh up
 ```
 
-## 3. Record an Event
+After install, run `SELECT rye_catalog()` to confirm Rye is ready. It returns an empty catalog — you haven't connected anything yet.
+
+---
+
+## 2. Link Your Existing Records
+
+Say you have a `customers` table and a `tickets` table that already work. Link them to the graph:
 
 ```sql
--- Log a meeting
-WITH meeting AS (
-    INSERT INTO events (event_type, occurred_at, summary, properties, actor_system)
-    VALUES (
-        'meeting', now(), 'Kickoff meeting for Q1 Launch',
-        '{"duration_minutes": 60, "location": "Zoom", "outcome": "Scope agreed"}',
-        'user:alice'
-    )
-    RETURNING id
-)
-INSERT INTO event_participants (event_id, node_id, role)
-SELECT meeting.id, n.id, role
-FROM meeting,
-(VALUES
-    ((SELECT id FROM nodes WHERE label = 'Alice Chen'), 'organizer'),
-    ((SELECT id FROM nodes WHERE label = 'Q1 Launch'), 'regarding')
-) AS participants(id, role)
-CROSS JOIN meeting;
+-- Link a customer record to the graph
+SELECT link_record(
+    p_source_schema := 'public',
+    p_source_table  := 'customers',
+    p_source_id     := '42',
+    p_node_type     := 'org',
+    p_label         := 'Acme Corp',
+    p_properties    := '{"plan": "growth", "mrr": 299}'
+);
+
+-- Link a support ticket
+SELECT link_record(
+    p_source_schema := 'public',
+    p_source_table  := 'tickets',
+    p_source_id     := '1087',
+    p_node_type     := 'ticket',
+    p_label         := 'Cannot export CSV reports',
+    p_properties    := '{"priority": "high", "channel": "chat"}'
+);
 ```
+
+`link_record()` creates a graph node and maps it back to the source table via `node_source_map`. Each distinct `source_id` creates a new node. Calling it again with the same `(schema, table, source_id)` updates the existing node's properties instead of creating a duplicate.
+
+---
+
+## 3. Connect Them With Edges
+
+Now draw the relationship that neither table knows about:
+
+```sql
+-- The ticket is about the customer
+INSERT INTO edges (edge_type, source_id, target_id, properties)
+SELECT 'regarding', ticket.id, customer.id, '{"context": "billing issue"}'
+FROM nodes ticket, nodes customer
+WHERE ticket.external_id = '1087' AND ticket.external_source = 'public.tickets'
+  AND customer.external_id = '42' AND customer.external_source = 'public.customers';
+```
+
+---
 
 ## 4. Assert a Fact
 
+Add a belief about the customer. This doesn't change the `customers` table — it lives in the graph:
+
 ```sql
--- Project status assertion
-INSERT INTO assertions (assertion_type, subject_node_id, claim, confidence)
-SELECT 'project_status', id, '{"status": "active", "health": "on_track"}', 1.0
-FROM nodes WHERE label = 'Q1 Launch';
+INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence)
+SELECT 'churn_risk', 'default', id,
+    '{"level": "high", "signals": ["3 open tickets", "no login 14d"]}',
+    0.75
+FROM nodes
+WHERE external_id = '42' AND external_source = 'public.customers';
 ```
 
-## 5. Supersede a Fact
+---
 
-Two weeks later, the project hits a delay:
+## 5. Record an Event
+
+```sql
+SELECT record_event(
+    p_event_type     := 'escalation',
+    p_summary        := 'Ticket #1087 escalated to engineering',
+    p_properties     := '{"reason": "requires code fix"}',
+    p_participant_ids := ARRAY[
+        (SELECT id FROM nodes WHERE external_id = '1087' AND external_source = 'public.tickets'),
+        (SELECT id FROM nodes WHERE external_id = '42' AND external_source = 'public.customers')
+    ]::uuid[],
+    p_participant_roles := ARRAY['subject', 'regarding']
+);
+```
+
+---
+
+## 6. Track Changes Automatically
+
+Want the graph to know when a customer or ticket changes in the source table? Attach a CDC trigger:
+
+```sql
+SELECT track_table('public', 'customers');
+SELECT track_table('public', 'tickets');
+```
+
+Now any INSERT, UPDATE, or DELETE on those tables automatically records a `domain_change` event in the graph — with the full before/after diff — for every row that has a linked node.
+
+---
+
+## 7. Query Across Everything
+
+```sql
+-- What do we know about Acme?
+SELECT * FROM node_context
+WHERE label = 'Acme Corp';
+
+-- What's the current churn risk?
+SELECT claim, confidence
+FROM current_assertions
+WHERE subject_node_id = (SELECT id FROM nodes WHERE external_id = '42' AND external_source = 'public.customers')
+  AND assertion_type = 'churn_risk';
+
+-- What changed on the customers table in the last week?
+SELECT e.occurred_at, e.summary, e.properties->'changed_fields'
+FROM events e
+JOIN event_participants ep ON ep.event_id = e.id
+WHERE ep.node_id = (SELECT id FROM nodes WHERE external_id = '42' AND external_source = 'public.customers')
+  AND e.event_type = 'domain_change'
+ORDER BY e.occurred_at DESC;
+
+-- Join back to the source table when you need the full record
+SELECT n.label, c.*
+FROM nodes n
+JOIN node_source_map nsm ON nsm.node_id = n.id
+    AND nsm.source_table = 'customers'
+JOIN customers c ON c.id = nsm.source_id::int
+WHERE n.node_type = 'org';
+```
+
+---
+
+## 8. See What's Connected
+
+```sql
+SELECT rye_catalog();
+```
+
+Returns a summary of everything in the instance — node types, edge types, assertion types, event types, tracked tables, and totals.
+
+---
+
+## 9. Supersede a Fact
+
+A month later, the churn risk drops:
 
 ```sql
 SELECT supersede_assertion(
     p_old_assertion_id := (
         SELECT id FROM current_assertions
-        WHERE subject_node_id = (SELECT id FROM nodes WHERE label = 'Q1 Launch')
-          AND assertion_type = 'project_status'
+        WHERE subject_node_id = (SELECT id FROM nodes WHERE external_id = '42' AND external_source = 'public.customers')
+          AND assertion_type = 'churn_risk'
     ),
-    p_new_assertion_type := 'project_status',
-    p_new_subject_node_id := (SELECT id FROM nodes WHERE label = 'Q1 Launch'),
+    p_new_assertion_type := 'churn_risk',
+    p_new_subject_node_id := (SELECT id FROM nodes WHERE external_id = '42' AND external_source = 'public.customers'),
     p_new_subject_edge_id := NULL,
-    p_new_claim := '{"status": "active", "health": "at_risk", "notes": "Dependency on vendor API delayed"}',
+    p_new_claim := '{"level": "low", "signals": ["renewed contract", "active usage"]}',
     p_new_confidence := 0.9
 );
 ```
 
-The old assertion now has `superseded_at` set. Both the old belief and the new belief are preserved.
+Both the old and new belief are preserved. `current_assertions` shows only the latest.
 
-## 6. Query the Graph
+---
 
-```sql
--- Everything about Alice
-SELECT * FROM node_context
-WHERE label = 'Alice Chen';
+## What You Didn't Have To Do
 
--- Current assertions for the project
-SELECT assertion_type, claim, asserted_at
-FROM current_assertions
-WHERE subject_node_id = (SELECT id FROM nodes WHERE label = 'Q1 Launch');
+- Change your `customers` or `tickets` tables
+- Add foreign keys from domain tables to the graph
+- Replace any existing system
+- Write an ETL pipeline
 
--- Full history (including superseded assertions)
-SELECT assertion_type, claim, asserted_at, superseded_at
-FROM assertions
-WHERE subject_node_id = (SELECT id FROM nodes WHERE label = 'Q1 Launch')
-ORDER BY asserted_at;
-```
+Your domain tables are the system of record. Rye connects them. If you drop the Rye schema, your application keeps working.
 
 ---
 
 ## Next Steps
 
-- [Core Contract and Conformance Kit](../model/core-contract-and-conformance.md) — baseline checklist and test matrix before production use
-- [SaaS Customer Operations](saas-customer-operations.md) — if you run a SaaS company
-- [Product Development](product-development.md) — if you're tracking features, bugs, and releases
-- [Recruiting Pipeline](recruiting-pipeline.md) — if you're hiring
-- [Mineral Rights Acquisition](mineral-rights.md) — for the domain that started it all
+- [Integration Guide](../model/integration.md) — deep dive on domain table overlay, CDC, and materialized views
+- [Core Contract](../model/core-contract-and-conformance.md) — what Rye guarantees
+- [Agent Operations](../../docs/agent-ops-guide.md) — safe read/write patterns for LLM agents
+- [SaaS Customer Operations](saas-customer-operations.md) — full worked example with Stripe, Intercom, and Linear

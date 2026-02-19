@@ -11,9 +11,9 @@ Rye uses **session variables** as the single authorization mechanism. No mixing 
 At the start of each transaction, the application sets:
 
 ```sql
-SET LOCAL app.current_user_id = 'user-456';
-SET LOCAL app.current_teams = 'engineering,sales';
-SET LOCAL app.current_role = 'team_lead';
+SET LOCAL "app.current_user_id" = 'user-456';
+SET LOCAL "app.current_teams" = 'engineering,sales';
+SET LOCAL "app.current_role" = 'team_lead';
 ```
 
 `SET LOCAL` scopes variables to the current transaction, which is safe for connection pooling (PgBouncer in transaction mode).
@@ -127,48 +127,96 @@ CREATE POLICY artifact_read_policy ON artifacts
 
 ### 2.4 Assertion-Type Gating
 
-Certain assertion types contain privileged information. Gate visibility by role using session variables:
+Certain assertion types contain privileged information. Access is controlled via the `assertion_type_access` table — new sensitive types can be added by inserting a row instead of modifying SQL policies.
 
 ```sql
-CREATE POLICY assertion_type_read_policy ON assertions
+-- The assertion_type_access table drives both read and write gating
+CREATE TABLE assertion_type_access (
+    id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    assertion_type  text NOT NULL,
+    operation       text NOT NULL CHECK (operation IN ('read', 'write')),
+    allowed_roles   text[] NOT NULL,
+    UNIQUE (assertion_type, operation)
+);
+```
+
+The read policy uses a two-part check: if the assertion type has no entry in the table, it's visible to all. If it does, only listed roles can see it:
+
+```sql
+CREATE POLICY assertion_read_policy ON assertions
     FOR SELECT
     USING (
-        CASE assertion_type
-            WHEN 'financial_terms'    THEN current_setting('app.current_role', true) IN ('deal_manager', 'finance', 'admin')
-            WHEN 'negotiation_stance' THEN current_setting('app.current_role', true) IN ('deal_manager', 'admin')
-            WHEN 'compensation'       THEN current_setting('app.current_role', true) IN ('hr_admin', 'admin')
-            ELSE true
-        END
+        -- Node visibility check (cascading)
+        ...
+        AND (
+            NOT EXISTS (
+                SELECT 1 FROM assertion_type_access ata
+                WHERE ata.assertion_type = assertions.assertion_type
+                  AND ata.operation = 'read'
+            )
+            OR EXISTS (
+                SELECT 1 FROM assertion_type_access ata
+                WHERE ata.assertion_type = assertions.assertion_type
+                  AND ata.operation = 'read'
+                  AND current_setting('app.current_role', true) = ANY(ata.allowed_roles)
+            )
+        )
     );
 ```
 
+Default seed data:
+
+| assertion_type | operation | allowed_roles |
+|---|---|---|
+| `financial_terms` | read | `deal_manager`, `finance`, `admin` |
+| `financial_terms` | write | `deal_manager`, `admin` |
+| `negotiation_stance` | read | `deal_manager`, `admin` |
+| `compensation` | read | `hr_admin`, `admin` |
+| `compensation` | write | `hr_admin`, `admin` |
+
 ### 2.5 Write Policies
 
+Agent roles (`agent:*`) can INSERT nodes, edges, events, event participants, assertions, and artifacts. They cannot UPDATE or DELETE any of these — agents create data, never modify or remove it.
+
 ```sql
--- Assertion write restrictions by type
-CREATE POLICY assertion_write_policy ON assertions
+-- Nodes, edges, artifacts: any role can INSERT (including agents)
+CREATE POLICY node_insert_policy ON nodes
+    FOR INSERT WITH CHECK (true);
+
+-- Assertion write restrictions by type (data-driven via assertion_type_access)
+CREATE POLICY assertion_insert_policy ON assertions
     FOR INSERT
     WITH CHECK (
-        CASE assertion_type
-            WHEN 'financial_terms' THEN current_setting('app.current_role', true) IN ('deal_manager', 'admin')
-            WHEN 'compensation'    THEN current_setting('app.current_role', true) IN ('hr_admin', 'admin')
-            ELSE true
-        END
+        NOT EXISTS (
+            SELECT 1 FROM assertion_type_access ata
+            WHERE ata.assertion_type = assertions.assertion_type
+              AND ata.operation = 'write'
+        )
+        OR EXISTS (
+            SELECT 1 FROM assertion_type_access ata
+            WHERE ata.assertion_type = assertions.assertion_type
+              AND ata.operation = 'write'
+              AND current_setting('app.current_role', true) = ANY(ata.allowed_roles)
+        )
     );
 
--- Agent safety: agents can insert but not update or delete
-CREATE POLICY agent_insert_only ON assertions
-    FOR INSERT
-    WITH CHECK (
-        current_setting('app.current_role', true) NOT LIKE 'agent:%'
-        OR true  -- agents CAN insert
-    );
-
-CREATE POLICY agent_no_delete ON assertions
-    FOR DELETE
+-- Function-scoped supersession updates only.
+-- The supersede_assertion(...) function sets these flags before update.
+CREATE POLICY assertion_update_policy ON assertions
+    FOR UPDATE
     USING (
-        current_setting('app.current_role', true) NOT LIKE 'agent:%'
+        current_setting('app.write_path', true) = 'supersede_assertion'
+        AND id::text = current_setting('app.supersede_assertion_id', true)
+    )
+    WITH CHECK (
+        current_setting('app.write_path', true) = 'supersede_assertion'
+        AND id::text = current_setting('app.supersede_assertion_id', true)
     );
+
+-- No direct assertion deletes.
+CREATE POLICY assertion_no_delete ON assertions
+    FOR DELETE
+    USING (false);
 ```
 
 ---
@@ -179,7 +227,30 @@ PostgreSQL's column-level GRANT/REVOKE doesn't reach inside JSONB. Field-level s
 
 ### 3.1 Redaction Function
 
-Strips sensitive keys from JSONB based on field classifications and the current session role.
+Strips sensitive keys from JSONB based on field classifications and the current session role. The role-to-classification mapping is data-driven via the `role_classification_access` table — new roles can be added by inserting a row.
+
+```sql
+CREATE TABLE role_classification_access (
+    role_name        text NOT NULL,
+    classifications  text[] NOT NULL,
+    PRIMARY KEY (role_name)
+);
+```
+
+Default seed data:
+
+| role_name | classifications |
+|---|---|
+| `admin` | `public`, `internal`, `confidential`, `restricted` |
+| `deal_manager` | `public`, `internal`, `confidential` |
+| `team_lead` | `public`, `internal`, `confidential` |
+| `hr_admin` | `public`, `internal`, `confidential` |
+| `finance` | `public`, `internal`, `confidential` |
+| `manager` | `public`, `internal`, `confidential` |
+| `team_member` | `public`, `internal` |
+| `viewer` | `public` |
+
+The redaction function looks up accessible classifications for the current role. Unknown roles default to `public` only.
 
 ```sql
 CREATE FUNCTION redact_properties(
@@ -190,14 +261,16 @@ DECLARE
     v_result jsonb := p_properties;
     v_field record;
     v_user_role text := current_setting('app.current_role', true);
-    v_role_hierarchy text[] := CASE v_user_role
-        WHEN 'admin' THEN ARRAY['public', 'internal', 'confidential', 'restricted']
-        WHEN 'deal_manager' THEN ARRAY['public', 'internal', 'confidential']
-        WHEN 'team_lead' THEN ARRAY['public', 'internal', 'confidential']
-        WHEN 'team_member' THEN ARRAY['public', 'internal']
-        ELSE ARRAY['public']
-    END;
+    v_role_hierarchy text[];
 BEGIN
+    SELECT classifications INTO v_role_hierarchy
+    FROM role_classification_access
+    WHERE role_name = v_user_role;
+
+    IF v_role_hierarchy IS NULL THEN
+        v_role_hierarchy := ARRAY['public'];
+    END IF;
+
     FOR v_field IN
         SELECT field_path, classification
         FROM field_classifications
@@ -212,18 +285,33 @@ END;
 $$ LANGUAGE plpgsql STABLE SECURITY DEFINER;
 ```
 
-### 3.2 Redacted View
+### 3.2 View Security (`security_invoker`)
 
-Application queries should use this view instead of the raw `nodes` table when field-level redaction is needed:
+All views that query RLS-protected tables **MUST** use `security_invoker = true` (PostgreSQL 15+). Without this, views execute with the view owner's permissions, silently bypassing RLS when the owner is a superuser.
 
 ```sql
-CREATE VIEW nodes_secure AS
+CREATE VIEW current_assertions
+WITH (security_invoker = true) AS
+SELECT * FROM assertions WHERE superseded_at IS NULL;
+
+CREATE VIEW nodes_secure
+WITH (security_invoker = true) AS
 SELECT
     id, node_type, label, external_id, external_source,
     redact_properties(properties, node_type) AS properties,
     attrs, created_at, updated_at, archived_at
 FROM nodes;
 ```
+
+This applies to all views: `current_assertions`, `node_context`, and `nodes_secure`.
+
+### 3.3 Classification Enforcement
+
+Nodes with team scoping (`attrs->'teams'` is a non-empty array) **MUST** have `attrs->>'classification'` set. A trigger enforces this constraint. Nodes without teams or classification are treated as public and visible to all users.
+
+### 3.4 Redacted View
+
+Application queries should use `nodes_secure` instead of the raw `nodes` table when field-level redaction is needed.
 
 ### 3.3 Classification Examples
 
@@ -273,13 +361,19 @@ CREATE FUNCTION log_agent_query(
 DECLARE
     v_event_id uuid;
 BEGIN
-    INSERT INTO events (event_type, occurred_at, summary, properties, actor_system)
+    -- Pre-generate UUID instead of using RETURNING id.
+    -- RETURNING triggers the event_read_policy SELECT check,
+    -- which requires participants to exist — but participants
+    -- are inserted after the event.
+    v_event_id := gen_random_uuid();
+
+    INSERT INTO events (id, event_type, occurred_at, summary, properties, actor_system)
     VALUES (
+        v_event_id,
         'agent_query', now(), p_result_summary,
         jsonb_build_object('query', p_query_text, 'agent_id', p_agent_id),
         'agent:' || p_agent_id
-    )
-    RETURNING id INTO v_event_id;
+    );
 
     INSERT INTO event_participants (event_id, node_id, role)
     SELECT v_event_id, unnest(p_nodes_referenced), 'queried';
@@ -288,3 +382,48 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 ```
+
+> **Important:** Never use `INSERT INTO events ... RETURNING id` in functions that add participants after the insert. The `event_read_policy` requires at least one participant to exist before the event is visible via SELECT, and `RETURNING` triggers that SELECT check. Always pre-generate the UUID with `gen_random_uuid()` and pass it explicitly.
+
+---
+
+## 6. Supporting Table RLS
+
+RLS is enabled and forced on all supporting and configuration tables.
+
+### `access_grants`
+
+| Operation | Who |
+|---|---|
+| SELECT | `admin`, `manager`, or the grantee (user, role, or team) |
+| INSERT/UPDATE | `admin`, `manager` |
+| DELETE | `admin` only |
+
+### `node_source_map`
+
+| Operation | Who |
+|---|---|
+| SELECT | Anyone who can see the linked node (cascading visibility) |
+| INSERT/UPDATE | All roles |
+| DELETE | `admin`, `manager` |
+
+### `field_classifications`
+
+| Operation | Who |
+|---|---|
+| SELECT | All roles (needed by `redact_properties()` which is `SECURITY DEFINER`) |
+| INSERT/UPDATE/DELETE | `admin` only |
+
+### `assertion_type_access`
+
+| Operation | Who |
+|---|---|
+| SELECT | All roles (needed by RLS policies) |
+| INSERT/UPDATE/DELETE | `admin` only |
+
+### `role_classification_access`
+
+| Operation | Who |
+|---|---|
+| SELECT | All roles (needed by `redact_properties()`) |
+| INSERT/UPDATE/DELETE | `admin` only |

@@ -494,29 +494,34 @@ Use the `weight` column on edges and `confidence` on assertions to prioritize wh
 
 The append-only model provides intrinsic safety for agent writes:
 
-- **Agents cannot corrupt existing data.** They can only insert new assertions, events, and event participants. They cannot UPDATE or DELETE existing rows (enforced by RLS write policies).
+- **Agents cannot corrupt existing data through direct DML.** Direct `UPDATE`/`DELETE` on assertions are blocked by policy. Supersession updates are function-scoped.
 - **Every agent write has provenance.** The `actor_system` field on events and the `source_event_id` on assertions trace every piece of data back to the agent and the interaction that produced it.
 - **Contradictions are explicit.** When an agent writes a new assertion that contradicts an existing one, the supersession is visible. A human or another agent can review supersession chains to validate agent decisions.
 
 Enforce this at the database level:
 
 ```sql
--- Agents can INSERT but not UPDATE or DELETE on core tables
-CREATE POLICY agent_insert_only ON assertions
+-- Assertion inserts remain role-gated by assertion type rules
+CREATE POLICY assertion_insert_policy ON assertions
     FOR INSERT
     WITH CHECK (
-        current_setting('app.current_role', true) LIKE 'agent:%'
+        CASE assertion_type
+            WHEN 'financial_terms' THEN current_setting('app.current_role', true) IN ('deal_manager', 'admin')
+            WHEN 'compensation'    THEN current_setting('app.current_role', true) IN ('hr_admin', 'admin')
+            ELSE true
+        END
     );
 
--- Agents cannot update assertions (only the supersession function can)
-CREATE POLICY agent_no_update ON assertions
+-- Function-scoped supersession update path
+CREATE POLICY assertion_update_policy ON assertions
     FOR UPDATE
     USING (
-        current_setting('app.current_role', true) NOT LIKE 'agent:%'
+        current_setting('app.write_path', true) = 'supersede_assertion'
+        AND id::text = current_setting('app.supersede_assertion_id', true)
     );
 
--- Agents cannot delete anything
-CREATE POLICY agent_no_delete ON assertions
+-- No direct assertion deletes
+CREATE POLICY assertion_no_delete ON assertions
     FOR DELETE
     USING (false);
 ```
@@ -804,9 +809,9 @@ The session variable pattern for RLS works with transaction mode — set the var
 
 ```sql
 BEGIN;
-SET LOCAL app.current_user_id = 'user-456';
-SET LOCAL app.current_teams = 'appalachia_team,legal_team';
-SET LOCAL app.current_role = 'land_manager';
+SET LOCAL "app.current_user_id" = 'user-456';
+SET LOCAL "app.current_teams" = 'appalachia_team,legal_team';
+SET LOCAL "app.current_role" = 'land_manager';
 -- ... queries ...
 COMMIT;
 ```
