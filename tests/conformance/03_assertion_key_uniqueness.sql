@@ -1,5 +1,7 @@
 -- FN-02 extension: enforce uniqueness per (subject, type, key) while allowing multiple keys.
 
+SET search_path = rye, public, pg_catalog;
+
 DO $$
 DECLARE
   v_node uuid;

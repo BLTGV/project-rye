@@ -4,6 +4,8 @@
 -- Gap 2: No record_artifact() function
 -- Gap 3: Binary assertion state (no contested/disputed assertions)
 
+SET search_path = rye, pg_catalog, public;
+
 -- ============================================================================
 -- 1. AGENT INSERT POLICIES
 -- ============================================================================
@@ -49,7 +51,9 @@ CREATE OR REPLACE FUNCTION record_artifact(
     p_related_node_ids uuid[] DEFAULT '{}',
     p_location jsonb DEFAULT NULL,
     p_content_hash text DEFAULT NULL
-) RETURNS uuid AS $$
+) RETURNS uuid
+SET search_path = rye, pg_catalog
+AS $$
 DECLARE
     v_artifact_id uuid;
     v_attrs jsonb := '{}';
@@ -113,7 +117,9 @@ CREATE OR REPLACE FUNCTION contest_assertion(
     p_reason text DEFAULT NULL,
     p_source_event_id uuid DEFAULT NULL,
     p_actor text DEFAULT NULL
-) RETURNS uuid AS $$
+) RETURNS uuid
+SET search_path = rye, pg_catalog
+AS $$
 DECLARE
     v_existing assertions;
     v_new_id uuid;
@@ -203,7 +209,9 @@ CREATE OR REPLACE FUNCTION resolve_dispute(
     p_winning_assertion_id uuid,
     p_reason text DEFAULT NULL,
     p_actor text DEFAULT NULL
-) RETURNS uuid AS $$
+) RETURNS uuid
+SET search_path = rye, pg_catalog
+AS $$
 DECLARE
     v_winner assertions;
     v_final_id uuid;

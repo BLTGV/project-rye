@@ -20,6 +20,7 @@ fi
 # Create a test node and assertion to supersede
 setup_sql="
 ${role_prefix}
+SET search_path = rye, public, pg_catalog;
 SET LOCAL \"app.current_user_id\" = 'user:concurrency-test';
 SET LOCAL \"app.current_teams\" = '';
 SET LOCAL \"app.current_role\" = 'admin';
@@ -43,6 +44,7 @@ psql "$DB_URL" -Atqc "$setup_sql" 2>/dev/null || true
 # Get the assertion ID
 assertion_id=$(psql "$DB_URL" -Atqc "
 ${role_prefix}
+SET search_path = rye, public, pg_catalog;
 SET LOCAL \"app.current_user_id\" = 'user:concurrency-test';
 SET LOCAL \"app.current_role\" = 'admin';
 SELECT id FROM current_assertions
@@ -60,6 +62,7 @@ fi
 # Run two supersessions concurrently
 supersede_sql="
 ${role_prefix}
+SET search_path = rye, public, pg_catalog;
 SET LOCAL \"app.current_user_id\" = 'user:concurrency-test';
 SET LOCAL \"app.current_role\" = 'admin';
 SELECT supersede_assertion(
@@ -115,6 +118,7 @@ fi
 # Verify exactly one active assertion remains
 active_count=$(psql "$DB_URL" -Atqc "
 ${role_prefix}
+SET search_path = rye, public, pg_catalog;
 SET LOCAL \"app.current_user_id\" = 'user:concurrency-test';
 SET LOCAL \"app.current_role\" = 'admin';
 SELECT count(*) FROM current_assertions
@@ -126,6 +130,7 @@ WHERE subject_node_id = 'f0000001-cccc-cccc-cccc-000000000001'
 # Cleanup
 psql "$DB_URL" -Atqc "
 ${role_prefix}
+SET search_path = rye, public, pg_catalog;
 DELETE FROM assertions WHERE subject_node_id = 'f0000001-cccc-cccc-cccc-000000000001';
 DELETE FROM nodes WHERE id = 'f0000001-cccc-cccc-cccc-000000000001';
 " 2>/dev/null || true

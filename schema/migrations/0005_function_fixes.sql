@@ -2,6 +2,8 @@
 -- merge_nodes event, matview refresh, bulk link, CDC PK handling,
 -- link_record consistency
 
+SET search_path = rye, pg_catalog, public;
+
 -- ============================================================================
 -- 1. AGENT_NODE_SUMMARY — Add inbound relationships
 -- ============================================================================
@@ -12,7 +14,9 @@
 CREATE OR REPLACE FUNCTION agent_node_summary(
     p_node_id uuid,
     p_max_items int DEFAULT 10
-) RETURNS jsonb AS $$
+) RETURNS jsonb
+SET search_path = rye, pg_catalog
+AS $$
 SELECT jsonb_build_object(
     'node', (SELECT row_to_json(n) FROM nodes n WHERE n.id = p_node_id),
 
@@ -144,7 +148,9 @@ CREATE OR REPLACE FUNCTION merge_nodes(
     p_duplicate_id uuid,
     p_canonical_id uuid,
     p_merged_by text DEFAULT 'system'
-) RETURNS void AS $$
+) RETURNS void
+SET search_path = rye, pg_catalog
+AS $$
 DECLARE
     v_dupe nodes;
     v_canon nodes;
@@ -304,19 +310,21 @@ $$ LANGUAGE plpgsql;
 -- Convenience function to refresh all profile materialized views.
 -- Uses CONCURRENTLY when the unique index exists (allows reads during refresh).
 
-CREATE OR REPLACE FUNCTION refresh_materialized_views() RETURNS void AS $$
+CREATE OR REPLACE FUNCTION refresh_materialized_views() RETURNS void
+SET search_path = rye, pg_catalog
+AS $$
 BEGIN
     -- Only refresh views that exist (profiles may not be installed)
-    IF EXISTS (SELECT 1 FROM pg_matviews WHERE matviewname = 'opportunities_active') THEN
-        REFRESH MATERIALIZED VIEW CONCURRENTLY opportunities_active;
+    IF EXISTS (SELECT 1 FROM pg_matviews WHERE schemaname = 'rye' AND matviewname = 'opportunities_active') THEN
+        REFRESH MATERIALIZED VIEW CONCURRENTLY rye.opportunities_active;
     END IF;
 
-    IF EXISTS (SELECT 1 FROM pg_matviews WHERE matviewname = 'contacts_directory') THEN
-        REFRESH MATERIALIZED VIEW CONCURRENTLY contacts_directory;
+    IF EXISTS (SELECT 1 FROM pg_matviews WHERE schemaname = 'rye' AND matviewname = 'contacts_directory') THEN
+        REFRESH MATERIALIZED VIEW CONCURRENTLY rye.contacts_directory;
     END IF;
 
-    IF EXISTS (SELECT 1 FROM pg_matviews WHERE matviewname = 'task_board') THEN
-        REFRESH MATERIALIZED VIEW CONCURRENTLY task_board;
+    IF EXISTS (SELECT 1 FROM pg_matviews WHERE schemaname = 'rye' AND matviewname = 'task_board') THEN
+        REFRESH MATERIALIZED VIEW CONCURRENTLY rye.task_board;
     END IF;
 END;
 $$ LANGUAGE plpgsql;
@@ -336,7 +344,9 @@ CREATE OR REPLACE FUNCTION link_records_batch(
     p_labels text[],
     p_properties jsonb[] DEFAULT NULL,
     p_source_id_type text DEFAULT 'int'
-) RETURNS uuid[] AS $$
+) RETURNS uuid[]
+SET search_path = rye, pg_catalog
+AS $$
 DECLARE
     v_count int;
     v_result uuid[] := '{}';
@@ -386,7 +396,9 @@ $$ LANGUAGE plpgsql;
 -- source_id from node_source_map using dynamic column access, or falls
 -- back to the table's actual primary key column.
 
-CREATE OR REPLACE FUNCTION capture_domain_change() RETURNS trigger AS $$
+CREATE OR REPLACE FUNCTION capture_domain_change() RETURNS trigger
+SET search_path = rye, pg_catalog, public
+AS $$
 DECLARE
     v_node_id uuid;
     v_change_type text;
@@ -497,7 +509,9 @@ CREATE OR REPLACE FUNCTION link_record(
     p_label text,
     p_properties jsonb DEFAULT '{}',
     p_source_id_type text DEFAULT 'int'
-) RETURNS uuid AS $$
+) RETURNS uuid
+SET search_path = rye, pg_catalog
+AS $$
 DECLARE
     v_node_id uuid;
     v_ext_source text;

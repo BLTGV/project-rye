@@ -1,12 +1,16 @@
 -- Rye CRM profile
 
+SET search_path = rye, pg_catalog, public;
+
 CREATE OR REPLACE FUNCTION create_opportunity(
     p_name text,
     p_pipeline_code text,
     p_assigned_to_id uuid,
     p_properties jsonb DEFAULT '{}',
     p_teams text[] DEFAULT '{}'
-) RETURNS uuid AS $$
+) RETURNS uuid
+SET search_path = rye, pg_catalog, public
+AS $$
 DECLARE
     v_opp_id uuid;
     v_code text;
@@ -86,7 +90,9 @@ CREATE OR REPLACE FUNCTION advance_deal_stage(
     p_new_stage text,
     p_reason text DEFAULT NULL,
     p_actor text DEFAULT NULL
-) RETURNS uuid AS $$
+) RETURNS uuid
+SET search_path = rye, pg_catalog, public
+AS $$
 DECLARE
     v_old_assertion_id uuid;
     v_old_stage text;
@@ -154,7 +160,9 @@ CREATE OR REPLACE FUNCTION log_crm_activity(
     p_participant_ids uuid[] DEFAULT '{}',
     p_participant_roles text[] DEFAULT '{}',
     p_occurred_at timestamptz DEFAULT now()
-) RETURNS uuid AS $$
+) RETURNS uuid
+SET search_path = rye, pg_catalog, public
+AS $$
 BEGIN
     RETURN record_event(
         p_event_type        := p_event_type,

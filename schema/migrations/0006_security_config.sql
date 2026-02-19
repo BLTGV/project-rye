@@ -1,5 +1,7 @@
 -- Data-driven security: assertion type gating, role hierarchy, supporting table RLS
 
+SET search_path = rye, pg_catalog, public;
+
 -- ============================================================================
 -- 1. ASSERTION TYPE ACCESS — Data-driven type gating
 -- ============================================================================
@@ -95,7 +97,9 @@ ON CONFLICT (role_name) DO NOTHING;
 CREATE OR REPLACE FUNCTION redact_properties(
     p_properties jsonb,
     p_node_type text
-) RETURNS jsonb AS $$
+) RETURNS jsonb
+SET search_path = rye, pg_catalog
+AS $$
 DECLARE
     v_result jsonb := p_properties;
     v_field record;

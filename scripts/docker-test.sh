@@ -6,6 +6,7 @@ POSTGRES_USER="${POSTGRES_USER:-rye}"
 POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-rye}"
 POSTGRES_DB="${POSTGRES_DB:-rye}"
 PROFILES="${RYE_PROFILES:-crm,pm}"
+SCHEMA="${RYE_SCHEMA:-rye}"
 SEED=1
 RUN_CONFORMANCE=1
 KEEP_RUNNING=0
@@ -84,7 +85,7 @@ cmd_test() {
   cmd_up
 
   container_dsn="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:5432/${POSTGRES_DB}"
-  install_cmd="cd /workspace && DATABASE_URL='${container_dsn}' ./scripts/install.sh --profiles '${PROFILES}'"
+  install_cmd="cd /workspace && DATABASE_URL='${container_dsn}' ./scripts/install.sh --profiles '${PROFILES}' --schema '${SCHEMA}'"
 
   if [[ "$SEED" -eq 1 ]]; then
     install_cmd+=" --seed"
@@ -93,7 +94,7 @@ cmd_test() {
   compose exec -T rye-db bash -lc "$install_cmd"
 
   if [[ "$RUN_CONFORMANCE" -eq 1 ]]; then
-    compose exec -T rye-db bash -lc "cd /workspace && DATABASE_URL='${container_dsn}' ./scripts/conformance.sh"
+    compose exec -T rye-db bash -lc "cd /workspace && DATABASE_URL='${container_dsn}' ./scripts/conformance.sh --schema '${SCHEMA}'"
   fi
 
   echo "Docker test flow passed."
@@ -142,6 +143,10 @@ main() {
     case "$1" in
       --profiles)
         PROFILES="${2:-}"
+        shift 2
+        ;;
+      --schema)
+        SCHEMA="${2:-}"
         shift 2
         ;;
       --seed)

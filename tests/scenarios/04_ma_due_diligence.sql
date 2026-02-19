@@ -2,6 +2,8 @@
 -- Tests restricted classification, explicit access_grants, compensation gating,
 -- and the principle that unauthorized users see zero M&A data.
 
+SET search_path = rye, public, pg_catalog;
+
 BEGIN;
 
 -- ============================================================

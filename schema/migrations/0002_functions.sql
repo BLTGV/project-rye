@@ -1,6 +1,10 @@
 -- Rye core functions and triggers
 
-CREATE OR REPLACE FUNCTION touch_updated_at() RETURNS trigger AS $$
+SET search_path = rye, pg_catalog, public;
+
+CREATE OR REPLACE FUNCTION touch_updated_at() RETURNS trigger
+SET search_path = rye, pg_catalog
+AS $$
 BEGIN
     NEW.updated_at := now();
     RETURN NEW;
@@ -13,7 +17,9 @@ CREATE TRIGGER trg_nodes_touch_updated_at
     FOR EACH ROW
     EXECUTE FUNCTION touch_updated_at();
 
-CREATE OR REPLACE FUNCTION assertions_immutable_guard() RETURNS trigger AS $$
+CREATE OR REPLACE FUNCTION assertions_immutable_guard() RETURNS trigger
+SET search_path = rye, pg_catalog
+AS $$
 BEGIN
     IF NEW.claim IS DISTINCT FROM OLD.claim
        OR NEW.assertion_type IS DISTINCT FROM OLD.assertion_type
@@ -44,7 +50,9 @@ CREATE TRIGGER trg_assertions_immutable
 CREATE OR REPLACE FUNCTION mark_assertion_superseded(
     p_old_assertion_id uuid,
     p_new_assertion_id uuid
-) RETURNS void AS $$
+) RETURNS void
+SET search_path = rye, pg_catalog
+AS $$
 DECLARE
     v_updated int;
 BEGIN
@@ -78,7 +86,9 @@ CREATE OR REPLACE FUNCTION supersede_assertion(
     p_new_effective_at timestamptz DEFAULT NULL,
     p_new_source_event_id uuid DEFAULT NULL,
     p_new_confidence numeric DEFAULT NULL
-) RETURNS uuid AS $$
+) RETURNS uuid
+SET search_path = rye, pg_catalog
+AS $$
 DECLARE
     v_old assertions;
     v_new_id uuid;
@@ -146,7 +156,9 @@ EXCEPTION WHEN OTHERS THEN
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION generate_crm_code(p_prefix text) RETURNS text AS $$
+CREATE OR REPLACE FUNCTION generate_crm_code(p_prefix text) RETURNS text
+SET search_path = rye, pg_catalog
+AS $$
 DECLARE
     v_yymm text;
     v_seq int;
@@ -167,7 +179,9 @@ CREATE OR REPLACE FUNCTION merge_nodes(
     p_duplicate_id uuid,
     p_canonical_id uuid,
     p_merged_by text DEFAULT 'system'
-) RETURNS void AS $$
+) RETURNS void
+SET search_path = rye, pg_catalog
+AS $$
 DECLARE
     v_dupe nodes;
     v_canon nodes;
@@ -302,7 +316,9 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION normalize_tmp(raw text) RETURNS text AS $$
+CREATE OR REPLACE FUNCTION normalize_tmp(raw text) RETURNS text
+SET search_path = rye, pg_catalog
+AS $$
     SELECT array_to_string(
         ARRAY(
             SELECT CASE
@@ -319,7 +335,9 @@ $$ LANGUAGE sql IMMUTABLE;
 CREATE OR REPLACE FUNCTION agent_node_summary(
     p_node_id uuid,
     p_max_items int DEFAULT 10
-) RETURNS jsonb AS $$
+) RETURNS jsonb
+SET search_path = rye, pg_catalog
+AS $$
 SELECT jsonb_build_object(
     'node', (SELECT row_to_json(n) FROM nodes n WHERE n.id = p_node_id),
 
@@ -383,7 +401,9 @@ CREATE OR REPLACE FUNCTION record_event(
     p_participant_roles text[] DEFAULT '{}',
     p_actor text DEFAULT NULL,
     p_occurred_at timestamptz DEFAULT now()
-) RETURNS uuid AS $$
+) RETURNS uuid
+SET search_path = rye, pg_catalog
+AS $$
 DECLARE
     v_event_id uuid;
     v_count int;
@@ -429,7 +449,9 @@ CREATE OR REPLACE FUNCTION link_record(
     p_label text,
     p_properties jsonb DEFAULT '{}',
     p_source_id_type text DEFAULT 'int'
-) RETURNS uuid AS $$
+) RETURNS uuid
+SET search_path = rye, pg_catalog
+AS $$
 DECLARE
     v_node_id uuid;
     v_ext_source text;
@@ -465,7 +487,9 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION capture_domain_change() RETURNS trigger AS $$
+CREATE OR REPLACE FUNCTION capture_domain_change() RETURNS trigger
+SET search_path = rye, pg_catalog, public
+AS $$
 DECLARE
     v_node_id uuid;
     v_change_type text;
@@ -520,7 +544,9 @@ CREATE OR REPLACE FUNCTION track_table(
     p_schema text,
     p_table text,
     p_trigger_name text DEFAULT NULL
-) RETURNS void AS $$
+) RETURNS void
+SET search_path = rye, pg_catalog, public
+AS $$
 DECLARE
     v_trigger text;
     v_qualified text;
@@ -533,13 +559,15 @@ BEGIN
         v_trigger, v_qualified
     );
     EXECUTE format(
-        'CREATE TRIGGER %I AFTER INSERT OR UPDATE OR DELETE ON %s FOR EACH ROW EXECUTE FUNCTION capture_domain_change()',
+        'CREATE TRIGGER %I AFTER INSERT OR UPDATE OR DELETE ON %s FOR EACH ROW EXECUTE FUNCTION rye.capture_domain_change()',
         v_trigger, v_qualified
     );
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION rye_catalog() RETURNS jsonb AS $$
+CREATE OR REPLACE FUNCTION rye_catalog() RETURNS jsonb
+SET search_path = rye, pg_catalog
+AS $$
 SELECT jsonb_build_object(
     'node_types', (
         SELECT coalesce(jsonb_object_agg(node_type, cnt), '{}'::jsonb)
@@ -579,7 +607,9 @@ CREATE OR REPLACE FUNCTION log_agent_query(
     p_query_text text,
     p_result_summary text,
     p_nodes_referenced uuid[]
-) RETURNS uuid AS $$
+) RETURNS uuid
+SET search_path = rye, pg_catalog
+AS $$
 DECLARE
     v_roles text[];
 BEGIN

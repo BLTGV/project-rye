@@ -2,6 +2,8 @@
 -- Tests multi-role access to deals, financial terms, negotiation stance,
 -- and aggregate queries that return different results per role.
 
+SET search_path = rye, public, pg_catalog;
+
 BEGIN;
 
 -- ============================================================

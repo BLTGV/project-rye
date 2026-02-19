@@ -10,11 +10,24 @@ There is no runtime, no ORM, no package manager, and no build step. The delivera
 
 ## Quick Start for Agents
 
-1. Run `SELECT rye_catalog()` to see what's in the instance — node types, edge types, assertion types, tracked tables, and totals.
-2. Use `link_record(schema, table, id, node_type, label, properties)` to connect existing domain table rows to the graph.
-3. Use `track_table(schema, table)` to attach CDC triggers that capture changes as graph events.
-4. Use `record_event(...)` for all event creation — never insert into `events` and `event_participants` separately.
-5. Use `agent_node_summary(node_id, max_items)` for compact context on a specific node.
+1. Set the search path: `SET search_path = rye, public, pg_catalog;`
+2. Run `SELECT rye_catalog()` to see what's in the instance — node types, edge types, assertion types, tracked tables, and totals.
+3. Use `link_record(schema, table, id, node_type, label, properties)` to connect existing domain table rows to the graph.
+4. Use `track_table(schema, table)` to attach CDC triggers that capture changes as graph events.
+5. Use `record_event(...)` for all event creation — never insert into `events` and `event_participants` separately.
+6. Use `agent_node_summary(node_id, max_items)` for compact context on a specific node.
+
+## Schema Isolation
+
+All Rye objects live in a dedicated `rye` schema. Domain tables stay in `public` (or wherever your application puts them). Set the search path before querying:
+
+```sql
+SET search_path = rye, public, pg_catalog;
+```
+
+Or schema-qualify references: `SELECT rye.rye_catalog()`.
+
+Every function includes `SET search_path` in its definition, so function calls work regardless of session state. See `design/model/deployment.md` for the full rationale.
 
 ## Overlay Architecture
 
@@ -46,6 +59,7 @@ tests/
 design/
   model/
     overview.md             — Architecture overview and design principles
+    deployment.md           — Schema isolation, search_path, SECURITY DEFINER hardening
     schema.md               — Table definitions, indexes, and full DDL
     functions.md            — All functions: supersession, merge, record_event, link_record, track_table, rye_catalog
     security.md             — RLS policies, field-level redaction, classification enforcement

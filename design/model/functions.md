@@ -2,6 +2,8 @@
 
 ## Utility Functions, Deduplication, and Query Patterns
 
+All functions include a `SET search_path` clause in their definition for schema isolation. Internal functions use `SET search_path = rye, pg_catalog`. Cross-schema functions (CDC, profiles) use `SET search_path = rye, pg_catalog, public`. `SECURITY DEFINER` functions exclude `public` from the path. See `design/model/deployment.md` for details.
+
 ---
 
 ## 1. Assertion Immutability Guard

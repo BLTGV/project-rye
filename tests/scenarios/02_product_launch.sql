@@ -2,6 +2,8 @@
 -- Tests PM profile access: engineering vs marketing vs admin visibility,
 -- cross-team blocker edges, and aggregate story point / status queries.
 
+SET search_path = rye, public, pg_catalog;
+
 BEGIN;
 
 -- ============================================================

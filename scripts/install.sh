@@ -3,6 +3,7 @@ set -euo pipefail
 
 DB_URL="${DATABASE_URL:-}"
 PROFILES="${RYE_PROFILES:-crm,pm}"
+SCHEMA="${RYE_SCHEMA:-rye}"
 SEED=0
 VERIFY=1
 
@@ -14,6 +15,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --profiles)
       PROFILES="${2:-}"
+      shift 2
+      ;;
+    --schema)
+      SCHEMA="${2:-}"
       shift 2
       ;;
     --seed)
@@ -37,16 +42,16 @@ if [[ -z "$DB_URL" ]]; then
 fi
 
 echo "Installing Rye schema (profiles: ${PROFILES})"
-./scripts/migrate.sh --db-url "$DB_URL" --profiles "$PROFILES"
+./scripts/migrate.sh --db-url "$DB_URL" --profiles "$PROFILES" --schema "$SCHEMA"
 
 if [[ "$SEED" -eq 1 ]]; then
   echo "Seeding quickstart data"
-  ./scripts/seed_quickstart.sh --db-url "$DB_URL"
+  ./scripts/seed_quickstart.sh --db-url "$DB_URL" --schema "$SCHEMA"
 fi
 
 if [[ "$VERIFY" -eq 1 ]]; then
   echo "Running verification"
-  ./scripts/verify.sh --db-url "$DB_URL"
+  ./scripts/verify.sh --db-url "$DB_URL" --schema "$SCHEMA"
 fi
 
 echo "Install complete"

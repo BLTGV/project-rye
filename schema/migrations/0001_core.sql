@@ -4,6 +4,9 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 CREATE EXTENSION IF NOT EXISTS "btree_gin";
 CREATE EXTENSION IF NOT EXISTS "pg_trgm";
 
+CREATE SCHEMA IF NOT EXISTS rye;
+SET search_path = rye, pg_catalog, public;
+
 CREATE TABLE IF NOT EXISTS nodes (
     id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     node_type       text NOT NULL,
@@ -200,7 +203,9 @@ CREATE TABLE IF NOT EXISTS crm_code_counters (
 -- Classification enforcement: nodes with teams must have classification set.
 -- Without this, team-scoped nodes default to NULL classification which makes
 -- them visible to all users, defeating team isolation.
-CREATE OR REPLACE FUNCTION enforce_classification_with_teams() RETURNS trigger AS $$
+CREATE OR REPLACE FUNCTION enforce_classification_with_teams() RETURNS trigger
+SET search_path = rye, pg_catalog
+AS $$
 BEGIN
     IF NEW.attrs ? 'teams'
        AND jsonb_typeof(NEW.attrs->'teams') = 'array'

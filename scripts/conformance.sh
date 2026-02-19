@@ -3,12 +3,17 @@ set -euo pipefail
 
 DB_URL="${DATABASE_URL:-}"
 TEST_ROLE="${RYE_TEST_ROLE:-rye_conformance}"
+SCHEMA="${RYE_SCHEMA:-rye}"
 USE_TEST_ROLE=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --db-url)
       DB_URL="${2:-}"
+      shift 2
+      ;;
+    --schema)
+      SCHEMA="${2:-}"
       shift 2
       ;;
     *)
@@ -25,7 +30,7 @@ fi
 
 export DATABASE_URL="$DB_URL"
 
-./scripts/verify.sh --db-url "$DB_URL"
+./scripts/verify.sh --db-url "$DB_URL" --schema "$SCHEMA"
 
 is_superuser="$(psql "$DB_URL" -Atqc "SELECT rolsuper FROM pg_roles WHERE rolname = current_user")"
 
@@ -44,6 +49,11 @@ BEGIN
 END;
 \$\$;
 
+GRANT USAGE ON SCHEMA ${SCHEMA} TO ${TEST_ROLE};
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA ${SCHEMA} TO ${TEST_ROLE};
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA ${SCHEMA} TO ${TEST_ROLE};
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA ${SCHEMA} TO ${TEST_ROLE};
+
 GRANT USAGE ON SCHEMA public TO ${TEST_ROLE};
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ${TEST_ROLE};
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ${TEST_ROLE};
@@ -59,11 +69,12 @@ run_sql_suite_file() {
   if [[ "$USE_TEST_ROLE" -eq 1 ]]; then
     psql "$DB_URL" -v ON_ERROR_STOP=1 <<SQL
 SET ROLE ${TEST_ROLE};
+SET search_path = ${SCHEMA}, public, pg_catalog;
 \\i ${file}
 RESET ROLE;
 SQL
   else
-    psql "$DB_URL" -v ON_ERROR_STOP=1 -f "$file"
+    psql "$DB_URL" -v ON_ERROR_STOP=1 -c "SET search_path = ${SCHEMA}, public, pg_catalog;" -f "$file"
   fi
 }
 

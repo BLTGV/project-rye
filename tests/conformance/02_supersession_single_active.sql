@@ -1,5 +1,7 @@
 -- FN-02: Supersession should preserve history and keep one active row per key.
 
+SET search_path = rye, public, pg_catalog;
+
 DO $$
 DECLARE
   v_node uuid;

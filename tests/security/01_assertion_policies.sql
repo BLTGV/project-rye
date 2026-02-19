@@ -1,5 +1,7 @@
 -- SE-02 / AG-02: direct assertion updates are blocked; supersession must use function path.
 
+SET search_path = rye, public, pg_catalog;
+
 BEGIN;
 
 SET LOCAL "app.current_user_id" = 'user:test';

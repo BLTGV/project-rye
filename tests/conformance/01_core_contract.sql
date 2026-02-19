@@ -1,5 +1,7 @@
 -- EX-01: Unknown node/edge types should work without migrations.
 
+SET search_path = rye, public, pg_catalog;
+
 DO $$
 DECLARE
   v_a uuid;

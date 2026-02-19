@@ -1,5 +1,7 @@
 -- FN-08: link_record() should create node + source map, and be idempotent on re-call.
 
+SET search_path = rye, public, pg_catalog;
+
 DO $$
 DECLARE
   v_node_id uuid;

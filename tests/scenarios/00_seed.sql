@@ -2,6 +2,8 @@
 -- Must run as superuser or a role with full DML on all tables.
 -- All scenarios share this seed; each test file is a self-contained transaction.
 
+SET search_path = rye, public, pg_catalog;
+
 BEGIN;
 
 -- ============================================================

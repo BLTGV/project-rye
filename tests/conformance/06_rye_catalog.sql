@@ -1,5 +1,7 @@
 -- FN-09: rye_catalog() should return JSONB with expected top-level keys and accurate totals.
 
+SET search_path = rye, public, pg_catalog;
+
 DO $$
 DECLARE
   v_catalog jsonb;

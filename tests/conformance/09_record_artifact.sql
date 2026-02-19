@@ -1,5 +1,7 @@
 -- Test: record_artifact() function (Gap 2 fix)
 
+SET search_path = rye, public, pg_catalog;
+
 DO $$
 DECLARE
     v_node_id uuid;

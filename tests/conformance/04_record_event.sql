@@ -1,5 +1,7 @@
 -- FN-07: record_event() should create event + participants atomically and return UUID.
 
+SET search_path = rye, public, pg_catalog;
+
 DO $$
 DECLARE
   v_node_a uuid;

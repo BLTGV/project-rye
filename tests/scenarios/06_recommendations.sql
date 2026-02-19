@@ -7,6 +7,8 @@
 -- R7: Field redaction in aggregates
 -- (R2: Concurrent supersession is tested in a separate shell script)
 
+SET search_path = rye, public, pg_catalog;
+
 BEGIN;
 
 -- ============================================================

@@ -1,6 +1,8 @@
 -- Test: Agents can INSERT nodes, edges, and artifacts (Gap 1 fix)
 -- Agents should be able to create data but not update or delete it.
 
+SET search_path = rye, public, pg_catalog;
+
 DO $$
 DECLARE
     v_node_a uuid;

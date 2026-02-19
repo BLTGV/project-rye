@@ -2,6 +2,8 @@
 -- Tests tiered support visibility, confidential/restricted customer orgs,
 -- event immutability, and aggregate ticket counts by role.
 
+SET search_path = rye, public, pg_catalog;
+
 BEGIN;
 
 -- ============================================================

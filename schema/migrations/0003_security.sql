@@ -1,5 +1,7 @@
 -- Rye security model (session-context + RLS)
 
+SET search_path = rye, pg_catalog, public;
+
 ALTER TABLE nodes               ENABLE ROW LEVEL SECURITY;
 ALTER TABLE edges               ENABLE ROW LEVEL SECURITY;
 ALTER TABLE events              ENABLE ROW LEVEL SECURITY;
@@ -241,7 +243,9 @@ CREATE POLICY artifact_delete_policy ON artifacts
 CREATE OR REPLACE FUNCTION redact_properties(
     p_properties jsonb,
     p_node_type text
-) RETURNS jsonb AS $$
+) RETURNS jsonb
+SET search_path = rye, pg_catalog
+AS $$
 DECLARE
     v_result jsonb := p_properties;
     v_field record;

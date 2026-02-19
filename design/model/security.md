@@ -2,6 +2,8 @@
 
 ## Row-Level Security, Field Redaction, and Access Control
 
+All Rye security objects (RLS policies, `SECURITY DEFINER` functions) live in the `rye` schema. The `redact_properties()` function uses `SET search_path = rye, pg_catalog` (no `public`) to prevent search-path injection attacks against `SECURITY DEFINER` functions. See `design/model/deployment.md` for the full schema isolation rationale.
+
 ---
 
 ## 1. Authorization Model

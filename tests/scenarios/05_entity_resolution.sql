@@ -2,6 +2,8 @@
 -- Tests merge_nodes(), node_merges tracking, assertion supersession chains,
 -- and agent audit logging via log_agent_query().
 
+SET search_path = rye, public, pg_catalog;
+
 BEGIN;
 
 SET LOCAL "app.current_user_id" = 'user:admin-merge';

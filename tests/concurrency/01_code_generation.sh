@@ -15,7 +15,7 @@ fi
 
 tmp_file="$(mktemp)"
 
-query="SELECT generate_crm_code('TST');"
+query="SET search_path = rye, public, pg_catalog; SELECT generate_crm_code('TST');"
 if [[ -n "$TEST_ROLE" ]]; then
   query="SET ROLE ${TEST_ROLE}; ${query}"
 fi

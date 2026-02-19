@@ -1,6 +1,6 @@
 # Rye Data Dictionary
 
-Every table, view, and function in the Rye schema — what it does and why it exists.
+Every table, view, and function in the Rye schema — what it does and why it exists. All objects live in the `rye` schema (except `rye_migrations` which stays in `public`). Set `search_path = rye, public, pg_catalog` before querying.
 
 ---
 

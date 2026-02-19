@@ -1,5 +1,15 @@
 # Rye Agent Operations Guide
 
+## Schema Setup
+
+All Rye objects live in the `rye` schema. Set the search path at the start of each session or transaction:
+
+```sql
+SET search_path = rye, public, pg_catalog;
+```
+
+All Rye functions include `SET search_path` in their definitions, so calling `rye.record_event(...)` works regardless of session state. But for queries against tables and views (`SELECT * FROM nodes`), the search path must include `rye`.
+
 ## Safe Read Path
 
 - Use `agent_node_summary(node_id, max_items)` for compact context retrieval

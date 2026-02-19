@@ -2,11 +2,16 @@
 set -euo pipefail
 
 DB_URL="${DATABASE_URL:-}"
+SCHEMA="${RYE_SCHEMA:-rye}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --db-url)
       DB_URL="${2:-}"
+      shift 2
+      ;;
+    --schema)
+      SCHEMA="${2:-}"
       shift 2
       ;;
     *)
@@ -21,21 +26,27 @@ if [[ -z "$DB_URL" ]]; then
   exit 1
 fi
 
-psql "$DB_URL" -v ON_ERROR_STOP=1 <<'SQL'
+psql "$DB_URL" -v ON_ERROR_STOP=1 -v rye_schema="$SCHEMA" <<'SQL'
 DO $$
 DECLARE
   v_missing text[] := ARRAY[]::text[];
+  v_schema text := 'rye';
 BEGIN
   IF current_setting('server_version_num')::int < 150000 THEN
     RAISE EXCEPTION 'PostgreSQL 15+ is required, got %', current_setting('server_version');
   END IF;
 
-  IF to_regclass('nodes') IS NULL THEN v_missing := array_append(v_missing, 'nodes'); END IF;
-  IF to_regclass('edges') IS NULL THEN v_missing := array_append(v_missing, 'edges'); END IF;
-  IF to_regclass('events') IS NULL THEN v_missing := array_append(v_missing, 'events'); END IF;
-  IF to_regclass('event_participants') IS NULL THEN v_missing := array_append(v_missing, 'event_participants'); END IF;
-  IF to_regclass('assertions') IS NULL THEN v_missing := array_append(v_missing, 'assertions'); END IF;
-  IF to_regclass('artifacts') IS NULL THEN v_missing := array_append(v_missing, 'artifacts'); END IF;
+  -- Verify schema exists
+  IF NOT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = v_schema) THEN
+    RAISE EXCEPTION 'Schema "%" does not exist', v_schema;
+  END IF;
+
+  IF to_regclass('rye.nodes') IS NULL THEN v_missing := array_append(v_missing, 'nodes'); END IF;
+  IF to_regclass('rye.edges') IS NULL THEN v_missing := array_append(v_missing, 'edges'); END IF;
+  IF to_regclass('rye.events') IS NULL THEN v_missing := array_append(v_missing, 'events'); END IF;
+  IF to_regclass('rye.event_participants') IS NULL THEN v_missing := array_append(v_missing, 'event_participants'); END IF;
+  IF to_regclass('rye.assertions') IS NULL THEN v_missing := array_append(v_missing, 'assertions'); END IF;
+  IF to_regclass('rye.artifacts') IS NULL THEN v_missing := array_append(v_missing, 'artifacts'); END IF;
 
   IF array_length(v_missing, 1) IS NOT NULL THEN
     RAISE EXCEPTION 'Missing core tables: %', array_to_string(v_missing, ', ');
@@ -44,21 +55,22 @@ BEGIN
   IF NOT EXISTS (
       SELECT 1
       FROM information_schema.columns
-      WHERE table_name = 'assertions'
+      WHERE table_schema = v_schema
+        AND table_name = 'assertions'
         AND column_name = 'assertion_key'
   ) THEN
     RAISE EXCEPTION 'assertions.assertion_key missing';
   END IF;
 
-  IF to_regclass('idx_assertions_active_unique') IS NULL THEN
+  IF to_regclass('rye.idx_assertions_active_unique') IS NULL THEN
     RAISE EXCEPTION 'idx_assertions_active_unique index missing';
   END IF;
 
-  IF to_regprocedure('supersede_assertion(uuid,text,uuid,uuid,jsonb,text,timestamp with time zone,uuid,numeric)') IS NULL THEN
+  IF to_regprocedure('rye.supersede_assertion(uuid,text,uuid,uuid,jsonb,text,timestamp with time zone,uuid,numeric)') IS NULL THEN
     RAISE EXCEPTION 'supersede_assertion function signature missing';
   END IF;
 
-  IF to_regprocedure('mark_assertion_superseded(uuid,uuid)') IS NULL THEN
+  IF to_regprocedure('rye.mark_assertion_superseded(uuid,uuid)') IS NULL THEN
     RAISE EXCEPTION 'mark_assertion_superseded function missing';
   END IF;
 
@@ -66,7 +78,8 @@ BEGIN
       SELECT 1
       FROM pg_class c
       JOIN pg_namespace n ON n.oid = c.relnamespace
-      WHERE c.relname = 'assertions'
+      WHERE n.nspname = v_schema
+        AND c.relname = 'assertions'
         AND c.relrowsecurity = true
         AND c.relforcerowsecurity = true
   ) THEN
@@ -76,7 +89,8 @@ BEGIN
   IF NOT EXISTS (
       SELECT 1
       FROM pg_policies
-      WHERE tablename = 'assertions'
+      WHERE schemaname = v_schema
+        AND tablename = 'assertions'
         AND policyname = 'assertion_update_policy'
         AND coalesce(qual, '') LIKE '%app.write_path%'
         AND coalesce(qual, '') LIKE '%app.supersede_assertion_id%'

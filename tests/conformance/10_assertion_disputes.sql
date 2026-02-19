@@ -1,5 +1,7 @@
 -- Test: contest_assertion() and resolve_dispute() (Gap 3 fix)
 
+SET search_path = rye, public, pg_catalog;
+
 DO $$
 DECLARE
     v_node_id uuid;

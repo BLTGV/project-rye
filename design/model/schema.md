@@ -16,6 +16,15 @@ CREATE EXTENSION IF NOT EXISTS "btree_gin";     -- Composite GIN indexes
 CREATE EXTENSION IF NOT EXISTS "pg_trgm";       -- Trigram fuzzy text search
 ```
 
+**Schema:** All Rye objects are created in the `rye` schema:
+
+```sql
+CREATE SCHEMA IF NOT EXISTS rye;
+SET search_path = rye, pg_catalog, public;
+```
+
+See `design/model/deployment.md` for the full schema isolation rationale.
+
 ---
 
 ## 2. Creation Order

@@ -9,6 +9,8 @@ set -euo pipefail
 DB_URL="${DATABASE_URL:?DATABASE_URL required}"
 
 result="$(psql "$DB_URL" -v ON_ERROR_STOP=1 -Atq <<'SQL'
+SET search_path = rye, public, pg_catalog;
+
 DO $$
 DECLARE
   v_node_id uuid;
@@ -16,17 +18,17 @@ DECLARE
   v_change_type text;
   v_changed_fields jsonb;
 BEGIN
-  -- Create a domain table
-  CREATE TABLE IF NOT EXISTS _rye_test_products (
+  -- Create a domain table in public schema
+  CREATE TABLE IF NOT EXISTS public._rye_test_products (
     id serial PRIMARY KEY,
     name text NOT NULL,
     price numeric NOT NULL
   );
 
-  TRUNCATE _rye_test_products CASCADE;
+  TRUNCATE public._rye_test_products CASCADE;
 
   -- Insert a product row
-  INSERT INTO _rye_test_products (id, name, price) VALUES (1, 'Widget', 49.99);
+  INSERT INTO public._rye_test_products (id, name, price) VALUES (1, 'Widget', 49.99);
 
   -- Link it to the graph
   v_node_id := link_record(
@@ -52,7 +54,7 @@ BEGIN
   END IF;
 
   -- Update the price (should fire CDC trigger)
-  UPDATE _rye_test_products SET price = 59.99 WHERE id = 1;
+  UPDATE public._rye_test_products SET price = 59.99 WHERE id = 1;
 
   -- Verify domain_change event was created
   SELECT count(*) INTO v_event_count
@@ -76,7 +78,7 @@ BEGIN
   END IF;
 
   -- Delete the row (should fire CDC trigger)
-  DELETE FROM _rye_test_products WHERE id = 1;
+  DELETE FROM public._rye_test_products WHERE id = 1;
 
   SELECT count(*) INTO v_event_count
   FROM events e
@@ -100,8 +102,8 @@ BEGIN
   END IF;
 
   -- Verify unlinked rows are silently skipped
-  INSERT INTO _rye_test_products (id, name, price) VALUES (2, 'Gadget', 99.99);
-  UPDATE _rye_test_products SET price = 109.99 WHERE id = 2;
+  INSERT INTO public._rye_test_products (id, name, price) VALUES (2, 'Gadget', 99.99);
+  UPDATE public._rye_test_products SET price = 109.99 WHERE id = 2;
 
   -- Should still be 2 events (unlinked row changes are ignored)
   SELECT count(*) INTO v_event_count
@@ -114,8 +116,8 @@ BEGIN
   END IF;
 
   -- Cleanup
-  DROP TRIGGER IF EXISTS rye_cdc__rye_test_products ON _rye_test_products;
-  DROP TABLE _rye_test_products;
+  DROP TRIGGER IF EXISTS rye_cdc__rye_test_products ON public._rye_test_products;
+  DROP TABLE public._rye_test_products;
 
   RAISE NOTICE 'domain_integration test passed';
 END;

@@ -3,6 +3,7 @@ set -euo pipefail
 
 DB_URL="${DATABASE_URL:-}"
 PROFILES="${RYE_PROFILES:-crm,pm}"
+SCHEMA="${RYE_SCHEMA:-rye}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -12,6 +13,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --profiles)
       PROFILES="${2:-}"
+      shift 2
+      ;;
+    --schema)
+      SCHEMA="${2:-}"
       shift 2
       ;;
     *)
@@ -32,6 +37,7 @@ profile_enabled() {
   [[ "$list" == *",${needle},"* ]]
 }
 
+# rye_migrations stays in public so the migrator can find it without knowing the schema
 psql "$DB_URL" -v ON_ERROR_STOP=1 <<'SQL'
 CREATE TABLE IF NOT EXISTS rye_migrations (
   name text PRIMARY KEY,

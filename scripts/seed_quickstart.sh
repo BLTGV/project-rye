@@ -2,11 +2,16 @@
 set -euo pipefail
 
 DB_URL="${DATABASE_URL:-}"
+SCHEMA="${RYE_SCHEMA:-rye}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --db-url)
       DB_URL="${2:-}"
+      shift 2
+      ;;
+    --schema)
+      SCHEMA="${2:-}"
       shift 2
       ;;
     *)
@@ -22,6 +27,8 @@ if [[ -z "$DB_URL" ]]; then
 fi
 
 psql "$DB_URL" -v ON_ERROR_STOP=1 <<'SQL'
+SET search_path = rye, public, pg_catalog;
+
 -- Nodes
 INSERT INTO nodes (node_type, label, properties)
 VALUES

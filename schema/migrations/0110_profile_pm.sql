@@ -1,5 +1,7 @@
 -- Rye PM profile
 
+SET search_path = rye, pg_catalog, public;
+
 CREATE OR REPLACE FUNCTION create_task(
     p_title text,
     p_description text DEFAULT NULL,
@@ -9,7 +11,9 @@ CREATE OR REPLACE FUNCTION create_task(
     p_teams text[] DEFAULT '{}',
     p_regarding_ids uuid[] DEFAULT '{}',
     p_regarding_roles text[] DEFAULT '{}'
-) RETURNS uuid AS $$
+) RETURNS uuid
+SET search_path = rye, pg_catalog, public
+AS $$
 DECLARE
     v_task_id uuid;
     v_code text;
@@ -98,7 +102,9 @@ CREATE OR REPLACE FUNCTION advance_task_status(
     p_new_status text,
     p_reason text DEFAULT NULL,
     p_actor text DEFAULT NULL
-) RETURNS uuid AS $$
+) RETURNS uuid
+SET search_path = rye, pg_catalog, public
+AS $$
 DECLARE
     v_old_assertion_id uuid;
     v_old_status text;
@@ -172,7 +178,9 @@ CREATE OR REPLACE FUNCTION add_comment(
     p_body text,
     p_actor text DEFAULT NULL,
     p_reply_to_event_id uuid DEFAULT NULL
-) RETURNS uuid AS $$
+) RETURNS uuid
+SET search_path = rye, pg_catalog, public
+AS $$
 DECLARE
     v_event_id uuid;
     v_task_code text;
@@ -219,7 +227,9 @@ CREATE OR REPLACE FUNCTION log_time(
     p_description text DEFAULT NULL,
     p_date date DEFAULT current_date,
     p_actor text DEFAULT NULL
-) RETURNS uuid AS $$
+) RETURNS uuid
+SET search_path = rye, pg_catalog, public
+AS $$
 DECLARE
     v_task_code text;
 BEGIN
@@ -245,7 +255,9 @@ CREATE OR REPLACE FUNCTION instantiate_workflow(
     p_context jsonb,
     p_regarding_ids uuid[] DEFAULT '{}',
     p_teams text[] DEFAULT '{}'
-) RETURNS uuid[] AS $$
+) RETURNS uuid[]
+SET search_path = rye, pg_catalog, public
+AS $$
 DECLARE
     v_steps jsonb;
     v_step jsonb;
