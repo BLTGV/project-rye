@@ -186,6 +186,7 @@ CREATE POLICY event_read_policy ON events
             FROM event_participants ep
             WHERE ep.event_id = events.id
         )
+        OR current_setting('app.current_role', true) = 'admin'
     );
 
 DROP POLICY IF EXISTS event_insert_policy ON events;

@@ -155,8 +155,8 @@ Views: `current_assertions` (non-superseded only), `node_context` (full node con
 
 ## PostgreSQL Requirements
 
-- **Version:** 15+ recommended, 13+ minimum.
-- **Extensions:** `uuid-ossp`, `btree_gin`, `pg_trgm`.
+- **Version:** 15+ required (for `security_invoker` views and `gen_random_uuid()`).
+- **Extensions:** `pgcrypto`, `btree_gin`, `pg_trgm`.
 - **Table creation order matters** due to FK dependencies: nodes -> edges -> events -> event_participants -> assertions -> artifacts -> supporting tables -> views.
 
 ## Voice and Tone (for Documentation)

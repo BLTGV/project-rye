@@ -64,6 +64,19 @@ BEGIN
         VALUES ('assigned_to', v_opp_id, p_assigned_to_id, '{"role": "owner"}', now());
     END IF;
 
+    -- Record creation event (parallel to create_task's task_created)
+    PERFORM record_event(
+        p_event_type        := 'opportunity_created',
+        p_summary           := format('Created %s: %s', v_code, p_name),
+        p_properties        := jsonb_build_object(
+            'opp_code', v_code,
+            'pipeline', p_pipeline_code,
+            'initial_stage', v_default_stage
+        ),
+        p_participant_ids   := ARRAY[v_opp_id],
+        p_participant_roles := ARRAY['subject']
+    );
+
     RETURN v_opp_id;
 END;
 $$ LANGUAGE plpgsql;

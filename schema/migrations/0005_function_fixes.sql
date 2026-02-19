@@ -1,6 +1,6 @@
 -- Function fixes: agent_node_summary inbound edges, node_context performance,
--- create_opportunity event, merge_nodes event, matview refresh, bulk link,
--- CDC PK handling, link_record consistency
+-- merge_nodes event, matview refresh, bulk link, CDC PK handling,
+-- link_record consistency
 
 -- ============================================================================
 -- 1. AGENT_NODE_SUMMARY — Add inbound relationships
@@ -135,95 +135,7 @@ WHERE n.archived_at IS NULL;
 
 
 -- ============================================================================
--- 3. CREATE_OPPORTUNITY — Add creation event
--- ============================================================================
--- create_task() records task_created but create_opportunity() did not.
--- Now records an opportunity_created event for audit trail consistency.
-
-CREATE OR REPLACE FUNCTION create_opportunity(
-    p_name text,
-    p_pipeline_code text,
-    p_assigned_to_id uuid,
-    p_properties jsonb DEFAULT '{}',
-    p_teams text[] DEFAULT '{}'
-) RETURNS uuid AS $$
-DECLARE
-    v_opp_id uuid;
-    v_code text;
-    v_pipeline_id uuid;
-    v_default_stage text;
-BEGIN
-    v_code := generate_crm_code('OPP');
-
-    SELECT id, properties->>'default_stage'
-    INTO v_pipeline_id, v_default_stage
-    FROM nodes
-    WHERE node_type = 'pipeline'
-      AND properties->>'code' = p_pipeline_code
-      AND archived_at IS NULL
-    LIMIT 1;
-
-    IF v_pipeline_id IS NULL THEN
-        RAISE EXCEPTION 'Pipeline with code % not found', p_pipeline_code;
-    END IF;
-
-    INSERT INTO nodes (node_type, label, properties, attrs, external_id, external_source)
-    VALUES (
-        'opportunity',
-        p_name,
-        p_properties || jsonb_build_object('name', p_name, 'code', v_code),
-        jsonb_build_object('teams', to_jsonb(p_teams))
-        || CASE WHEN array_length(p_teams, 1) > 0
-                THEN jsonb_build_object('classification', 'internal')
-                ELSE '{}'::jsonb
-           END,
-        v_code,
-        'internal'
-    )
-    RETURNING id INTO v_opp_id;
-
-    INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence)
-    VALUES (
-        'deal_stage',
-        'default',
-        v_opp_id,
-        jsonb_build_object('stage', v_default_stage, 'pipeline', p_pipeline_code),
-        1.0
-    );
-
-    INSERT INTO edges (edge_type, source_id, target_id, properties)
-    VALUES (
-        'pipeline_member',
-        v_opp_id,
-        v_pipeline_id,
-        jsonb_build_object('entered_at', now())
-    );
-
-    IF p_assigned_to_id IS NOT NULL THEN
-        INSERT INTO edges (edge_type, source_id, target_id, properties, effective_from)
-        VALUES ('assigned_to', v_opp_id, p_assigned_to_id, '{"role": "owner"}', now());
-    END IF;
-
-    -- Record creation event (parallel to create_task's task_created)
-    PERFORM record_event(
-        p_event_type        := 'opportunity_created',
-        p_summary           := format('Created %s: %s', v_code, p_name),
-        p_properties        := jsonb_build_object(
-            'opp_code', v_code,
-            'pipeline', p_pipeline_code,
-            'initial_stage', v_default_stage
-        ),
-        p_participant_ids   := ARRAY[v_opp_id],
-        p_participant_roles := ARRAY['subject']
-    );
-
-    RETURN v_opp_id;
-END;
-$$ LANGUAGE plpgsql;
-
-
--- ============================================================================
--- 4. MERGE_NODES — Add audit event
+-- 3. MERGE_NODES — Add audit event
 -- ============================================================================
 -- merge_nodes() tracked merges in node_merges but not in the event log.
 -- Now records a node_merge event so agents see merges in timelines.
@@ -387,7 +299,7 @@ $$ LANGUAGE plpgsql;
 
 
 -- ============================================================================
--- 5. REFRESH_MATERIALIZED_VIEWS
+-- 4. REFRESH_MATERIALIZED_VIEWS
 -- ============================================================================
 -- Convenience function to refresh all profile materialized views.
 -- Uses CONCURRENTLY when the unique index exists (allows reads during refresh).
@@ -411,7 +323,7 @@ $$ LANGUAGE plpgsql;
 
 
 -- ============================================================================
--- 6. LINK_RECORDS_BATCH — Bulk domain table import
+-- 5. LINK_RECORDS_BATCH — Bulk domain table import
 -- ============================================================================
 -- Processes multiple link_record calls in a single function call.
 -- Accepts parallel arrays for each parameter.
@@ -467,7 +379,7 @@ $$ LANGUAGE plpgsql;
 
 
 -- ============================================================================
--- 7. CDC — Handle non-id primary keys
+-- 6. CDC — Handle non-id primary keys
 -- ============================================================================
 -- The original capture_domain_change() used OLD.id::text / NEW.id::text,
 -- failing on tables without an "id" column. The new version looks up the
@@ -567,7 +479,7 @@ $$ LANGUAGE plpgsql;
 
 
 -- ============================================================================
--- 8. LINK_RECORD — Ensure dual storage consistency
+-- 7. LINK_RECORD — Ensure dual storage consistency
 -- ============================================================================
 -- The node_source_map upsert uses ON CONFLICT on (node_id, source_schema,
 -- source_table) but link_record looks up by external_id/external_source.

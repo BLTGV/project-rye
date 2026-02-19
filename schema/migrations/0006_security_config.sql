@@ -189,7 +189,9 @@ CREATE POLICY nsm_insert_policy ON node_source_map
 DROP POLICY IF EXISTS nsm_update_policy ON node_source_map;
 CREATE POLICY nsm_update_policy ON node_source_map
     FOR UPDATE
-    USING (true);
+    USING (
+        EXISTS (SELECT 1 FROM nodes WHERE id = node_source_map.node_id)
+    );
 
 DROP POLICY IF EXISTS nsm_delete_policy ON node_source_map;
 CREATE POLICY nsm_delete_policy ON node_source_map

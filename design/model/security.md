@@ -107,13 +107,14 @@ CREATE POLICY ep_read_policy ON event_participants
         EXISTS (SELECT 1 FROM nodes WHERE id = event_participants.node_id)
     );
 
--- Events: visible if user can see at least one participant
+-- Events: visible if user can see at least one participant, or if admin
 CREATE POLICY event_read_policy ON events
     FOR SELECT
     USING (
         EXISTS (
             SELECT 1 FROM event_participants ep WHERE ep.event_id = events.id
         )
+        OR current_setting('app.current_role', true) = 'admin'
     );
 
 -- Artifacts: must see the source node
@@ -404,7 +405,8 @@ RLS is enabled and forced on all supporting and configuration tables.
 | Operation | Who |
 |---|---|
 | SELECT | Anyone who can see the linked node (cascading visibility) |
-| INSERT/UPDATE | All roles |
+| INSERT | All roles |
+| UPDATE | Anyone who can see the linked node (cascading visibility) |
 | DELETE | `admin`, `manager` |
 
 ### `field_classifications`
