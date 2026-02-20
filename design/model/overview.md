@@ -80,12 +80,11 @@ Supporting tables handle security, integration, and deduplication:
 
 ## 6. Related Documents
 
-- [Data Dictionary](../../docs/data-dictionary.md) — Every table, view, and function: what it does and why
-- [Core Contract and Conformance Kit](core-contract-and-conformance.md) — Normative contract, implementation checklist, and test matrix
-- [Schema Reference](schema.md) — Table definitions and DDL
-- [Functions Reference](functions.md) — Utility functions and query patterns
-- [Security](security.md) — RLS policies and field-level redaction
-- [Integration](integration.md) — Domain table overlay and change tracking
-- [CRM Conventions](../layers/crm.md) — Contact, opportunity, and pipeline conventions
-- [PM Conventions](../layers/pm.md) — Task, project, and sprint conventions
-- [Scaling](../scale.md) — Performance thresholds and upgrade paths
+- [Data Dictionary](/docs/reference/data-dictionary/) — Every table, view, and function: what it does and why
+- [Core Contract and Conformance Kit](/docs/model/core-contract-and-conformance/) — Normative contract, implementation checklist, and test matrix
+- [Schema Reference](/docs/model/schema/) — Table definitions and DDL
+- [Functions Reference](/docs/model/functions/) — Utility functions and query patterns
+- [Security](/docs/model/security/) — RLS policies and field-level redaction
+- [Integration](/docs/model/integration/) — Domain table overlay and change tracking
+- [CRM Conventions](/docs/layers/crm/) — Contact, opportunity, and pipeline conventions
+- [PM Conventions](/docs/layers/pm/) — Task, project, and sprint conventions

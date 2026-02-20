@@ -4,7 +4,7 @@
 
 Rye sits alongside your existing tables. It doesn't replace them — it connects them. Your domain tables stay exactly as they are. Rye adds a graph layer that lets you track relationships, record events, and assert facts across all of them.
 
-**Prerequisite:** Complete the [Installation](installation.md) steps first — Rye should be installed, the search path set, and session variables configured.
+**Prerequisite:** Complete the [Installation](/docs/getting-started/installation/) steps first — Rye should be installed, the search path set, and session variables configured.
 
 ---
 
@@ -187,7 +187,7 @@ Your domain tables are the system of record. Rye connects them. If you drop the 
 
 ## Next Steps
 
-- [Integration Guide](../model/integration.md) — deep dive on domain table overlay, CDC, and materialized views
-- [Core Contract](../model/core-contract-and-conformance.md) — what Rye guarantees
-- [Agent Operations](../../docs/agent-ops-guide.md) — safe read/write patterns for LLM agents
-- [SaaS Customer Operations](../cookbooks/saas-customer-operations.md) — full worked example with Stripe, Intercom, and Linear
+- [Integration Guide](/docs/model/integration/) — deep dive on domain table overlay, CDC, and materialized views
+- [Core Contract](/docs/model/core-contract-and-conformance/) — what Rye guarantees
+- [Agent Operations](/docs/reference/agent-ops-guide/) — safe read/write patterns for LLM agents
+- [SaaS Customer Operations](/docs/cookbooks/saas-customer-operations/) — full worked example with Stripe, Intercom, and Linear

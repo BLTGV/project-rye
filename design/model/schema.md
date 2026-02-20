@@ -141,7 +141,7 @@ Append-only claims about nodes or edges. When a newer fact contradicts an older 
 
 Check constraint: at least one of `subject_node_id` or `subject_edge_id` must be set.
 
-An immutability trigger prevents updates to any column except `superseded_at` and `superseded_by`. Active rows are uniquely constrained on `(subject_ref, assertion_type, assertion_key)`. See [Functions Reference](functions.md).
+An immutability trigger prevents updates to any column except `superseded_at` and `superseded_by`. Active rows are uniquely constrained on `(subject_ref, assertion_type, assertion_key)`. See [Functions Reference](/docs/model/functions/).
 
 ### 3.6 `artifacts` — Extracted Content
 

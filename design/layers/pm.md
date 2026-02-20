@@ -68,7 +68,7 @@ Like the CRM conventions, PM is implemented on the existing core tables. Tasks a
 
 ## 3. Codes
 
-Same format as CRM codes (see [CRM Conventions](crm.md)):
+Same format as CRM codes (see [CRM Conventions](/docs/layers/crm/)):
 
 | Entity | Prefix | Example |
 |---|---|---|
@@ -528,7 +528,7 @@ ORDER BY due_date;
 
 ## 8. Access Control
 
-Task access builds on the core RLS infrastructure. See [Security](../model/security.md).
+Task access builds on the core RLS infrastructure. See [Security](/docs/model/security/).
 
 1. **Task visibility follows team membership.** A task tagged with `{"teams": ["engineering"]}` is visible to engineering team members.
 2. **Project membership grants task visibility.** If you're a `project_member`, you see all tasks in that project.

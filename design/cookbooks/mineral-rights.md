@@ -35,7 +35,7 @@ Rye connects all of it. The same parcel node links to its owners, the documents 
 
 ## 2. Parcel Ingestion
 
-Use the `normalize_tmp` function (see [Functions](../model/functions.md)) to ensure consistent identifiers:
+Use the `normalize_tmp` function (see [Functions](/docs/model/functions/)) to ensure consistent identifiers:
 
 ```sql
 SELECT link_record(

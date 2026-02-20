@@ -109,4 +109,4 @@ Profiles are additive. You can install with no profiles (`--profiles ""`) and ad
 
 ## Next Steps
 
-You're ready to connect your data. Head to the [Quickstart](quickstart.md) to link your first domain records, draw edges, and query across everything in under 10 minutes.
+You're ready to connect your data. Head to the [Quickstart](/docs/getting-started/quickstart/) to link your first domain records, draw edges, and query across everything in under 10 minutes.

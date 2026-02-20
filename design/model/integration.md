@@ -175,4 +175,4 @@ CREATE INDEX idx_cf_plan ON customers_flat (plan);
 REFRESH MATERIALIZED VIEW CONCURRENTLY customers_flat;
 ```
 
-**Guidance:** Start with regular views. Promote to materialized views only after measuring real query pressure. See [Scaling](../scale.md) for refresh strategies.
+**Guidance:** Start with regular views. Promote to materialized views only after measuring real query pressure. See the scaling documentation for refresh strategies.
