@@ -11,6 +11,7 @@ This implementation targets PostgreSQL 15+ and enforces the core Rye contract vi
 - Unknown `node_type` / `edge_type` values work without migration
 - Session-context + RLS security model
 - Agent-facing summary and logging functions: `agent_node_summary`, `log_agent_query`
+- Agent node updates via write-path gated `update_node_properties()` (direct UPDATE blocked)
 
 ## Key Implementation Choices
 

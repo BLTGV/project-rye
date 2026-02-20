@@ -477,7 +477,43 @@ Only refreshes views that are installed — checks `pg_matviews` before each ref
 
 ---
 
-## 14. Common Query Patterns
+## 14. Node Property Updates
+
+Agents (`agent:*` roles) cannot directly UPDATE nodes (blocked by `node_update_policy`). When the node IS the system of record (no backing domain table), use `update_node_properties()` for controlled, audited property updates.
+
+The function sets a write-path session flag (`app.write_path = 'update_node_properties'`) that temporarily opens the policy gate, then clears it immediately after the update. RLS still applies to the SELECT — agents can only update nodes they can read.
+
+```sql
+CREATE FUNCTION update_node_properties(
+    p_node_id    uuid,
+    p_properties jsonb,
+    p_label      text DEFAULT NULL,
+    p_summary    text DEFAULT NULL
+) RETURNS uuid;
+```
+
+Usage:
+
+```sql
+-- Agent discovered a new email during conversation
+SELECT update_node_properties(
+    p_node_id    := '<contact_node_uuid>',
+    p_properties := '{"email": "jane@newdomain.com", "title": "VP Engineering"}',
+    p_summary    := 'Updated contact info from sales call'
+);
+```
+
+Behavior:
+- **Properties** are merged via `||` (new keys overlay old, existing keys preserved).
+- **Label** is updated only if `p_label` is provided and different from the current label.
+- **Archived nodes** raise an exception.
+- Returns the UUID of the `node_properties_updated` audit event, which includes `changed_fields` with `properties_before`, `properties_after`, `properties_added`, and optionally `label_before`/`label_after`.
+
+Non-agent roles can also use this function — they already have direct UPDATE access, but the function provides consistent audit logging.
+
+---
+
+## 15. Common Query Patterns
 
 ### Point-in-time reconstruction
 

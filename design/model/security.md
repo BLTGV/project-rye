@@ -179,12 +179,25 @@ Default seed data:
 
 ### 2.5 Write Policies
 
-Agent roles (`agent:*`) can INSERT nodes, edges, events, event participants, assertions, and artifacts. They cannot UPDATE or DELETE any of these — agents create data, never modify or remove it.
+Agent roles (`agent:*`) can INSERT nodes, edges, events, event participants, assertions, and artifacts. They cannot DELETE any of these. Direct UPDATE is blocked — agents modify data only through approved function paths that set session flags.
 
 ```sql
 -- Nodes, edges, artifacts: any role can INSERT (including agents)
 CREATE POLICY node_insert_policy ON nodes
     FOR INSERT WITH CHECK (true);
+
+-- Node updates: non-agents unrestricted; agents only via update_node_properties()
+-- The function sets app.write_path = 'update_node_properties' before the UPDATE.
+CREATE POLICY node_update_policy ON nodes
+    FOR UPDATE
+    USING (
+        coalesce(current_setting('app.current_role', true), '') NOT LIKE 'agent:%'
+        OR current_setting('app.write_path', true) = 'update_node_properties'
+    )
+    WITH CHECK (
+        coalesce(current_setting('app.current_role', true), '') NOT LIKE 'agent:%'
+        OR current_setting('app.write_path', true) = 'update_node_properties'
+    );
 
 -- Assertion write restrictions by type (data-driven via assertion_type_access)
 CREATE POLICY assertion_insert_policy ON assertions
@@ -221,6 +234,19 @@ CREATE POLICY assertion_no_delete ON assertions
     FOR DELETE
     USING (false);
 ```
+
+### 2.6 Write-Path Gate Pattern
+
+Several UPDATE policies use a **write-path gate**: the policy allows updates only when a session variable (`app.write_path`) is set to a specific value. The corresponding function sets this flag before performing the update and clears it immediately after.
+
+| Gate value | Policy | Function |
+|---|---|---|
+| `supersede_assertion` | `assertion_update_policy` | `supersede_assertion()` |
+| `update_node_properties` | `node_update_policy` | `update_node_properties()` |
+
+This pattern lets agents (and other restricted roles) perform controlled updates through audited functions while blocking direct `UPDATE` statements. RLS still applies to the SELECT portion — agents can only update rows they can read.
+
+> **Important:** `SELECT ... FOR UPDATE` requires both the SELECT and UPDATE policies to pass. When using a write-path gate, set the flag **before** the `FOR UPDATE` lock, not after. Otherwise the locking SELECT will fail for gated roles.
 
 ---
 

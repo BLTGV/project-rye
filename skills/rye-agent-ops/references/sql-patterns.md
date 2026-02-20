@@ -97,6 +97,23 @@ SELECT track_table('public', 'customers');
 
 Attaches a CDC trigger. Changes to linked rows produce `domain_change` events.
 
+## Update node properties
+
+When the node is the system of record (no backing domain table), use `update_node_properties()`:
+
+```sql
+SELECT update_node_properties(
+    p_node_id    := '<node_uuid>',
+    p_properties := '{"email": "jane@new.com", "title": "VP Engineering"}',
+    p_label      := 'Jane Smith',  -- optional
+    p_summary    := 'Updated contact info from sales call'
+);
+```
+
+Properties are merged — new keys overlay old, existing keys are preserved. Returns the UUID of a `node_properties_updated` audit event.
+
+Direct `UPDATE nodes ...` is intentionally blocked by policy for agents. For nodes backed by a domain table, update the domain table instead (CDC propagates the change).
+
 ## Audit log for agent interaction
 
 ```sql

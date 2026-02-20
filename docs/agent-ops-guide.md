@@ -51,6 +51,25 @@ SELECT record_event(
 
 **Do not** insert events and event_participants separately. The `record_event()` function exists to prevent a known RLS interaction where `INSERT ... RETURNING id` on the events table fails because the event_read_policy requires participants to exist before the event is visible.
 
+### Updating node properties
+
+When a node IS the system of record (no backing domain table), use `update_node_properties()` to update its properties. This is the only way agents can update nodes — direct `UPDATE nodes` is blocked by RLS.
+
+```sql
+SELECT update_node_properties(
+    p_node_id    := '<node_uuid>',
+    p_properties := '{"email": "jane@newdomain.com", "title": "VP Engineering"}',
+    p_label      := 'Jane Smith',  -- optional, only changes if provided
+    p_summary    := 'Updated contact info from sales call'
+);
+```
+
+- Properties are merged (`||`) — new keys overlay old, existing keys preserved.
+- Returns the UUID of a `node_properties_updated` audit event with before/after diff.
+- Archived nodes raise an exception.
+
+For nodes backed by a domain table, update the domain table instead (CDC will propagate the change).
+
 ### Writing assertions
 
 - Insert assertions directly (subject to RLS and assertion-type gating):
@@ -128,7 +147,7 @@ SET LOCAL "app.current_teams"   = 'engineering,sales';
 SET LOCAL "app.current_role"    = 'team_member';
 ```
 
-Internal supersession context flags (`app.write_path`, `app.supersede_assertion_id`) are set by database functions, not client SQL.
+Internal write-path flags (`app.write_path`, `app.supersede_assertion_id`) are set by database functions (`supersede_assertion()`, `update_node_properties()`), not client SQL.
 
 ## Views
 

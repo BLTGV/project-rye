@@ -7,7 +7,7 @@ Types are open conventions — write a new value and it exists, no migration req
 - **Node types** (`node_type`): `person`, `org`, `project`, `task`, `opportunity`, `pipeline`, `ticket`, `parcel`, `document`, `incident`, `release`, `component`, `product`
 - **Edge types** (`edge_type`): `employs`, `assigned_to`, `project_member`, `blocks`, `depends_on`, `regarding`, `applied_to`, `targets`, `references`, `affects`, `triggered_by`, `contains`, `impacted`, `owns`, `adjacent_to`
 - **Assertion types** (`assertion_type`): `project_status`, `task_status`, `deal_stage`, `health_score`, `churn_risk`, `sentiment`, `ownership`, `title_opinion`, `interview_feedback`, `candidate_stage`, `ticket_status`, `decision_status`
-- **Event types** (`event_type`): `meeting`, `phone_call`, `email`, `escalation`, `incident_update`, `interview`, `agent_query`, `domain_change`, `task_created`, `status_change`, `comment`, `time_log`, `dispute_raised`, `dispute_resolved`, `opportunity_created`, `node_merge`
+- **Event types** (`event_type`): `meeting`, `phone_call`, `email`, `escalation`, `incident_update`, `interview`, `agent_query`, `domain_change`, `task_created`, `status_change`, `comment`, `time_log`, `dispute_raised`, `dispute_resolved`, `opportunity_created`, `node_merge`, `node_properties_updated`
 
 Run `SELECT rye_catalog()` to see which types are in use in a given instance.
 
@@ -139,6 +139,25 @@ VALUES ('task', 'Build feature X',
 INSERT INTO nodes (node_type, label, properties)
 VALUES ('pipeline', 'Sales Pipeline', '{"code": "PL-SALES"}');
 ```
+
+## Node Property Update Convention
+
+When the graph node IS the system of record (no backing domain table), use `update_node_properties()` to update its properties. This is the only way agents can modify nodes — direct `UPDATE nodes` is blocked by RLS.
+
+- Properties are merged via `||` (new keys overlay old, existing keys preserved).
+- Optionally updates `label` if provided.
+- Returns the UUID of a `node_properties_updated` audit event with `changed_fields` containing `properties_before`, `properties_after`, `properties_added`, and optionally `label_before`/`label_after`.
+- Archived nodes raise an exception.
+
+```sql
+SELECT update_node_properties(
+    p_node_id    := '<node_uuid>',
+    p_properties := '{"email": "jane@new.com", "title": "VP Engineering"}',
+    p_summary    := 'Updated contact info from sales call'
+);
+```
+
+For nodes backed by a domain table, update the domain table instead — CDC will propagate the change via `domain_change` events.
 
 ## Domain Integration Convention
 

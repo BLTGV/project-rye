@@ -298,6 +298,18 @@ Picks a winning assertion and supersedes all other active assertions for the sam
 
 **Why it exists:** Completes the dispute lifecycle. After `contest_assertion()` creates competing claims, someone must eventually resolve them. This function handles the resolution atomically, including key promotion and audit trail.
 
+#### `update_node_properties()`
+
+```
+update_node_properties(p_node_id, p_properties, p_label, p_summary) → uuid
+```
+
+Merges new properties into an existing node, optionally updates the label, and records a `node_properties_updated` audit event with before/after diff. Returns the event UUID.
+
+Uses a write-path gate (`app.write_path = 'update_node_properties'`) to temporarily open the `node_update_policy` for agent roles. The gate is set before the `FOR UPDATE` lock (required because `SELECT ... FOR UPDATE` checks both SELECT and UPDATE policies) and cleared immediately after the update.
+
+**Why it exists:** Agents can INSERT nodes but the `node_update_policy` blocks direct UPDATE. When a node IS the system of record (no backing domain table), agents need a controlled, audited way to update properties — e.g., recording a new email discovered during conversation. This function provides that path while keeping direct `UPDATE nodes` blocked.
+
 #### `link_records_batch()`
 
 ```
