@@ -1,5 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
+  "account_id": "47aff5a525d2d8b160e410030407dc4c",
   "name": "project-rye-site",
   "main": "./dist/_worker.js/index.js",
   "assets": {
