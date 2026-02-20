@@ -9,20 +9,20 @@ const nav = buildNavigation(entries);
 
 <DocsLayout
   title="Project Rye Documentation"
-  description="Rye is an opinionated PostgreSQL pattern for technical operators to deploy AI-agent-compatible persistence quickly, using existing data while evolving the target model over time."
+  description="Rye is an open source PostgreSQL schema for teams who want CRM, task management, and agent memory in their own database — no SaaS required."
   nav={nav}
   hideSidebar={true}
 >
   <section class="hero-panel enter">
-    <p class="eyebrow">Open Source</p>
-    <h1>Deploy agent-compatible persistence now. Evolve your data model as you learn.</h1>
+    <p class="eyebrow">Open Source / PostgreSQL</p>
+    <h1>Your CRM, your tasks, your agents — one graph you actually own.</h1>
     <p class="hero-audience">
-      For teams running PostgreSQL who need agent-compatible context without a platform migration.
+      For teams who want operational data and agent memory in their own Postgres, not scattered across SaaS platforms.
     </p>
     <p>
-      Rye is an opinionated pattern implemented in PostgreSQL for technical operators. It works with
-      your existing data, persists context immediately, and lets you refine your long-term domain model
-      without blocking delivery.
+      Rye is a flexible graph schema that handles contacts, tasks, events, and agent context in one
+      place — your PostgreSQL database. No platform migration. No vendor lock-in. Start capturing
+      context now and evolve your data model as you learn.
     </p>
     <div class="hero-actions">
       <a class="btn btn-primary" href="/docs/getting-started/installation/">Get Started</a>
@@ -42,8 +42,8 @@ const nav = buildNavigation(entries);
       <code class="stat-code">SELECT track_table('public','contacts');</code>
     </article>
     <article>
-      <h2>Operator Control</h2>
-      <p>Postgres-native RLS, append-only history, explicit agent write paths.</p>
+      <h2>Your Database, Your Rules</h2>
+      <p>Data never leaves your Postgres. Row-level security enforces access on every query.</p>
       <code class="stat-code">SELECT agent_node_summary(node_id);</code>
     </article>
   </section>
