@@ -1,0 +1,28 @@
+{
+  "name": "project-rye-site",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "clean:astro": "node -e \"const fs=require('node:fs'); fs.rmSync('.astro',{ recursive: true, force: true });\"",
+    "sync:docs": "node ./scripts/sync-content.mjs",
+    "dev": "npm run clean:astro && npm run sync:docs && astro dev",
+    "build": "npm run clean:astro && npm run sync:docs && astro build",
+    "preview": "astro preview",
+    "check": "npm run clean:astro && astro check",
+    "deploy": "npm run build && wrangler deploy"
+  },
+  "dependencies": {
+    "@astrojs/cloudflare": "12.6.12",
+    "astro": "5.17.3",
+    "remark-gfm": "4.0.1"
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.6",
+    "@tailwindcss/vite": "^4.2.0",
+    "daisyui": "^5.5.18",
+    "tailwindcss": "^4.2.0",
+    "typescript": "5.9.3",
+    "wrangler": "4.67.0"
+  }
+}

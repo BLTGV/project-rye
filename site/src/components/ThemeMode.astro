@@ -1,0 +1,167 @@
+<div class="theme-mode" data-theme-mode-root>
+  <label class="theme-mode-label" for="theme-mode-btn">Theme</label>
+  <button
+    class="theme-mode-trigger"
+    id="theme-mode-btn"
+    type="button"
+    aria-haspopup="listbox"
+    aria-expanded="false"
+    aria-label="Select color theme"
+  >
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="1.3"
+      stroke-linecap="round"
+      aria-hidden="true"
+    >
+      <circle cx="8" cy="8" r="3.5" />
+      <path d="M8 1.5v1M8 13.5v1M1.5 8h1M13.5 8h1M3.4 3.4l.7.7M11.9 11.9l.7.7M3.4 12.6l.7-.7M11.9 4.1l.7-.7" />
+    </svg>
+    <span data-theme-label>System</span>
+    <svg
+      class="chevron"
+      width="10"
+      height="6"
+      viewBox="0 0 10 6"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="1.5"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M1 1l4 4 4-4" />
+    </svg>
+  </button>
+  <ul class="theme-mode-menu" role="listbox" hidden>
+    <li role="option" data-value="system" aria-selected="true">System</li>
+    <li role="option" data-value="light" aria-selected="false">Light</li>
+    <li role="option" data-value="dark" aria-selected="false">Dark</li>
+  </ul>
+</div>
+
+<script is:inline>
+  (() => {
+    const storageKey = "rye-theme-mode";
+    const widget = document.querySelector("[data-theme-mode-root]");
+    if (!widget) return;
+
+    const btn = widget.querySelector("button");
+    const menu = widget.querySelector("ul");
+    const label = widget.querySelector("[data-theme-label]");
+    const root = document.documentElement;
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+
+    function isMode(value) {
+      return value === "light" || value === "dark" || value === "system";
+    }
+
+    function readMode() {
+      let stored = null;
+      try {
+        stored = window.localStorage.getItem(storageKey);
+      } catch {
+        stored = null;
+      }
+      return isMode(stored) ? stored : "system";
+    }
+
+    function resolveTheme(mode) {
+      if (mode === "system") {
+        return media.matches ? "dark" : "light";
+      }
+      return mode;
+    }
+
+    function syncBrandLogo(resolvedTheme) {
+      const logo = document.querySelector("[data-brand-logo]");
+      if (!(logo instanceof HTMLImageElement)) return;
+
+      const lightLogo = logo.getAttribute("data-logo-light");
+      const darkLogo = logo.getAttribute("data-logo-dark");
+
+      if (!lightLogo || !darkLogo) return;
+      logo.src = resolvedTheme === "dark" ? darkLogo : lightLogo;
+    }
+
+    function applyMode(rawMode, options = { persist: true }) {
+      const mode = isMode(rawMode) ? rawMode : "system";
+      const resolvedTheme = resolveTheme(mode);
+
+      root.setAttribute("data-theme-mode", mode);
+      root.setAttribute("data-theme", resolvedTheme);
+
+      // Update label text
+      label.textContent = mode.charAt(0).toUpperCase() + mode.slice(1);
+
+      // Update aria-selected on menu items
+      menu.querySelectorAll("li").forEach((li) => {
+        li.setAttribute(
+          "aria-selected",
+          li.dataset.value === mode ? "true" : "false"
+        );
+      });
+
+      syncBrandLogo(resolvedTheme);
+
+      if (options.persist) {
+        try {
+          window.localStorage.setItem(storageKey, mode);
+        } catch {
+          // Ignore storage errors
+        }
+      }
+    }
+
+    // Initialize
+    applyMode(readMode(), { persist: false });
+
+    // Toggle dropdown
+    btn.addEventListener("click", () => {
+      const opening = menu.hidden;
+      menu.hidden = !opening;
+      btn.setAttribute("aria-expanded", opening ? "true" : "false");
+    });
+
+    // Select option
+    menu.addEventListener("click", (e) => {
+      const li = e.target.closest("li");
+      if (!li || !li.dataset.value) return;
+      applyMode(li.dataset.value, { persist: true });
+      menu.hidden = true;
+      btn.setAttribute("aria-expanded", "false");
+    });
+
+    // Close on outside click
+    document.addEventListener("click", (e) => {
+      if (!widget.contains(e.target)) {
+        menu.hidden = true;
+        btn.setAttribute("aria-expanded", "false");
+      }
+    });
+
+    // Close on Escape
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && !menu.hidden) {
+        menu.hidden = true;
+        btn.setAttribute("aria-expanded", "false");
+        btn.focus();
+      }
+    });
+
+    // System theme change listener
+    const onSystemThemeChange = () => {
+      if (readMode() === "system") {
+        applyMode("system", { persist: false });
+      }
+    };
+
+    if (typeof media.addEventListener === "function") {
+      media.addEventListener("change", onSystemThemeChange);
+    }
+  })();
+</script>

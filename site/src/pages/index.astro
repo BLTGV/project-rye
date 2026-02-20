@@ -1,0 +1,118 @@
+---
+import { getCollection } from "astro:content";
+import DocsLayout from "../layouts/DocsLayout.astro";
+import { buildNavigation } from "../lib/docs";
+
+const entries = await getCollection("docs");
+const nav = buildNavigation(entries);
+---
+
+<DocsLayout
+  title="Project Rye Documentation"
+  description="Rye is an opinionated PostgreSQL pattern for technical operators to deploy AI-agent-compatible persistence quickly, using existing data while evolving the target model over time."
+  nav={nav}
+  hideSidebar={true}
+>
+  <section class="hero-panel enter">
+    <p class="eyebrow">Open Source</p>
+    <h1>Deploy agent-compatible persistence now. Evolve your data model as you learn.</h1>
+    <p class="hero-audience">
+      For teams running PostgreSQL who need agent-compatible context without a platform migration.
+    </p>
+    <p>
+      Rye is an opinionated pattern implemented in PostgreSQL for technical operators. It works with
+      your existing data, persists context immediately, and lets you refine your long-term domain model
+      without blocking delivery.
+    </p>
+    <div class="hero-actions">
+      <a class="btn btn-primary" href="/docs/getting-started/installation/">Get Started</a>
+      <a class="btn btn-ghost" href="/docs/getting-started/quickstart/">Run the Quickstart</a>
+    </div>
+  </section>
+
+  <section class="stats-grid enter enter-d1" aria-label="Core benefits">
+    <article>
+      <h2>Persist Now, Model Later</h2>
+      <p>Capture agent context today while your target schema evolves.</p>
+      <code class="stat-code">SELECT record_event('agent:summarized', ...);</code>
+    </article>
+    <article>
+      <h2>Works With Existing Data</h2>
+      <p>Overlay on current systems of record. No migration required.</p>
+      <code class="stat-code">SELECT track_table('public','contacts');</code>
+    </article>
+    <article>
+      <h2>Operator Control</h2>
+      <p>Postgres-native RLS, append-only history, explicit agent write paths.</p>
+      <code class="stat-code">SELECT agent_node_summary(node_id);</code>
+    </article>
+  </section>
+
+  <section class="section-grid enter enter-d2">
+    <article class="card">
+      <h2>How It Works</h2>
+      <p>Four steps from install to production agent queries.</p>
+      <ol class="steps-list">
+        <li>
+          <strong>Gain visibility</strong> &mdash; install Rye and inspect your scope.
+          <code>SELECT rye_catalog();</code>
+        </li>
+        <li>
+          <strong>Connect your data</strong> &mdash; link domain rows and enable change capture.
+          <code>link_record(...)</code> + <code>track_table(...)</code>
+        </li>
+        <li>
+          <strong>Preserve history</strong> &mdash; record activity and evolve assertions over time.
+          <code>record_event(...)</code> + <code>supersede_assertion(...)</code>
+        </li>
+        <li>
+          <strong>Query from agents</strong> &mdash; compact context and current state, ready for LLM consumption.
+          <code>agent_node_summary(...)</code> + <code>current_assertions</code>
+        </li>
+      </ol>
+    </article>
+    <article class="card">
+      <h2>What You Get</h2>
+      <ul>
+        <li>No migration of source systems.</li>
+        <li>Temporal history with auditable, supersedable assertions.</li>
+        <li>Agent-compatible read and write patterns with PostgreSQL controls.</li>
+        <li>Row-level security enforced on every table, every query.</li>
+        <li>Content-addressed artifact storage with deduplication.</li>
+      </ul>
+      <h2>Start Here</h2>
+      <ul class="start-here-links">
+        <li>
+          <a href="/docs/reference/core-contract/">Core Contract</a>
+          <span>Guarantees Rye makes and expects</span>
+        </li>
+        <li>
+          <a href="/docs/reference/data-dictionary/">Data Dictionary</a>
+          <span>Every table, column, and trigger explained</span>
+        </li>
+        <li>
+          <a href="/docs/model/security/">Security Model</a>
+          <span>RLS policies, redaction, and access control</span>
+        </li>
+        <li>
+          <a href="/docs/getting-started/quickstart/">Quickstart</a>
+          <span>Working system in under 10 minutes</span>
+        </li>
+      </ul>
+    </article>
+  </section>
+
+  <section class="cta-section enter enter-d3">
+    <div class="cta-card">
+      <h2>Ready to start?</h2>
+      <p>
+        Run the quickstart to have a working Rye instance in minutes, or read the overview
+        to understand the architecture first.
+      </p>
+      <div class="hero-actions">
+        <a class="btn btn-primary" href="/docs/getting-started/quickstart/">Run the Quickstart</a>
+        <a class="btn btn-ghost" href="https://github.com/BLTGV/project-rye">Star on GitHub</a>
+      </div>
+    </div>
+  </section>
+</DocsLayout>

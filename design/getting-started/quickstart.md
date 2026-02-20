@@ -4,24 +4,18 @@
 
 Rye sits alongside your existing tables. It doesn't replace them — it connects them. Your domain tables stay exactly as they are. Rye adds a graph layer that lets you track relationships, record events, and assert facts across all of them.
 
+**Prerequisite:** Complete the [Installation](installation.md) steps first — Rye should be installed, the search path set, and session variables configured.
+
 ---
 
-## 1. Install Rye Into Your Database
+## 1. Set Up Your Session
 
-Rye installs into an existing PostgreSQL 15+ database. Your tables are not touched.
-
-```bash
-export DATABASE_URL='postgresql://user:pass@host:5432/your_existing_db'
-./scripts/install.sh --profiles crm,pm
+```sql
+SET search_path = rye, public, pg_catalog;
+SET LOCAL "app.current_user_id" = 'quickstart-user';
+SET LOCAL "app.current_teams" = 'default';
+SET LOCAL "app.current_role" = 'operator';
 ```
-
-Or with Docker:
-
-```bash
-./scripts/docker-test.sh up
-```
-
-After install, run `SELECT rye_catalog()` to confirm Rye is ready. It returns an empty catalog — you haven't connected anything yet.
 
 ---
 
@@ -196,4 +190,4 @@ Your domain tables are the system of record. Rye connects them. If you drop the 
 - [Integration Guide](../model/integration.md) — deep dive on domain table overlay, CDC, and materialized views
 - [Core Contract](../model/core-contract-and-conformance.md) — what Rye guarantees
 - [Agent Operations](../../docs/agent-ops-guide.md) — safe read/write patterns for LLM agents
-- [SaaS Customer Operations](saas-customer-operations.md) — full worked example with Stripe, Intercom, and Linear
+- [SaaS Customer Operations](../cookbooks/saas-customer-operations.md) — full worked example with Stripe, Intercom, and Linear

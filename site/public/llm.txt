@@ -1,0 +1,37 @@
+Project: Project Rye
+Type: Agent-native temporal knowledge graph schema for PostgreSQL
+Source of truth: Markdown files in /docs and /design
+Repository: https://github.com/BLTGV/project-rye
+
+Positioning:
+- Rye is an opinionated PostgreSQL pattern for technical org operators.
+- Deploy AI-agent-compatible persistence quickly without replacing existing systems.
+- Persist context now while refining the long-term domain model.
+
+Site sections:
+- /docs/getting-started/installation/
+- /docs/getting-started/quickstart/
+- /docs/reference/core-contract/
+- /docs/reference/data-dictionary/
+- /docs/reference/agent-ops-guide/
+- /docs/reference/conventions-catalog/
+- /docs/model/overview/
+- /docs/model/schema/
+- /docs/model/functions/
+- /docs/model/integration/
+- /docs/model/security/
+- /docs/model/core-contract-and-conformance/
+- /docs/layers/crm/
+- /docs/layers/pm/
+- /docs/cookbooks/saas-customer-operations/
+- /docs/cookbooks/recruiting-pipeline/
+- /docs/cookbooks/product-development/
+- /docs/cookbooks/mineral-rights/
+
+Search:
+- /search-index.json (generated at build time)
+
+Notes:
+- Content is synced from repository Markdown during build.
+- UI uses DaisyUI with custom Rye color tokens and supports light, dark, and system modes.
+- Prefer this site structure for retrieval and navigation.

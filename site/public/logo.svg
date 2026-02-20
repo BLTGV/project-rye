@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 340 110" role="img" aria-label="Rye">
+  <defs>
+    <style>
+      .slice-fill { fill: #f3e5cd; }
+      .slice-outline { fill: none; stroke: #8d4f1d; stroke-width: 4; stroke-linejoin: round; }
+      .crust { stroke: #6f3d13; stroke-width: 5; stroke-linecap: round; }
+      .edge { stroke: #8d4f1d; stroke-width: 2.6; stroke-linecap: round; opacity: 0.7; }
+      .node-ring { fill: none; stroke: #b7792b; stroke-width: 1.5; opacity: 0.45; }
+      .node { fill: #b7792b; }
+      .wordmark {
+        font-family: "Space Grotesk", "Segoe UI", system-ui, sans-serif;
+        font-size: 58px;
+        font-weight: 700;
+        letter-spacing: -0.7px;
+        fill: #1f1b16;
+      }
+    </style>
+  </defs>
+
+  <g transform="translate(8, 10)">
+    <!-- Bread slice silhouette -->
+    <path
+      class="slice-fill"
+      d="M14 84c-5 0-9-4-9-9V49C5 21 23 8 45 8s40 13 40 41v26c0 5-4 9-9 9z"
+    />
+    <path
+      class="slice-outline"
+      d="M14 84c-5 0-9-4-9-9V49C5 21 23 8 45 8s40 13 40 41v26c0 5-4 9-9 9z"
+    />
+    <!-- Foundation crust line -->
+    <line class="crust" x1="13" y1="84" x2="77" y2="84" />
+
+    <!-- Graph network inside the bread -->
+    <line class="edge" x1="19" y1="64" x2="45" y2="49" />
+    <line class="edge" x1="45" y1="49" x2="71" y2="64" />
+    <line class="edge" x1="31" y1="34" x2="45" y2="49" />
+    <line class="edge" x1="59" y1="34" x2="45" y2="49" />
+    <line class="edge" x1="31" y1="34" x2="59" y2="34" opacity="0.45" />
+    <line class="edge" x1="19" y1="64" x2="31" y2="34" opacity="0.35" />
+    <line class="edge" x1="71" y1="64" x2="59" y2="34" opacity="0.35" />
+
+    <circle class="node-ring" cx="19" cy="64" r="8" />
+    <circle class="node-ring" cx="45" cy="49" r="9" />
+    <circle class="node-ring" cx="71" cy="64" r="8" />
+    <circle class="node-ring" cx="31" cy="34" r="7.5" />
+    <circle class="node-ring" cx="59" cy="34" r="7.5" />
+
+    <circle class="node" cx="19" cy="64" r="4.6" />
+    <circle class="node" cx="45" cy="49" r="5.2" />
+    <circle class="node" cx="71" cy="64" r="4.6" />
+    <circle class="node" cx="31" cy="34" r="4.2" />
+    <circle class="node" cx="59" cy="34" r="4.2" />
+  </g>
+
+  <text class="wordmark" x="108" y="76">rye</text>
+</svg>

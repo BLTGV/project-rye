@@ -1,0 +1,1908 @@
+---
+export const prerender = true;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Design System | Project Rye</title>
+    <meta
+      name="description"
+      content="Component library and design tokens for Project Rye"
+    />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300..900&family=IBM+Plex+Mono:wght@400;500&family=Source+Sans+3:wght@400;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <script is:inline>
+      (() => {
+        const storageKey = "rye-theme-mode";
+        const root = document.documentElement;
+        let mode = "system";
+        try {
+          const stored = window.localStorage.getItem(storageKey);
+          if (
+            stored === "light" ||
+            stored === "dark" ||
+            stored === "system"
+          )
+            mode = stored;
+        } catch {
+          mode = "system";
+        }
+        const prefersDark =
+          typeof window.matchMedia === "function" &&
+          window.matchMedia("(prefers-color-scheme: dark)").matches;
+        const resolved =
+          mode === "system" ? (prefersDark ? "dark" : "light") : mode;
+        root.setAttribute("data-theme-mode", mode);
+        root.setAttribute("data-theme", resolved);
+      })();
+    </script>
+
+    <style is:inline>
+      /* ================================================================
+         RYE DESIGN SYSTEM — Improved tokens & components
+         ================================================================ */
+
+      /* ---------- Theme Tokens ---------- */
+      :root {
+        color-scheme: light;
+        --font-display: "Fraunces", Georgia, serif;
+        --font-body: "Source Sans 3", "Segoe UI", sans-serif;
+        --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+
+        --page-bg: #f4eee3;
+        --surface: #fdf8ef;
+        --surface-strong: #fffef9;
+        --surface-muted: #ede5d6;
+
+        --ink: #231d16;
+        --ink-soft: #5d5448;
+        --ink-faint: #9e9385;
+
+        --border: #dacbb5;
+        --border-strong: #c4b29a;
+
+        --brand: #a46627;
+        --brand-deep: #7f4517;
+        --brand-soft: rgba(164, 102, 39, 0.12);
+
+        --accent: #3f6654;
+        --accent-soft: rgba(63, 102, 84, 0.12);
+        --earth: #8b5e3c;
+        --rust: #b23a2f;
+
+        --info: #2563eb;
+        --info-bg: #eef4ff;
+        --success: #2f7a48;
+        --success-bg: #eefbf2;
+        --warning: #b7792b;
+        --warning-bg: #fef8ec;
+        --error: #b23a2f;
+        --error-bg: #fef1f0;
+
+        --shadow-sm: 0 1px 4px rgba(35, 29, 22, 0.05),
+          0 2px 8px rgba(35, 29, 22, 0.04);
+        --shadow-md: 0 4px 12px rgba(35, 29, 22, 0.07),
+          0 8px 24px rgba(35, 29, 22, 0.06);
+        --shadow-lg: 0 8px 20px rgba(35, 29, 22, 0.09),
+          0 20px 48px rgba(35, 29, 22, 0.1);
+
+        --radius-sm: 0.4rem;
+        --radius-md: 0.7rem;
+        --radius-lg: 1rem;
+        --radius-pill: 999px;
+      }
+
+      :root[data-theme="dark"] {
+        color-scheme: dark;
+        --page-bg: #12100d;
+        --surface: #1e1914;
+        --surface-strong: #28211b;
+        --surface-muted: #1a1510;
+
+        --ink: #f2e9dc;
+        --ink-soft: #cbbca7;
+        --ink-faint: #7a6e60;
+
+        --border: #4f4134;
+        --border-strong: #6b5a49;
+
+        --brand: #c9934d;
+        --brand-deep: #e0b279;
+        --brand-soft: rgba(201, 147, 77, 0.14);
+
+        --accent: #78a793;
+        --accent-soft: rgba(120, 167, 147, 0.14);
+        --earth: #c9934d;
+        --rust: #e17568;
+
+        --info: #60a5fa;
+        --info-bg: #1a2332;
+        --success: #5faa78;
+        --success-bg: #132218;
+        --warning: #d8a35b;
+        --warning-bg: #2a1f10;
+        --error: #e17568;
+        --error-bg: #2a1410;
+
+        --shadow-sm: 0 1px 4px rgba(0, 0, 0, 0.18),
+          0 2px 8px rgba(0, 0, 0, 0.14);
+        --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.22),
+          0 8px 24px rgba(0, 0, 0, 0.2);
+        --shadow-lg: 0 8px 20px rgba(0, 0, 0, 0.3),
+          0 20px 48px rgba(0, 0, 0, 0.32);
+      }
+
+      /* ---------- Reset / Base ---------- */
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+      }
+      body {
+        background: var(--page-bg);
+        color: var(--ink);
+        font-family: var(--font-body);
+        line-height: 1.6;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      /* ---------- Grain Texture ---------- */
+      .ds-grain {
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        pointer-events: none;
+        opacity: 0.028;
+        background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 512 512' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+        background-size: 256px;
+      }
+
+      /* ---------- Ambient Background ---------- */
+      .ds-ambient {
+        position: fixed;
+        inset: 0;
+        z-index: -1;
+        pointer-events: none;
+        background: radial-gradient(
+              ellipse 1200px 680px at 8% 2%,
+              rgba(164, 102, 39, 0.15),
+              transparent 55%
+            ),
+          radial-gradient(
+            ellipse 1000px 600px at 88% 0%,
+            rgba(63, 102, 84, 0.1),
+            transparent 54%
+          ),
+          linear-gradient(180deg, #f7f1e7, #efe3d2);
+      }
+      :root[data-theme="dark"] .ds-ambient {
+        background: radial-gradient(
+              ellipse 1200px 680px at 10% 2%,
+              rgba(201, 147, 77, 0.14),
+              transparent 56%
+            ),
+          radial-gradient(
+            ellipse 1000px 620px at 90% 0%,
+            rgba(120, 167, 147, 0.1),
+            transparent 56%
+          ),
+          linear-gradient(180deg, #1a1510, #100d0a);
+      }
+
+      /* ---------- Entrance Animations ---------- */
+      @keyframes ds-fade-up {
+        from {
+          opacity: 0;
+          transform: translateY(18px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      @keyframes ds-scale-in {
+        from {
+          opacity: 0;
+          transform: scale(0.96);
+        }
+        to {
+          opacity: 1;
+          transform: scale(1);
+        }
+      }
+
+      .ds-anim {
+        animation: ds-fade-up 0.55s cubic-bezier(0.23, 1, 0.32, 1) both;
+      }
+      .ds-anim-d1 {
+        animation-delay: 0.06s;
+      }
+      .ds-anim-d2 {
+        animation-delay: 0.13s;
+      }
+      .ds-anim-d3 {
+        animation-delay: 0.2s;
+      }
+      .ds-anim-d4 {
+        animation-delay: 0.27s;
+      }
+      .ds-anim-d5 {
+        animation-delay: 0.34s;
+      }
+      .ds-anim-d6 {
+        animation-delay: 0.41s;
+      }
+      .ds-anim-d7 {
+        animation-delay: 0.48s;
+      }
+      .ds-anim-d8 {
+        animation-delay: 0.55s;
+      }
+
+      /* ---------- Layout ---------- */
+      .ds-wrap {
+        max-width: 960px;
+        margin: 0 auto;
+        padding: 0 1.5rem 4rem;
+      }
+
+      .ds-topbar {
+        position: sticky;
+        top: 0;
+        z-index: 50;
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border-bottom: 1px solid var(--border);
+        background: color-mix(in oklab, var(--page-bg) 82%, transparent);
+      }
+      .ds-topbar-inner {
+        max-width: 960px;
+        margin: 0 auto;
+        padding: 0.85rem 1.5rem;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      .ds-topbar-brand {
+        font-family: var(--font-display);
+        font-weight: 400;
+        font-size: 1.15rem;
+        color: var(--ink);
+        text-decoration: none;
+        letter-spacing: -0.01em;
+      }
+      .ds-topbar-brand strong {
+        font-weight: 700;
+      }
+
+      /* ---------- Theme Toggle (custom, Safari-safe) ---------- */
+      .ds-theme-toggle {
+        position: relative;
+      }
+      .ds-theme-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.45rem;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-pill);
+        background: var(--surface);
+        color: var(--ink);
+        font-family: var(--font-body);
+        font-size: 0.88rem;
+        padding: 0.45rem 0.75rem;
+        cursor: pointer;
+        transition: border-color 0.15s, background 0.15s;
+        line-height: 1;
+        white-space: nowrap;
+      }
+      .ds-theme-btn:hover {
+        border-color: var(--border-strong);
+        background: var(--surface-strong);
+      }
+      .ds-theme-btn svg {
+        flex-shrink: 0;
+      }
+      .ds-theme-menu {
+        position: absolute;
+        top: calc(100% + 4px);
+        right: 0;
+        min-width: 120px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        background: var(--surface);
+        box-shadow: var(--shadow-md);
+        padding: 0.3rem;
+        list-style: none;
+        margin: 0;
+        z-index: 60;
+      }
+      .ds-theme-menu[hidden] {
+        display: none;
+      }
+      .ds-theme-menu li {
+        padding: 0.45rem 0.7rem;
+        font-size: 0.88rem;
+        border-radius: var(--radius-sm);
+        cursor: pointer;
+        transition: background 0.12s;
+      }
+      .ds-theme-menu li:hover {
+        background: var(--brand-soft);
+      }
+      .ds-theme-menu li[aria-selected="true"] {
+        font-weight: 600;
+        color: var(--brand);
+      }
+
+      /* ---------- Hero ---------- */
+      .ds-hero {
+        padding: 4.5rem 0 3.5rem;
+        text-align: center;
+      }
+      .ds-hero-label {
+        font-family: var(--font-mono);
+        font-size: 0.78rem;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--brand);
+        margin: 0;
+      }
+      .ds-hero h1 {
+        font-family: var(--font-display);
+        font-weight: 500;
+        font-size: clamp(2.4rem, 5vw, 3.8rem);
+        line-height: 1.1;
+        letter-spacing: -0.025em;
+        margin: 0.5rem 0 0;
+        color: var(--ink);
+        font-variation-settings: "opsz" 72;
+      }
+      .ds-hero p {
+        font-size: 1.12rem;
+        color: var(--ink-soft);
+        max-width: 52ch;
+        margin: 0.85rem auto 0;
+      }
+
+      /* ---------- Section Dividers ---------- */
+      .ds-section {
+        margin-top: 3.5rem;
+        scroll-margin-top: 5rem;
+      }
+      .ds-section-hd {
+        display: flex;
+        align-items: baseline;
+        gap: 0.7rem;
+        margin-bottom: 1.5rem;
+        padding-bottom: 0.6rem;
+        border-bottom: 1px solid var(--border);
+      }
+      .ds-section-hd h2 {
+        font-family: var(--font-display);
+        font-weight: 600;
+        font-size: 1.6rem;
+        margin: 0;
+        letter-spacing: -0.02em;
+        font-variation-settings: "opsz" 36;
+      }
+      .ds-section-hd span {
+        font-family: var(--font-mono);
+        font-size: 0.72rem;
+        color: var(--ink-faint);
+        letter-spacing: 0.04em;
+      }
+      .ds-note {
+        font-size: 0.92rem;
+        color: var(--ink-soft);
+        margin: -0.8rem 0 1.5rem;
+        max-width: 64ch;
+      }
+
+      /* ---------- Color Palette ---------- */
+      .ds-palette {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+        gap: 0.75rem;
+      }
+      .ds-swatch {
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        overflow: hidden;
+        background: var(--surface);
+      }
+      .ds-swatch-color {
+        height: 56px;
+        border-bottom: 1px solid var(--border);
+      }
+      .ds-swatch-info {
+        padding: 0.5rem 0.6rem;
+      }
+      .ds-swatch-name {
+        font-family: var(--font-mono);
+        font-size: 0.72rem;
+        color: var(--ink-soft);
+        display: block;
+      }
+      .ds-swatch-var {
+        font-family: var(--font-mono);
+        font-size: 0.68rem;
+        color: var(--ink-faint);
+        display: block;
+        margin-top: 0.15rem;
+      }
+
+      /* ---------- Typography ---------- */
+      .ds-type-row {
+        margin-bottom: 1.5rem;
+      }
+      .ds-type-row p {
+        margin: 0.25rem 0 0;
+        color: var(--ink-soft);
+        font-size: 0.85rem;
+        font-family: var(--font-mono);
+      }
+      .ds-type-display {
+        font-family: var(--font-display);
+        font-variation-settings: "opsz" 72;
+        line-height: 1.15;
+        letter-spacing: -0.02em;
+      }
+      .ds-type-body {
+        font-family: var(--font-body);
+        line-height: 1.6;
+      }
+      .ds-type-mono {
+        font-family: var(--font-mono);
+        line-height: 1.5;
+      }
+
+      /* ---------- Buttons ---------- */
+      .ds-btn-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.65rem;
+        align-items: center;
+        margin-bottom: 1rem;
+      }
+      .ds-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.4rem;
+        font-family: var(--font-display);
+        font-weight: 600;
+        font-size: 0.92rem;
+        font-variation-settings: "opsz" 14;
+        line-height: 1;
+        border: 1px solid transparent;
+        border-radius: var(--radius-md);
+        padding: 0.7rem 1.3rem;
+        cursor: pointer;
+        text-decoration: none;
+        white-space: nowrap;
+        transition: all 0.18s cubic-bezier(0.23, 1, 0.32, 1);
+      }
+      .ds-btn:active {
+        transform: translateY(1px);
+      }
+
+      .ds-btn--primary {
+        background: var(--brand);
+        color: #fff;
+        border-color: var(--brand);
+      }
+      .ds-btn--primary:hover {
+        background: var(--brand-deep);
+        border-color: var(--brand-deep);
+        box-shadow: 0 4px 14px rgba(164, 102, 39, 0.3);
+      }
+
+      .ds-btn--secondary {
+        background: var(--accent);
+        color: #fff;
+        border-color: var(--accent);
+      }
+      .ds-btn--secondary:hover {
+        background: #346050;
+        box-shadow: 0 4px 14px rgba(63, 102, 84, 0.3);
+      }
+
+      .ds-btn--outline {
+        background: transparent;
+        color: var(--ink);
+        border-color: var(--border-strong);
+      }
+      .ds-btn--outline:hover {
+        background: var(--brand-soft);
+        border-color: var(--brand);
+        color: var(--brand-deep);
+      }
+
+      .ds-btn--ghost {
+        background: transparent;
+        color: var(--ink-soft);
+        border-color: transparent;
+      }
+      .ds-btn--ghost:hover {
+        background: var(--surface-muted);
+        color: var(--ink);
+      }
+
+      .ds-btn--sm {
+        font-size: 0.82rem;
+        padding: 0.5rem 0.95rem;
+      }
+      .ds-btn--lg {
+        font-size: 1.02rem;
+        padding: 0.85rem 1.6rem;
+      }
+
+      /* ---------- Cards ---------- */
+      .ds-card-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+        gap: 1rem;
+      }
+      .ds-card {
+        border: 1px solid var(--border);
+        border-radius: var(--radius-lg);
+        background: var(--surface);
+        padding: 1.25rem;
+        transition: all 0.25s cubic-bezier(0.23, 1, 0.32, 1);
+      }
+      .ds-card h3 {
+        font-family: var(--font-display);
+        font-size: 1.15rem;
+        font-weight: 600;
+        margin: 0;
+        font-variation-settings: "opsz" 20;
+      }
+      .ds-card p {
+        color: var(--ink-soft);
+        margin: 0.35rem 0 0;
+        font-size: 0.94rem;
+      }
+
+      /* Card: Elevated */
+      .ds-card--elevated {
+        box-shadow: var(--shadow-md);
+      }
+
+      /* Card: Interactive */
+      .ds-card--interactive {
+        cursor: pointer;
+      }
+      .ds-card--interactive:hover {
+        transform: translateY(-3px);
+        box-shadow: var(--shadow-lg);
+        border-color: var(--border-strong);
+      }
+
+      /* Card: Accent top stripe */
+      .ds-card--accent-brand {
+        border-top: 3px solid var(--brand);
+      }
+      .ds-card--accent-green {
+        border-top: 3px solid var(--accent);
+      }
+      .ds-card--accent-earth {
+        border-top: 3px solid var(--earth);
+      }
+
+      /* Card: Feature (hero-style) */
+      .ds-card--feature {
+        background: linear-gradient(
+          145deg,
+          var(--surface),
+          var(--surface-muted)
+        );
+        box-shadow: var(--shadow-sm);
+        position: relative;
+        overflow: hidden;
+      }
+      .ds-card--feature::after {
+        content: "";
+        position: absolute;
+        top: -40px;
+        right: -40px;
+        width: 120px;
+        height: 120px;
+        border-radius: 50%;
+        background: var(--brand-soft);
+        pointer-events: none;
+      }
+
+      /* ---------- Form Controls ---------- */
+      .ds-form-group {
+        margin-bottom: 1.25rem;
+      }
+      .ds-form-label {
+        display: block;
+        font-size: 0.85rem;
+        font-weight: 600;
+        color: var(--ink);
+        margin-bottom: 0.35rem;
+        font-family: var(--font-display);
+        font-variation-settings: "opsz" 12;
+      }
+      .ds-input {
+        display: block;
+        width: 100%;
+        max-width: 400px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        background: var(--surface-strong);
+        color: var(--ink);
+        font-family: var(--font-body);
+        font-size: 0.95rem;
+        padding: 0.65rem 0.85rem;
+        transition: border-color 0.15s, box-shadow 0.15s;
+      }
+      .ds-input:focus {
+        outline: none;
+        border-color: var(--brand);
+        box-shadow: 0 0 0 3px var(--brand-soft);
+      }
+      .ds-input::placeholder {
+        color: var(--ink-faint);
+      }
+
+      /* Custom Select (Safari-safe) */
+      .ds-select {
+        position: relative;
+        display: inline-block;
+      }
+      .ds-select-trigger {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        background: var(--surface-strong);
+        color: var(--ink);
+        font-family: var(--font-body);
+        font-size: 0.95rem;
+        padding: 0.65rem 0.85rem;
+        cursor: pointer;
+        transition: border-color 0.15s, box-shadow 0.15s;
+        min-width: 180px;
+        justify-content: space-between;
+        line-height: 1;
+        white-space: nowrap;
+      }
+      .ds-select-trigger:hover {
+        border-color: var(--border-strong);
+      }
+      .ds-select-trigger:focus {
+        outline: none;
+        border-color: var(--brand);
+        box-shadow: 0 0 0 3px var(--brand-soft);
+      }
+      .ds-select-trigger svg {
+        flex-shrink: 0;
+        transition: transform 0.2s;
+      }
+      .ds-select-trigger[aria-expanded="true"] svg {
+        transform: rotate(180deg);
+      }
+      .ds-select-menu {
+        position: absolute;
+        top: calc(100% + 4px);
+        left: 0;
+        right: 0;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        background: var(--surface);
+        box-shadow: var(--shadow-md);
+        padding: 0.3rem;
+        list-style: none;
+        margin: 0;
+        z-index: 60;
+      }
+      .ds-select-menu[hidden] {
+        display: none;
+      }
+      .ds-select-option {
+        padding: 0.5rem 0.7rem;
+        font-size: 0.92rem;
+        border-radius: var(--radius-sm);
+        cursor: pointer;
+        transition: background 0.1s;
+      }
+      .ds-select-option:hover {
+        background: var(--brand-soft);
+      }
+      .ds-select-option[aria-selected="true"] {
+        font-weight: 600;
+        color: var(--brand);
+      }
+
+      /* Search input */
+      .ds-search {
+        position: relative;
+        max-width: 400px;
+      }
+      .ds-search-icon {
+        position: absolute;
+        left: 0.8rem;
+        top: 50%;
+        transform: translateY(-50%);
+        color: var(--ink-faint);
+        pointer-events: none;
+      }
+      .ds-search .ds-input {
+        padding-left: 2.3rem;
+      }
+
+      /* ---------- Code Blocks ---------- */
+      .ds-code-inline {
+        font-family: var(--font-mono);
+        font-size: 0.87em;
+        background: var(--brand-soft);
+        border-radius: var(--radius-sm);
+        padding: 0.14rem 0.35rem;
+        color: var(--brand-deep);
+      }
+      :root[data-theme="dark"] .ds-code-inline {
+        color: var(--brand);
+      }
+
+      .ds-code-block {
+        border: 1px solid var(--border);
+        border-radius: var(--radius-lg);
+        overflow: hidden;
+        margin: 0;
+      }
+      .ds-code-header {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.55rem 0.85rem;
+        background: #2a241c;
+        border-bottom: 1px solid #3d3428;
+        font-family: var(--font-mono);
+        font-size: 0.75rem;
+        color: #a09080;
+      }
+      .ds-code-dots {
+        display: flex;
+        gap: 0.35rem;
+      }
+      .ds-code-dots span {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #4a3f32;
+      }
+      .ds-code-header span.ds-code-filename {
+        margin-left: auto;
+      }
+      .ds-code-body {
+        background: #1f1c19;
+        padding: 1rem;
+        overflow-x: auto;
+      }
+      .ds-code-body pre {
+        margin: 0;
+        font-family: var(--font-mono);
+        font-size: 0.85rem;
+        line-height: 1.65;
+        color: #f0e8d8;
+      }
+      .ds-code-body .kw {
+        color: #d8a35b;
+      }
+      .ds-code-body .fn {
+        color: #78a793;
+      }
+      .ds-code-body .str {
+        color: #c9934d;
+      }
+      .ds-code-body .cmt {
+        color: #6b5c4d;
+        font-style: italic;
+      }
+      .ds-code-body .num {
+        color: #e0b279;
+      }
+
+      /* ---------- Alerts ---------- */
+      .ds-alert {
+        border-radius: var(--radius-md);
+        padding: 0.85rem 1rem;
+        font-size: 0.92rem;
+        display: flex;
+        align-items: flex-start;
+        gap: 0.6rem;
+        margin-bottom: 0.75rem;
+      }
+      .ds-alert svg {
+        flex-shrink: 0;
+        margin-top: 0.15rem;
+      }
+      .ds-alert strong {
+        display: block;
+        font-size: 0.88rem;
+        margin-bottom: 0.15rem;
+      }
+      .ds-alert--info {
+        background: var(--info-bg);
+        border: 1px solid color-mix(in oklab, var(--info) 25%, transparent);
+        color: var(--info);
+      }
+      .ds-alert--success {
+        background: var(--success-bg);
+        border: 1px solid
+          color-mix(in oklab, var(--success) 25%, transparent);
+        color: var(--success);
+      }
+      .ds-alert--warning {
+        background: var(--warning-bg);
+        border: 1px solid
+          color-mix(in oklab, var(--warning) 25%, transparent);
+        color: var(--warning);
+      }
+      .ds-alert--error {
+        background: var(--error-bg);
+        border: 1px solid color-mix(in oklab, var(--error) 25%, transparent);
+        color: var(--error);
+      }
+
+      /* ---------- Badges ---------- */
+      .ds-badge-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        align-items: center;
+      }
+      .ds-badge {
+        display: inline-flex;
+        align-items: center;
+        font-family: var(--font-mono);
+        font-size: 0.72rem;
+        font-weight: 500;
+        letter-spacing: 0.03em;
+        padding: 0.28rem 0.6rem;
+        border-radius: var(--radius-pill);
+        line-height: 1;
+      }
+      .ds-badge--brand {
+        background: var(--brand-soft);
+        color: var(--brand-deep);
+      }
+      .ds-badge--green {
+        background: var(--accent-soft);
+        color: var(--accent);
+      }
+      .ds-badge--info {
+        background: var(--info-bg);
+        color: var(--info);
+      }
+      .ds-badge--error {
+        background: var(--error-bg);
+        color: var(--error);
+      }
+
+      /* ---------- Table ---------- */
+      .ds-table-wrap {
+        border: 1px solid var(--border);
+        border-radius: var(--radius-lg);
+        overflow: hidden;
+      }
+      .ds-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.92rem;
+      }
+      .ds-table th {
+        text-align: left;
+        padding: 0.65rem 0.85rem;
+        font-family: var(--font-display);
+        font-weight: 600;
+        font-size: 0.85rem;
+        font-variation-settings: "opsz" 12;
+        background: var(--surface-muted);
+        color: var(--ink-soft);
+        border-bottom: 1px solid var(--border);
+      }
+      .ds-table td {
+        padding: 0.6rem 0.85rem;
+        border-bottom: 1px solid var(--border);
+        vertical-align: top;
+      }
+      .ds-table tr:last-child td {
+        border-bottom: none;
+      }
+      .ds-table tr:hover td {
+        background: var(--brand-soft);
+      }
+
+      /* ---------- Sidebar Nav (mini demo) ---------- */
+      .ds-nav-demo {
+        max-width: 280px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-lg);
+        background: var(--surface);
+        padding: 1rem;
+        box-shadow: var(--shadow-sm);
+      }
+      .ds-nav-section + .ds-nav-section {
+        margin-top: 0.9rem;
+      }
+      .ds-nav-section h4 {
+        margin: 0 0 0.4rem;
+        font-family: var(--font-display);
+        font-weight: 700;
+        font-size: 0.78rem;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--brand-deep);
+        font-variation-settings: "opsz" 10;
+      }
+      .ds-nav-section ul {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+      }
+      .ds-nav-section li + li {
+        margin-top: 0.15rem;
+      }
+      .ds-nav-section a {
+        display: block;
+        padding: 0.3rem 0.55rem;
+        font-size: 0.9rem;
+        color: var(--ink-soft);
+        text-decoration: none;
+        border-radius: var(--radius-sm);
+        transition: all 0.12s;
+      }
+      .ds-nav-section a:hover {
+        background: var(--brand-soft);
+        color: var(--ink);
+      }
+      .ds-nav-section a.active {
+        background: color-mix(
+          in oklab,
+          var(--brand) 18%,
+          var(--surface-strong)
+        );
+        color: var(--ink);
+        font-weight: 600;
+      }
+
+      /* ---------- Responsive ---------- */
+      @media (max-width: 720px) {
+        .ds-palette {
+          grid-template-columns: repeat(3, 1fr);
+        }
+        .ds-card-grid {
+          grid-template-columns: 1fr;
+        }
+        .ds-hero h1 {
+          font-size: 2rem;
+        }
+      }
+    </style>
+  </head>
+
+  <body>
+    <div class="ds-grain" aria-hidden="true"></div>
+    <div class="ds-ambient" aria-hidden="true"></div>
+
+    <!-- Sticky topbar -->
+    <header class="ds-topbar">
+      <div class="ds-topbar-inner">
+        <a href="/" class="ds-topbar-brand">
+          <strong>Rye</strong>&ensp;Design System
+        </a>
+
+        <div class="ds-theme-toggle" data-theme-widget>
+          <button
+            class="ds-theme-btn"
+            type="button"
+            aria-haspopup="listbox"
+            aria-expanded="false"
+          >
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 16 16"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.3"
+              stroke-linecap="round"
+            >
+              <circle cx="8" cy="8" r="3.5" />
+              <path d="M8 1.5v1M8 13.5v1M1.5 8h1M13.5 8h1M3.4 3.4l.7.7M11.9 11.9l.7.7M3.4 12.6l.7-.7M11.9 4.1l.7-.7" />
+            </svg>
+            <span data-theme-label>System</span>
+            <svg
+              width="10"
+              height="6"
+              viewBox="0 0 10 6"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="M1 1l4 4 4-4" />
+            </svg>
+          </button>
+          <ul class="ds-theme-menu" role="listbox" hidden>
+            <li role="option" data-value="system" aria-selected="true">
+              System
+            </li>
+            <li role="option" data-value="light" aria-selected="false">
+              Light
+            </li>
+            <li role="option" data-value="dark" aria-selected="false">
+              Dark
+            </li>
+          </ul>
+        </div>
+      </div>
+    </header>
+
+    <div class="ds-wrap">
+      <!-- Hero -->
+      <section class="ds-hero ds-anim">
+        <p class="ds-hero-label">Improved Components</p>
+        <h1>Rye Design System</h1>
+        <p>
+          Elevated components for the Project Rye documentation site.
+          Fraunces serif for display, tactile grain texture, refined
+          interactions, and cross-browser form controls.
+        </p>
+      </section>
+
+      <!-- Quick nav -->
+      <nav
+        style="display:flex; flex-wrap:wrap; gap:0.4rem; justify-content:center; margin-bottom:2rem"
+        class="ds-anim ds-anim-d1"
+      >
+        <a href="#colors" class="ds-btn ds-btn--ghost ds-btn--sm">Colors</a>
+        <a href="#typography" class="ds-btn ds-btn--ghost ds-btn--sm"
+          >Typography</a
+        >
+        <a href="#buttons" class="ds-btn ds-btn--ghost ds-btn--sm">Buttons</a>
+        <a href="#cards" class="ds-btn ds-btn--ghost ds-btn--sm">Cards</a>
+        <a href="#forms" class="ds-btn ds-btn--ghost ds-btn--sm">Forms</a>
+        <a href="#code" class="ds-btn ds-btn--ghost ds-btn--sm">Code</a>
+        <a href="#alerts" class="ds-btn ds-btn--ghost ds-btn--sm">Alerts</a>
+        <a href="#table" class="ds-btn ds-btn--ghost ds-btn--sm">Table</a>
+        <a href="#nav" class="ds-btn ds-btn--ghost ds-btn--sm">Nav</a>
+      </nav>
+
+      <!-- ======== COLORS ======== -->
+      <section id="colors" class="ds-section ds-anim ds-anim-d2">
+        <div class="ds-section-hd">
+          <h2>Color Palette</h2>
+          <span>01</span>
+        </div>
+        <p class="ds-note">
+          Warm earth tones with semantic color layers. All colors adapt
+          automatically via CSS custom properties when the theme changes.
+        </p>
+        <div class="ds-palette">
+          <div class="ds-swatch">
+            <div class="ds-swatch-color" style="background:var(--brand)"></div>
+            <div class="ds-swatch-info">
+              <span class="ds-swatch-name">Brand</span>
+              <span class="ds-swatch-var">--brand</span>
+            </div>
+          </div>
+          <div class="ds-swatch">
+            <div
+              class="ds-swatch-color"
+              style="background:var(--brand-deep)"
+            ></div>
+            <div class="ds-swatch-info">
+              <span class="ds-swatch-name">Brand Deep</span>
+              <span class="ds-swatch-var">--brand-deep</span>
+            </div>
+          </div>
+          <div class="ds-swatch">
+            <div class="ds-swatch-color" style="background:var(--accent)"></div>
+            <div class="ds-swatch-info">
+              <span class="ds-swatch-name">Accent</span>
+              <span class="ds-swatch-var">--accent</span>
+            </div>
+          </div>
+          <div class="ds-swatch">
+            <div class="ds-swatch-color" style="background:var(--earth)"></div>
+            <div class="ds-swatch-info">
+              <span class="ds-swatch-name">Earth</span>
+              <span class="ds-swatch-var">--earth</span>
+            </div>
+          </div>
+          <div class="ds-swatch">
+            <div class="ds-swatch-color" style="background:var(--ink)"></div>
+            <div class="ds-swatch-info">
+              <span class="ds-swatch-name">Ink</span>
+              <span class="ds-swatch-var">--ink</span>
+            </div>
+          </div>
+          <div class="ds-swatch">
+            <div
+              class="ds-swatch-color"
+              style="background:var(--ink-soft)"
+            ></div>
+            <div class="ds-swatch-info">
+              <span class="ds-swatch-name">Ink Soft</span>
+              <span class="ds-swatch-var">--ink-soft</span>
+            </div>
+          </div>
+          <div class="ds-swatch">
+            <div
+              class="ds-swatch-color"
+              style="background:var(--surface)"
+            ></div>
+            <div class="ds-swatch-info">
+              <span class="ds-swatch-name">Surface</span>
+              <span class="ds-swatch-var">--surface</span>
+            </div>
+          </div>
+          <div class="ds-swatch">
+            <div
+              class="ds-swatch-color"
+              style="background:var(--surface-strong)"
+            ></div>
+            <div class="ds-swatch-info">
+              <span class="ds-swatch-name">Surface Strong</span>
+              <span class="ds-swatch-var">--surface-strong</span>
+            </div>
+          </div>
+          <div class="ds-swatch">
+            <div
+              class="ds-swatch-color"
+              style="background:var(--page-bg)"
+            ></div>
+            <div class="ds-swatch-info">
+              <span class="ds-swatch-name">Page BG</span>
+              <span class="ds-swatch-var">--page-bg</span>
+            </div>
+          </div>
+          <div class="ds-swatch">
+            <div class="ds-swatch-color" style="background:var(--border)"></div>
+            <div class="ds-swatch-info">
+              <span class="ds-swatch-name">Border</span>
+              <span class="ds-swatch-var">--border</span>
+            </div>
+          </div>
+          <div class="ds-swatch">
+            <div class="ds-swatch-color" style="background:var(--info)"></div>
+            <div class="ds-swatch-info">
+              <span class="ds-swatch-name">Info</span>
+              <span class="ds-swatch-var">--info</span>
+            </div>
+          </div>
+          <div class="ds-swatch">
+            <div
+              class="ds-swatch-color"
+              style="background:var(--success)"
+            ></div>
+            <div class="ds-swatch-info">
+              <span class="ds-swatch-name">Success</span>
+              <span class="ds-swatch-var">--success</span>
+            </div>
+          </div>
+          <div class="ds-swatch">
+            <div
+              class="ds-swatch-color"
+              style="background:var(--warning)"
+            ></div>
+            <div class="ds-swatch-info">
+              <span class="ds-swatch-name">Warning</span>
+              <span class="ds-swatch-var">--warning</span>
+            </div>
+          </div>
+          <div class="ds-swatch">
+            <div class="ds-swatch-color" style="background:var(--error)"></div>
+            <div class="ds-swatch-info">
+              <span class="ds-swatch-name">Error</span>
+              <span class="ds-swatch-var">--error</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ======== TYPOGRAPHY ======== -->
+      <section id="typography" class="ds-section ds-anim ds-anim-d3">
+        <div class="ds-section-hd">
+          <h2>Typography</h2>
+          <span>02</span>
+        </div>
+        <p class="ds-note">
+          Fraunces variable serif for display headings brings organic,
+          craft-bakery character. Variable optical sizing adjusts letterforms at
+          each size. Source Sans 3 for body, IBM Plex Mono for code.
+        </p>
+
+        <div class="ds-type-row">
+          <div class="ds-type-display" style="font-size:3rem; font-weight:500">
+            Temporal Knowledge
+          </div>
+          <p>Fraunces 500 / 3rem / opsz 72</p>
+        </div>
+
+        <div class="ds-type-row">
+          <div
+            class="ds-type-display"
+            style="font-size:2rem; font-weight:600"
+          >
+            Agent-Compatible Persistence
+          </div>
+          <p>Fraunces 600 / 2rem / opsz 36</p>
+        </div>
+
+        <div class="ds-type-row">
+          <div
+            class="ds-type-display"
+            style="font-size:1.35rem; font-weight:700"
+          >
+            PostgreSQL Row-Level Security
+          </div>
+          <p>Fraunces 700 / 1.35rem / opsz 20</p>
+        </div>
+
+        <div class="ds-type-row">
+          <div class="ds-type-body" style="font-size:1rem; max-width:60ch">
+            Rye is an opinionated pattern implemented in PostgreSQL for technical
+            operators. It works with your existing data, persists context
+            immediately, and lets you refine your long-term domain model without
+            blocking delivery.
+          </div>
+          <p>Source Sans 3 / 1rem / body</p>
+        </div>
+
+        <div class="ds-type-row">
+          <div class="ds-type-mono" style="font-size:0.88rem">
+            SELECT rye.agent_node_summary(p_node_id := '...');
+          </div>
+          <p>IBM Plex Mono / 0.88rem / code</p>
+        </div>
+      </section>
+
+      <!-- ======== BUTTONS ======== -->
+      <section id="buttons" class="ds-section ds-anim ds-anim-d4">
+        <div class="ds-section-hd">
+          <h2>Buttons</h2>
+          <span>03</span>
+        </div>
+        <p class="ds-note">
+          Rounded-rectangle shape with Fraunces labels. Active state presses
+          down 1px for tactile feedback. Hover lifts box-shadow.
+        </p>
+
+        <h3
+          style="font-family:var(--font-display); font-size:1rem; margin:0 0 0.6rem; color:var(--ink-soft); font-variation-settings:'opsz' 14"
+        >
+          Variants
+        </h3>
+        <div class="ds-btn-row">
+          <button class="ds-btn ds-btn--primary">Primary</button>
+          <button class="ds-btn ds-btn--secondary">Secondary</button>
+          <button class="ds-btn ds-btn--outline">Outline</button>
+          <button class="ds-btn ds-btn--ghost">Ghost</button>
+        </div>
+
+        <h3
+          style="font-family:var(--font-display); font-size:1rem; margin:1rem 0 0.6rem; color:var(--ink-soft); font-variation-settings:'opsz' 14"
+        >
+          Sizes
+        </h3>
+        <div class="ds-btn-row">
+          <button class="ds-btn ds-btn--primary ds-btn--sm">Small</button>
+          <button class="ds-btn ds-btn--primary">Medium</button>
+          <button class="ds-btn ds-btn--primary ds-btn--lg">Large</button>
+        </div>
+
+        <h3
+          style="font-family:var(--font-display); font-size:1rem; margin:1rem 0 0.6rem; color:var(--ink-soft); font-variation-settings:'opsz' 14"
+        >
+          With Icons
+        </h3>
+        <div class="ds-btn-row">
+          <button class="ds-btn ds-btn--primary">
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 16 16"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.5"
+              stroke-linecap="round"
+            >
+              <path d="M3 8h10M8 3l5 5-5 5" />
+            </svg>
+            Get Started
+          </button>
+          <button class="ds-btn ds-btn--outline">
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 16 16"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.5"
+              stroke-linecap="round"
+            >
+              <path d="M8 2v12M2 8h12" />
+            </svg>
+            Add Node
+          </button>
+        </div>
+      </section>
+
+      <!-- ======== CARDS ======== -->
+      <section id="cards" class="ds-section ds-anim ds-anim-d5">
+        <div class="ds-section-hd">
+          <h2>Cards</h2>
+          <span>04</span>
+        </div>
+        <p class="ds-note">
+          Three tiers: base, elevated, and interactive. Accent top-stripes
+          differentiate categories. The feature variant uses a gradient
+          background with a decorative circle.
+        </p>
+
+        <div class="ds-card-grid">
+          <div class="ds-card">
+            <h3>Base Card</h3>
+            <p>
+              Default card with border and surface background. No shadow, no
+              interaction.
+            </p>
+          </div>
+          <div class="ds-card ds-card--elevated">
+            <h3>Elevated Card</h3>
+            <p>
+              Medium shadow for cards that need to lift from the page slightly.
+            </p>
+          </div>
+          <div class="ds-card ds-card--interactive">
+            <h3>Interactive Card</h3>
+            <p>
+              Hover to see the lift effect. Cursor changes and shadow deepens on
+              hover.
+            </p>
+          </div>
+        </div>
+
+        <h3
+          style="font-family:var(--font-display); font-size:1rem; margin:1.5rem 0 0.8rem; color:var(--ink-soft)"
+        >
+          Accent Variants
+        </h3>
+        <div class="ds-card-grid">
+          <div class="ds-card ds-card--accent-brand ds-card--interactive">
+            <h3>Persist Now</h3>
+            <p>
+              Start capturing agent context today while your schema evolves.
+            </p>
+          </div>
+          <div class="ds-card ds-card--accent-green ds-card--interactive">
+            <h3>Existing Data</h3>
+            <p>Overlay Rye on current systems without forced migration.</p>
+          </div>
+          <div class="ds-card ds-card--accent-earth ds-card--interactive">
+            <h3>Operator Control</h3>
+            <p>Postgres-native RLS, append-only history, explicit writes.</p>
+          </div>
+        </div>
+
+        <h3
+          style="font-family:var(--font-display); font-size:1rem; margin:1.5rem 0 0.8rem; color:var(--ink-soft)"
+        >
+          Feature Card
+        </h3>
+        <div style="max-width: 340px">
+          <div class="ds-card ds-card--feature">
+            <h3>Temporal Graph</h3>
+            <p>
+              Nodes, edges, events, and assertions with full temporal history
+              built into PostgreSQL.
+            </p>
+            <div style="margin-top:0.75rem">
+              <span class="ds-badge ds-badge--brand">PostgreSQL 15+</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ======== FORMS ======== -->
+      <section id="forms" class="ds-section ds-anim ds-anim-d6">
+        <div class="ds-section-hd">
+          <h2>Form Controls</h2>
+          <span>05</span>
+        </div>
+        <p class="ds-note">
+          The custom select replaces the native &lt;select&gt; element to fix
+          Safari text clipping with pill-shaped borders. Uses a button trigger
+          with a dropdown listbox, fully keyboard-navigable.
+        </p>
+
+        <div class="ds-form-group">
+          <label class="ds-form-label" for="demo-input">Text Input</label>
+          <input
+            class="ds-input"
+            id="demo-input"
+            type="text"
+            placeholder="Enter a node label..."
+          />
+        </div>
+
+        <div class="ds-form-group">
+          <label class="ds-form-label">Search Input</label>
+          <div class="ds-search">
+            <svg
+              class="ds-search-icon"
+              width="16"
+              height="16"
+              viewBox="0 0 16 16"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.5"
+              stroke-linecap="round"
+            >
+              <circle cx="7" cy="7" r="4.5" />
+              <path d="M10.5 10.5L14 14" />
+            </svg>
+            <input
+              class="ds-input"
+              type="search"
+              placeholder="Search docs..."
+            />
+          </div>
+        </div>
+
+        <div class="ds-form-group">
+          <label class="ds-form-label">Custom Select (Safari-safe)</label>
+          <div class="ds-select" data-select>
+            <button
+              class="ds-select-trigger"
+              type="button"
+              aria-haspopup="listbox"
+              aria-expanded="false"
+            >
+              <span>Select a section...</span>
+              <svg
+                width="10"
+                height="6"
+                viewBox="0 0 10 6"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M1 1l4 4 4-4" />
+              </svg>
+            </button>
+            <ul class="ds-select-menu" role="listbox" hidden>
+              <li
+                class="ds-select-option"
+                role="option"
+                data-value="reference"
+                aria-selected="false"
+              >
+                Reference
+              </li>
+              <li
+                class="ds-select-option"
+                role="option"
+                data-value="model"
+                aria-selected="false"
+              >
+                Data Model
+              </li>
+              <li
+                class="ds-select-option"
+                role="option"
+                data-value="layers"
+                aria-selected="false"
+              >
+                Layers
+              </li>
+              <li
+                class="ds-select-option"
+                role="option"
+                data-value="cookbooks"
+                aria-selected="false"
+              >
+                Cookbooks
+              </li>
+            </ul>
+          </div>
+          <p
+            style="font-size:0.82rem; color:var(--ink-faint); margin-top:0.4rem; font-family:var(--font-mono)"
+          >
+            No native &lt;select&gt; — no Safari clipping.
+          </p>
+        </div>
+
+        <div class="ds-form-group">
+          <label class="ds-form-label" for="demo-textarea">Textarea</label>
+          <textarea
+            class="ds-input"
+            id="demo-textarea"
+            rows="3"
+            placeholder="Describe the assertion..."
+            style="resize:vertical"
+          ></textarea>
+        </div>
+      </section>
+
+      <!-- ======== CODE ======== -->
+      <section id="code" class="ds-section ds-anim ds-anim-d7">
+        <div class="ds-section-hd">
+          <h2>Code Blocks</h2>
+          <span>06</span>
+        </div>
+        <p class="ds-note">
+          Inline code uses the brand color for visibility. Block code gets a
+          title bar with decorative dots and optional filename, warm dark
+          background with semantic syntax colors.
+        </p>
+
+        <p style="margin-bottom:1rem">
+          Inline code example: call
+          <code class="ds-code-inline">record_event()</code> to create events
+          with participants, or query
+          <code class="ds-code-inline">agent_node_summary()</code> for compact
+          context.
+        </p>
+
+        <div class="ds-code-block">
+          <div class="ds-code-header">
+            <div class="ds-code-dots">
+              <span></span><span></span><span></span>
+            </div>
+            <span class="ds-code-filename">quickstart.sql</span>
+          </div>
+          <div class="ds-code-body">
+            <pre><span class="cmt">-- Link a domain record to the knowledge graph</span>
+<span class="kw">SELECT</span> rye.<span class="fn">link_record</span>(
+  p_source_table  := <span class="str">'public.contacts'</span>,
+  p_source_id     := contact_row.id,
+  p_label         := contact_row.full_name,
+  p_node_type     := <span class="str">'contact'</span>,
+  p_teams         := <span class="str">ARRAY['sales']</span>
+);
+
+<span class="cmt">-- Record an event with participants</span>
+<span class="kw">SELECT</span> rye.<span class="fn">record_event</span>(
+  p_event_type    := <span class="str">'contact_created'</span>,
+  p_description   := <span class="str">'New contact added via CRM sync'</span>,
+  p_participant_nodes := ARRAY[v_node_id],
+  p_participant_roles := ARRAY[<span class="str">'subject'</span>]
+);</pre>
+          </div>
+        </div>
+      </section>
+
+      <!-- ======== ALERTS ======== -->
+      <section id="alerts" class="ds-section ds-anim ds-anim-d8">
+        <div class="ds-section-hd">
+          <h2>Alerts &amp; Badges</h2>
+          <span>07</span>
+        </div>
+        <p class="ds-note">
+          Four semantic alert levels for documentation callouts, plus compact
+          badges for status indicators and tags.
+        </p>
+
+        <div class="ds-alert ds-alert--info">
+          <svg
+            width="18"
+            height="18"
+            viewBox="0 0 18 18"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"
+          >
+            <circle cx="9" cy="9" r="7" />
+            <path d="M9 8.5v4M9 6v.01" />
+          </svg>
+          <div>
+            <strong>Note</strong>
+            All Rye objects live in the <code class="ds-code-inline">rye</code> schema.
+            Domain tables stay in <code class="ds-code-inline">public</code>.
+          </div>
+        </div>
+
+        <div class="ds-alert ds-alert--success">
+          <svg
+            width="18"
+            height="18"
+            viewBox="0 0 18 18"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"
+          >
+            <circle cx="9" cy="9" r="7" />
+            <path d="M6 9l2 2 4-4" />
+          </svg>
+          <div>
+            <strong>Success</strong>
+            Migration 0006 applied. All 17 production gaps are now resolved.
+          </div>
+        </div>
+
+        <div class="ds-alert ds-alert--warning">
+          <svg
+            width="18"
+            height="18"
+            viewBox="0 0 18 18"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"
+          >
+            <path d="M9 2L1.5 15h15L9 2z" />
+            <path d="M9 7v3.5M9 12.5v.01" />
+          </svg>
+          <div>
+            <strong>Warning</strong>
+            <code class="ds-code-inline">ON CONFLICT</code> triggers RLS SELECT
+            checks. Avoid for classified nodes.
+          </div>
+        </div>
+
+        <div class="ds-alert ds-alert--error">
+          <svg
+            width="18"
+            height="18"
+            viewBox="0 0 18 18"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"
+          >
+            <circle cx="9" cy="9" r="7" />
+            <path d="M6.5 6.5l5 5M11.5 6.5l-5 5" />
+          </svg>
+          <div>
+            <strong>Error</strong>
+            INSERT WITH CHECK violation: row does not satisfy RLS policy.
+          </div>
+        </div>
+
+        <h3
+          style="font-family:var(--font-display); font-size:1rem; margin:1.5rem 0 0.8rem; color:var(--ink-soft)"
+        >
+          Badges
+        </h3>
+        <div class="ds-badge-row">
+          <span class="ds-badge ds-badge--brand">PostgreSQL 15+</span>
+          <span class="ds-badge ds-badge--green">RLS Enabled</span>
+          <span class="ds-badge ds-badge--info">Temporal</span>
+          <span class="ds-badge ds-badge--error">Breaking Change</span>
+        </div>
+      </section>
+
+      <!-- ======== TABLE ======== -->
+      <section id="table" class="ds-section">
+        <div class="ds-section-hd">
+          <h2>Table</h2>
+          <span>08</span>
+        </div>
+        <p class="ds-note">
+          Rounded container with hover-row highlighting. Header uses the muted
+          surface color. Compact padding for data-dense views.
+        </p>
+
+        <div class="ds-table-wrap">
+          <table class="ds-table">
+            <thead>
+              <tr>
+                <th>Function</th>
+                <th>Purpose</th>
+                <th>Migration</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code class="ds-code-inline">record_event()</code></td>
+                <td>Create event with participants in one call</td>
+                <td><span class="ds-badge ds-badge--brand">0002</span></td>
+              </tr>
+              <tr>
+                <td><code class="ds-code-inline">link_record()</code></td>
+                <td>Connect a domain row to the graph</td>
+                <td><span class="ds-badge ds-badge--brand">0002</span></td>
+              </tr>
+              <tr>
+                <td>
+                  <code class="ds-code-inline">agent_node_summary()</code>
+                </td>
+                <td>Compact node context for agents</td>
+                <td><span class="ds-badge ds-badge--green">0005</span></td>
+              </tr>
+              <tr>
+                <td>
+                  <code class="ds-code-inline">contest_assertion()</code>
+                </td>
+                <td>Dispute an existing assertion</td>
+                <td><span class="ds-badge ds-badge--info">0004</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ======== NAV ======== -->
+      <section id="nav" class="ds-section">
+        <div class="ds-section-hd">
+          <h2>Sidebar Navigation</h2>
+          <span>09</span>
+        </div>
+        <p class="ds-note">
+          Section headers in uppercase Fraunces with brand-deep color. Active
+          item gets a warm background tint. First item in each section is
+          bold.
+        </p>
+
+        <div class="ds-nav-demo">
+          <div class="ds-nav-section">
+            <h4>Reference</h4>
+            <ul>
+              <li><a href="#" class="active">Core Contract</a></li>
+              <li><a href="#">Data Dictionary</a></li>
+              <li><a href="#">Schema Reference</a></li>
+            </ul>
+          </div>
+          <div class="ds-nav-section">
+            <h4>Data Model</h4>
+            <ul>
+              <li><a href="#">Overview</a></li>
+              <li><a href="#">Security</a></li>
+              <li><a href="#">Profiles</a></li>
+            </ul>
+          </div>
+          <div class="ds-nav-section">
+            <h4>Cookbooks</h4>
+            <ul>
+              <li><a href="#">Quickstart</a></li>
+              <li><a href="#">CRM Example</a></li>
+            </ul>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- ======== Scripts ======== -->
+    <script is:inline>
+      (() => {
+        // --- Theme Toggle ---
+        const widget = document.querySelector("[data-theme-widget]");
+        if (!widget) return;
+
+        const btn = widget.querySelector("button");
+        const menu = widget.querySelector("ul");
+        const label = widget.querySelector("[data-theme-label]");
+        const root = document.documentElement;
+        const storageKey = "rye-theme-mode";
+        const media = window.matchMedia("(prefers-color-scheme: dark)");
+
+        function currentMode() {
+          try {
+            const s = localStorage.getItem(storageKey);
+            if (s === "light" || s === "dark" || s === "system") return s;
+          } catch {}
+          return "system";
+        }
+
+        function applyMode(mode) {
+          const resolved =
+            mode === "system" ? (media.matches ? "dark" : "light") : mode;
+          root.setAttribute("data-theme-mode", mode);
+          root.setAttribute("data-theme", resolved);
+          label.textContent =
+            mode.charAt(0).toUpperCase() + mode.slice(1);
+          try {
+            localStorage.setItem(storageKey, mode);
+          } catch {}
+
+          menu.querySelectorAll("li").forEach((li) => {
+            li.setAttribute(
+              "aria-selected",
+              li.dataset.value === mode ? "true" : "false"
+            );
+          });
+        }
+
+        // Init label
+        const init = currentMode();
+        label.textContent =
+          init.charAt(0).toUpperCase() + init.slice(1);
+        applyMode(init);
+
+        btn.addEventListener("click", () => {
+          const open = menu.hidden;
+          menu.hidden = !open;
+          btn.setAttribute("aria-expanded", open ? "true" : "false");
+        });
+
+        menu.addEventListener("click", (e) => {
+          const li = e.target.closest("li");
+          if (!li || !li.dataset.value) return;
+          applyMode(li.dataset.value);
+          menu.hidden = true;
+          btn.setAttribute("aria-expanded", "false");
+        });
+
+        document.addEventListener("click", (e) => {
+          if (!widget.contains(e.target)) {
+            menu.hidden = true;
+            btn.setAttribute("aria-expanded", "false");
+          }
+        });
+
+        document.addEventListener("keydown", (e) => {
+          if (e.key === "Escape" && !menu.hidden) {
+            menu.hidden = true;
+            btn.setAttribute("aria-expanded", "false");
+            btn.focus();
+          }
+        });
+
+        if (typeof media.addEventListener === "function") {
+          media.addEventListener("change", () => {
+            if (currentMode() === "system") applyMode("system");
+          });
+        }
+
+        // --- Custom Selects ---
+        document.querySelectorAll("[data-select]").forEach((sel) => {
+          const trigger = sel.querySelector(".ds-select-trigger");
+          const dropdown = sel.querySelector(".ds-select-menu");
+          const valueSpan = trigger.querySelector("span");
+
+          trigger.addEventListener("click", () => {
+            const open = dropdown.hidden;
+            dropdown.hidden = !open;
+            trigger.setAttribute("aria-expanded", open ? "true" : "false");
+          });
+
+          dropdown.addEventListener("click", (e) => {
+            const opt = e.target.closest("[role='option']");
+            if (!opt) return;
+
+            dropdown
+              .querySelectorAll("[role='option']")
+              .forEach((o) => o.setAttribute("aria-selected", "false"));
+            opt.setAttribute("aria-selected", "true");
+            valueSpan.textContent = opt.textContent.trim();
+            dropdown.hidden = true;
+            trigger.setAttribute("aria-expanded", "false");
+          });
+
+          document.addEventListener("click", (e) => {
+            if (!sel.contains(e.target)) {
+              dropdown.hidden = true;
+              trigger.setAttribute("aria-expanded", "false");
+            }
+          });
+        });
+      })();
+    </script>
+  </body>
+</html>

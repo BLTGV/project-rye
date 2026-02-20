@@ -1,0 +1,136 @@
+<div class="search" data-search-root>
+  <label class="search-label" for="doc-search">Search Rye docs</label>
+  <input
+    class="search-input input input-bordered w-full"
+    id="doc-search"
+    type="search"
+    placeholder="Search Rye docs..."
+    autocomplete="off"
+    spellcheck="false"
+  />
+  <div class="search-results" id="doc-search-results" hidden></div>
+</div>
+
+<script is:inline>
+  (() => {
+    const root = document.querySelector("[data-search-root]");
+    const input = document.getElementById("doc-search");
+    const panel = document.getElementById("doc-search-results");
+
+    if (!root || !input || !panel) return;
+
+    let index = [];
+    let loading = null;
+
+    async function ensureIndex() {
+      if (index.length > 0) return index;
+      if (!loading) {
+        loading = fetch("/search-index.json")
+          .then((res) => (res.ok ? res.json() : []))
+          .then((items) =>
+            items.map((item) => ({
+              ...item,
+              _title: item.title.toLowerCase(),
+              _section: item.section.toLowerCase(),
+              _body: item.body.toLowerCase(),
+            }))
+          )
+          .catch(() => []);
+      }
+      index = await loading;
+      return index;
+    }
+
+    function score(item, query, terms) {
+      let points = 0;
+      if (item._title.includes(query)) points += 8;
+      if (item._section.includes(query)) points += 3;
+      if (item._body.includes(query)) points += 1;
+
+      for (const term of terms) {
+        if (item._title.includes(term)) points += 4;
+        if (item._section.includes(term)) points += 2;
+        if (item._body.includes(term)) points += 1;
+      }
+
+      return points;
+    }
+
+    function clearResults() {
+      panel.replaceChildren();
+      panel.hidden = true;
+    }
+
+    function renderResults(results, query) {
+      panel.replaceChildren();
+
+      if (results.length === 0) {
+        const empty = document.createElement("p");
+        empty.className = "search-empty";
+        empty.textContent = `No matches for \"${query}\".`;
+        panel.appendChild(empty);
+        panel.hidden = false;
+        return;
+      }
+
+      const list = document.createElement("ul");
+      list.className = "search-list";
+
+      for (const item of results.slice(0, 8)) {
+        const li = document.createElement("li");
+        const link = document.createElement("a");
+        link.href = item.url;
+        link.className = "search-item";
+
+        const title = document.createElement("strong");
+        title.textContent = item.title;
+
+        const meta = document.createElement("span");
+        meta.className = "search-meta";
+        meta.textContent = `${item.section} • ${item.excerpt}`;
+
+        link.append(title, meta);
+        li.appendChild(link);
+        list.appendChild(li);
+      }
+
+      panel.appendChild(list);
+      panel.hidden = false;
+    }
+
+    input.addEventListener("focus", () => {
+      void ensureIndex();
+    });
+
+    input.addEventListener("input", async () => {
+      const query = input.value.trim().toLowerCase();
+      if (!query) {
+        clearResults();
+        return;
+      }
+
+      const terms = query.split(/\s+/).filter(Boolean);
+      const docs = await ensureIndex();
+      const ranked = docs
+        .map((item) => ({ item, score: score(item, query, terms) }))
+        .filter((entry) => entry.score > 0)
+        .sort((a, b) => b.score - a.score)
+        .map((entry) => entry.item);
+
+      renderResults(ranked, query);
+    });
+
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        clearResults();
+        input.blur();
+      }
+    });
+
+    document.addEventListener("click", (event) => {
+      if (!root.contains(event.target)) {
+        clearResults();
+      }
+    });
+  })();
+</script>

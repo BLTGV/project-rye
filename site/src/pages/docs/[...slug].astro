@@ -1,0 +1,86 @@
+---
+import { getCollection, render } from "astro:content";
+import type { CollectionEntry } from "astro:content";
+import DocsLayout from "../../layouts/DocsLayout.astro";
+import { buildNavigation, sectionFromSlug, titleFromEntry, SECTION_TITLES } from "../../lib/docs";
+
+export const prerender = true;
+
+export async function getStaticPaths() {
+  const entries = await getCollection("docs");
+  const nav = buildNavigation(entries);
+
+  return entries.map((doc) => ({
+    params: { slug: doc.slug },
+    props: { doc, nav },
+  }));
+}
+
+const { doc, nav } = Astro.props as {
+  doc: CollectionEntry<"docs">;
+  nav: ReturnType<typeof buildNavigation>;
+};
+
+const sectionId = doc.data.section ?? sectionFromSlug(doc.slug);
+const sectionTitle = SECTION_TITLES[sectionId] ?? sectionId;
+const pageTitle = titleFromEntry(doc);
+const { Content, headings } = await render(doc);
+---
+
+<DocsLayout
+  title={`${pageTitle} | Project Rye`}
+  description={doc.data.description}
+  nav={nav}
+  currentSlug={doc.slug}
+>
+  <div class="doc-with-toc">
+    <article class="doc-article">
+      <header class="doc-header">
+        <p class="eyebrow">{sectionTitle}</p>
+        <h1>{pageTitle}</h1>
+        {doc.data.description && <p>{doc.data.description}</p>}
+        {doc.data.sourcePath && (
+          <p class="source-path">Source file: <code>{doc.data.sourcePath}</code></p>
+        )}
+      </header>
+
+      {
+        headings.length > 0 && (
+          <nav class="doc-toc doc-toc--inline" aria-label="On this page">
+            <h2>On this page</h2>
+            <ul>
+              {headings
+                .filter((heading) => heading.depth <= 3)
+                .slice(0, 12)
+                .map((heading) => (
+                  <li><a href={`#${heading.slug}`}>{heading.text}</a></li>
+                ))}
+            </ul>
+          </nav>
+        )
+      }
+
+      <div class="prose">
+        <Content />
+      </div>
+    </article>
+
+    {
+      headings.length > 0 && (
+        <aside class="doc-toc-rail">
+          <nav class="doc-toc" aria-label="On this page">
+            <h2>On this page</h2>
+            <ul>
+              {headings
+                .filter((heading) => heading.depth <= 3)
+                .slice(0, 16)
+                .map((heading) => (
+                  <li><a href={`#${heading.slug}`}>{heading.text}</a></li>
+                ))}
+            </ul>
+          </nav>
+        </aside>
+      )
+    }
+  </div>
+</DocsLayout>

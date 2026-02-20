@@ -1,0 +1,126 @@
+---
+import type { NavSection } from "../lib/docs";
+import SearchBox from "../components/SearchBox.astro";
+import ThemeMode from "../components/ThemeMode.astro";
+import "../styles/global.css";
+
+interface Props {
+  title: string;
+  description?: string;
+  nav: NavSection[];
+  currentSlug?: string;
+  hideSidebar?: boolean;
+}
+
+const {
+  title,
+  description = "Project Rye documentation for an open source, agent-native temporal knowledge graph data model in PostgreSQL.",
+  nav,
+  currentSlug,
+  hideSidebar = false,
+} = Astro.props;
+
+const currentYear = new Date().getFullYear();
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <script is:inline>
+      (() => {
+        const storageKey = "rye-theme-mode";
+        const root = document.documentElement;
+        let mode = "system";
+
+        try {
+          const stored = window.localStorage.getItem(storageKey);
+          if (stored === "light" || stored === "dark" || stored === "system") {
+            mode = stored;
+          }
+        } catch {
+          mode = "system";
+        }
+
+        const prefersDark =
+          typeof window.matchMedia === "function" &&
+          window.matchMedia("(prefers-color-scheme: dark)").matches;
+        const resolved = mode === "system" ? (prefersDark ? "dark" : "light") : mode;
+
+        root.setAttribute("data-theme-mode", mode);
+        root.setAttribute("data-theme", resolved);
+      })();
+    </script>
+  </head>
+  <body>
+    <div class="page-bg" aria-hidden="true"></div>
+    <div class="grain" aria-hidden="true"></div>
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="brand" href="/">
+          <img
+            src="/logo.svg"
+            data-brand-logo
+            data-logo-light="/logo.svg"
+            data-logo-dark="/logo-dark.svg"
+            alt="Rye"
+            width="148"
+            height="42"
+          />
+          <span>Open source temporal knowledge graph schema for PostgreSQL</span>
+        </a>
+        <div class="topbar-tools">
+          <SearchBox />
+          <ThemeMode />
+        </div>
+      </div>
+    </header>
+
+    <div class={hideSidebar ? "site-grid site-grid--wide" : "site-grid"}>
+      {!hideSidebar && (
+        <aside class="sidebar">
+          <nav aria-label="Documentation navigation">
+            {nav.map((section) => (
+              <section class="nav-section">
+                <h2>{section.title}</h2>
+                <ul>
+                  {section.items.map((item) => (
+                    <li>
+                      <a
+                        href={item.url}
+                        aria-current={item.slug === currentSlug ? "page" : undefined}
+                      >
+                        {item.title}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ))}
+          </nav>
+        </aside>
+      )}
+
+      <main class="content">
+        <slot />
+      </main>
+    </div>
+
+    <footer class="site-footer">
+      <div class="footer-left">
+        <p>&copy; {currentYear} Open BLT &middot; MIT License</p>
+      </div>
+      <nav class="footer-links" aria-label="Footer navigation">
+        <a href="/docs/getting-started/quickstart/">Quickstart</a>
+        <a href="/docs/model/overview/">Overview</a>
+        <a href="/docs/model/deployment/">Architecture</a>
+        <a href="/docs/model/security/">Security</a>
+        <a href="https://github.com/BLTGV/project-rye">GitHub</a>
+      </nav>
+    </footer>
+  </body>
+</html>
