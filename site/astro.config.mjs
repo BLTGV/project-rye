@@ -4,6 +4,7 @@ import tailwindcss from "@tailwindcss/vite";
 import remarkGfm from "remark-gfm";
 
 export default defineConfig({
+  site: "https://projectrye.dev",
   output: "server",
   adapter: cloudflare({
     imageService: "compile",

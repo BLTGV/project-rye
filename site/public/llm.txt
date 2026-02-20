@@ -1,5 +1,6 @@
 Project: Project Rye
 Type: Agent-native temporal knowledge graph schema for PostgreSQL
+URL: https://projectrye.dev
 Source of truth: Markdown files in /docs and /design
 Repository: https://github.com/BLTGV/project-rye
 
