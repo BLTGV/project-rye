@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": [
+    "schema_type",
+    "schema_version",
+    "run_id",
+    "scenario",
+    "input_kind",
+    "source",
+    "stage_status",
+    "lineage",
+    "mapping",
+    "destination_table"
+  ],
+  "properties": {
+    "schema_type": { "const": "rye.tabular_intake.row_event_properties.v1" },
+    "schema_version": { "const": 1 },
+    "run_id": { "type": "string" },
+    "scenario": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+    "input_kind": { "enum": ["source_row", "mapped_record", "rye_stage_record"] },
+    "source": {
+      "type": "object",
+      "required": ["path", "format", "table_name", "sheet_name", "header_row", "row_number", "record_number"],
+      "properties": {
+        "path": { "type": "string" },
+        "format": { "enum": ["csv", "xlsx"] },
+        "table_name": { "type": "string" },
+        "sheet_name": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "header_row": { "type": "integer", "minimum": 1 },
+        "row_number": { "type": "integer", "minimum": 1 },
+        "record_number": { "type": "integer", "minimum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "stage_status": { "type": "string" },
+    "lineage": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "mapping": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+    "destination_table": { "anyOf": [{ "type": "string" }, { "type": "null" }] }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["schema_type", "schema_version", "path"],
+  "properties": {
+    "schema_type": { "const": "rye.tabular_intake.source_file_location.v1" },
+    "schema_version": { "const": 1 },
+    "path": { "type": "string" }
+  },
+  "additionalProperties": false
+}

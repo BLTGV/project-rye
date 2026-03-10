@@ -1,0 +1,5 @@
+Invoice Number,Customer External ID,Invoice Date,Currency,Line Number,SKU,Description,Quantity,Unit Price
+INV-100,C-100,2024-04-01,USD,1,SKU-RED,Red Widget,2,19.95
+INV-100,C-100,2024-04-01,USD,2,SKU-BLU,Blue Widget,1,9.50
+INV-101,C-101,2024-04-02,USD,1,SKU-GRN,Green Widget,5,4.00
+INV-101,C-101,2024-04-02,USD,2,SVC-SETUP,Setup Fee,1,25.00

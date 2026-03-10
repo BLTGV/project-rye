@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": [
+    "schema_type",
+    "schema_version",
+    "run_id",
+    "scenario",
+    "input_path",
+    "completed_at",
+    "input_kinds",
+    "mappings",
+    "stage_statuses",
+    "source_files",
+    "run_fingerprint_sha1"
+  ],
+  "properties": {
+    "schema_type": { "const": "rye.tabular_intake.run_node.v1" },
+    "schema_version": { "const": 1 },
+    "run_id": { "type": "string" },
+    "scenario": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+    "input_path": { "type": "string" },
+    "completed_at": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+    "input_kinds": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "mappings": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "stage_statuses": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "source_files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "format", "table_name", "sheet_name", "content_sha1"],
+        "properties": {
+          "path": { "type": "string" },
+          "format": { "enum": ["csv", "xlsx"] },
+          "table_name": { "type": "string" },
+          "sheet_name": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+          "content_sha1": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "run_fingerprint_sha1": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+    "summary": {
+      "type": "object",
+      "required": ["source_rows", "mapped_records", "stage_records"],
+      "properties": {
+        "source_rows": { "type": "integer", "minimum": 0 },
+        "mapped_records": { "type": "integer", "minimum": 0 },
+        "stage_records": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Rye Tabular Intake"
+  short_description: "Extract and map CSV/XLSX sources for Rye-tracked loads"
+  default_prompt: "Inspect tabular source files, emit row lineage, map fields, and stage import tracking records for Rye."

@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": [
+    "schema_type",
+    "schema_version",
+    "ingest_status",
+    "source_format",
+    "source_path",
+    "source_table",
+    "source_sheet",
+    "source_row_number"
+  ],
+  "properties": {
+    "schema_type": { "const": "rye.tabular_intake.stage_properties.v1" },
+    "schema_version": { "const": 1 },
+    "ingest_status": { "type": "string" },
+    "source_format": { "enum": ["csv", "xlsx"] },
+    "source_path": { "type": "string" },
+    "source_table": { "type": "string" },
+    "source_sheet": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+    "source_row_number": { "type": "integer", "minimum": 1 },
+    "raw_fields": {
+      "type": "object",
+      "additionalProperties": {
+        "anyOf": [{ "type": "string" }, { "type": "null" }]
+      }
+    },
+    "destination_table": { "type": "string" },
+    "mapping": { "type": "string" },
+    "mapped_record": { "type": "object" },
+    "mapping_issues": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+  "additionalProperties": true
+}

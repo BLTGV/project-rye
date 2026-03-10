@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": [
+    "schema_type",
+    "schema_version",
+    "path",
+    "format",
+    "table_name",
+    "sheet_name",
+    "scenario",
+    "content_sha1"
+  ],
+  "properties": {
+    "schema_type": { "const": "rye.tabular_intake.source_file_artifact.v1" },
+    "schema_version": { "const": 1 },
+    "path": { "type": "string" },
+    "format": { "enum": ["csv", "xlsx"] },
+    "table_name": { "type": "string" },
+    "sheet_name": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+    "scenario": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+    "content_sha1": { "anyOf": [{ "type": "string" }, { "type": "null" }] }
+  },
+  "additionalProperties": false
+}

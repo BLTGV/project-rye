@@ -1,0 +1,34 @@
+{
+  "name": "customers_to_demo_contacts",
+  "destination_table": "demo_contacts",
+  "operation": "upsert",
+  "record": {
+    "external_id": {
+      "column": "Customer ID",
+      "trim": true,
+      "required": true
+    },
+    "full_name": {
+      "column": "Name",
+      "trim": true,
+      "required": true
+    },
+    "email": {
+      "column": "Email",
+      "trim": true,
+      "lowercase": true,
+      "null_if": [
+        "",
+        "n/a"
+      ]
+    },
+    "lifecycle": {
+      "column": "Status",
+      "trim": true
+    },
+    "created_at": {
+      "column": "Created At",
+      "convert": "timestamp"
+    }
+  }
+}

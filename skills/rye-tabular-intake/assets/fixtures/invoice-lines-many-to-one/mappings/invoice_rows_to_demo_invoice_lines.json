@@ -1,0 +1,35 @@
+{
+  "name": "invoice_rows_to_demo_invoice_lines",
+  "destination_table": "demo_invoice_lines",
+  "operation": "upsert",
+  "record": {
+    "invoice_number": {
+      "column": "Invoice Number",
+      "trim": true,
+      "required": true
+    },
+    "line_number": {
+      "column": "Line Number",
+      "convert": "integer",
+      "required": true
+    },
+    "sku": {
+      "column": "SKU",
+      "trim": true
+    },
+    "description": {
+      "column": "Description",
+      "trim": true
+    },
+    "quantity": {
+      "column": "Quantity",
+      "convert": "integer",
+      "required": true
+    },
+    "unit_price": {
+      "column": "Unit Price",
+      "convert": "number",
+      "required": true
+    }
+  }
+}

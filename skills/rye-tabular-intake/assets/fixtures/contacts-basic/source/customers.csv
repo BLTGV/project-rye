@@ -1,0 +1,4 @@
+Customer ID,Name,Email,Status,Created At
+C-100,Ada Lovelace,ADA@EXAMPLE.COM,Active,2024-01-02T03:04:05Z
+C-101,Grace Hopper,,Prospect,2024-02-03T04:05:06Z
+C-102,Alan Turing,alan@example.com,Inactive,2024-03-04T05:06:07Z

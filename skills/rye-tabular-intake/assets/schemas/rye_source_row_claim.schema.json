@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": [
+    "schema_type",
+    "schema_version",
+    "kind",
+    "source",
+    "lineage",
+    "row",
+    "raw",
+    "run_id",
+    "scenario",
+    "payload_hash",
+    "recorded_via"
+  ],
+  "properties": {
+    "schema_type": { "const": "rye.tabular_intake.source_row_claim.v1" },
+    "schema_version": { "const": 1 },
+    "kind": { "const": "source_row" },
+    "source": {
+      "type": "object",
+      "required": ["path", "format", "table_name", "sheet_name", "header_row", "row_number", "record_number"],
+      "properties": {
+        "path": { "type": "string" },
+        "format": { "enum": ["csv", "xlsx"] },
+        "table_name": { "type": "string" },
+        "sheet_name": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "header_row": { "type": "integer", "minimum": 1 },
+        "row_number": { "type": "integer", "minimum": 1 },
+        "record_number": { "type": "integer", "minimum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "lineage": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "row": {
+      "type": "object",
+      "additionalProperties": {
+        "anyOf": [{ "type": "string" }, { "type": "null" }]
+      }
+    },
+    "raw": {
+      "type": "array",
+      "items": {
+        "anyOf": [{ "type": "string" }, { "type": "null" }]
+      }
+    },
+    "run_id": { "type": "string" },
+    "scenario": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+    "payload_hash": { "type": "string" },
+    "recorded_via": { "const": "tabular_commit_rye.mts" }
+  },
+  "additionalProperties": false
+}

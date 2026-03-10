@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": [
+    "schema_type",
+    "schema_version",
+    "source",
+    "scenario",
+    "latest_run_id",
+    "latest_event_type",
+    "latest_ingest_status",
+    "latest_lineage",
+    "latest_mapping",
+    "latest_destination_table"
+  ],
+  "properties": {
+    "schema_type": { "const": "rye.tabular_intake.row_node.v1" },
+    "schema_version": { "const": 1 },
+    "source": {
+      "type": "object",
+      "required": ["path", "format", "table_name", "sheet_name", "header_row", "row_number", "record_number"],
+      "properties": {
+        "path": { "type": "string" },
+        "format": { "enum": ["csv", "xlsx"] },
+        "table_name": { "type": "string" },
+        "sheet_name": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "header_row": { "type": "integer", "minimum": 1 },
+        "row_number": { "type": "integer", "minimum": 1 },
+        "record_number": { "type": "integer", "minimum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "scenario": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+    "latest_run_id": { "type": "string" },
+    "latest_event_type": {
+      "enum": [
+        "rye_tabular_intake_row_extracted",
+        "rye_tabular_intake_row_mapped",
+        "rye_tabular_intake_row_staged"
+      ]
+    },
+    "latest_ingest_status": { "type": "string" },
+    "latest_lineage": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "latest_mapping": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+    "latest_destination_table": { "anyOf": [{ "type": "string" }, { "type": "null" }] }
+  },
+  "additionalProperties": false
+}

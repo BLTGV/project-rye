@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": [
+    "schema_type",
+    "schema_version",
+    "run_id",
+    "scenario",
+    "event_phase",
+    "input_path",
+    "input_records",
+    "source_rows",
+    "mapped_records",
+    "stage_records",
+    "input_kinds",
+    "mappings",
+    "stage_statuses",
+    "source_files",
+    "run_fingerprint_sha1"
+  ],
+  "properties": {
+    "schema_type": { "const": "rye.tabular_intake.run_event_properties.v1" },
+    "schema_version": { "const": 1 },
+    "run_id": { "type": "string" },
+    "scenario": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+    "event_phase": { "enum": ["started", "completed"] },
+    "input_path": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+    "input_records": { "anyOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] },
+    "source_rows": { "anyOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] },
+    "mapped_records": { "anyOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] },
+    "stage_records": { "anyOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] },
+    "input_kinds": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "mappings": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "stage_statuses": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "source_files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "format", "table_name", "sheet_name", "content_sha1"],
+        "properties": {
+          "path": { "type": "string" },
+          "format": { "enum": ["csv", "xlsx"] },
+          "table_name": { "type": "string" },
+          "sheet_name": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+          "content_sha1": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "run_fingerprint_sha1": { "anyOf": [{ "type": "string" }, { "type": "null" }] }
+  },
+  "additionalProperties": false
+}
