@@ -83,6 +83,21 @@ SELECT record_artifact(
 );
 ```
 
+## Tabular Intake Convention
+
+When source data arrives as CSV or XLSX files instead of live domain tables:
+
+- inspect first, then confirm mappings with the user before writing transforms
+- keep extraction lossless by preserving source column names and raw row values
+- use NDJSON as the interchange format between extract, map, and stage steps
+- treat `tabular_commit_rye.mts` as the only database write boundary
+- use `run_id` as the run identity and `run_fingerprint_sha1` as duplicate protection
+- reject repeated source content by default unless the operator explicitly allows a replay
+
+The reference implementation for this convention lives in:
+
+- `skills/rye-tabular-intake/SKILL.md`
+
 ## Event Convention
 
 - Use `record_event()` for all event creation. Never insert into `events` and `event_participants` separately.

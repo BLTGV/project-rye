@@ -18,6 +18,23 @@ All Rye functions include `SET search_path` in their definitions, so calling `ry
 
 ## Safe Write Path
 
+### Tabular intake workflow
+
+For CSV and XLSX imports that need inspection, conversational mapping, Rye staging, and duplicate-run protection, use the tabular intake skill:
+
+- `skills/rye-tabular-intake/SKILL.md`
+
+That skill provides:
+
+- file inspection before mapping
+- row-level NDJSON extraction
+- conversational or declarative column mapping
+- Rye staging envelopes for import tracking
+- commit-time writes into `nodes`, `events`, `assertions`, and `artifacts`
+- SHA1-based duplicate-run detection for repeated source content
+
+Use it when source data starts outside PostgreSQL and needs to be normalized into Rye-tracked intake runs before final domain-table load.
+
 ### Recording events
 
 Use `record_event()` for all event creation. It handles UUID generation and participant linking in a single call:

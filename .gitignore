@@ -2,3 +2,4 @@
 .mcp.json
 .env
 *.log
+tmp/
