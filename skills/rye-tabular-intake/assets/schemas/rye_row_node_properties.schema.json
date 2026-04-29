@@ -4,7 +4,7 @@
   "required": [
     "schema_type",
     "schema_version",
-    "source",
+    "source_set",
     "scenario",
     "latest_run_id",
     "latest_event_type",
@@ -14,19 +14,46 @@
     "latest_destination_table"
   ],
   "properties": {
-    "schema_type": { "const": "rye.tabular_intake.row_node.v1" },
-    "schema_version": { "const": 1 },
-    "source": {
+    "schema_type": { "const": "rye.tabular_intake.row_node.v2" },
+    "schema_version": { "const": 2 },
+    "source_set": {
       "type": "object",
-      "required": ["path", "format", "table_name", "sheet_name", "header_row", "row_number", "record_number"],
+      "required": ["group_key", "primary", "sources", "row_count"],
       "properties": {
-        "path": { "type": "string" },
-        "format": { "enum": ["csv", "xlsx"] },
-        "table_name": { "type": "string" },
-        "sheet_name": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
-        "header_row": { "type": "integer", "minimum": 1 },
-        "row_number": { "type": "integer", "minimum": 1 },
-        "record_number": { "type": "integer", "minimum": 1 }
+        "group_key": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "primary": {
+          "type": "object",
+          "required": ["path", "format", "table_name", "sheet_name", "header_row", "row_number", "record_number"],
+          "properties": {
+            "path": { "type": "string" },
+            "format": { "enum": ["csv", "xlsx"] },
+            "table_name": { "type": "string" },
+            "sheet_name": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+            "header_row": { "type": "integer", "minimum": 1 },
+            "row_number": { "type": "integer", "minimum": 1 },
+            "record_number": { "type": "integer", "minimum": 1 }
+          },
+          "additionalProperties": false
+        },
+        "sources": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["path", "format", "table_name", "sheet_name", "header_row", "row_number", "record_number"],
+            "properties": {
+              "path": { "type": "string" },
+              "format": { "enum": ["csv", "xlsx"] },
+              "table_name": { "type": "string" },
+              "sheet_name": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+              "header_row": { "type": "integer", "minimum": 1 },
+              "row_number": { "type": "integer", "minimum": 1 },
+              "record_number": { "type": "integer", "minimum": 1 }
+            },
+            "additionalProperties": false
+          }
+        },
+        "row_count": { "type": "integer", "minimum": 1 }
       },
       "additionalProperties": false
     },

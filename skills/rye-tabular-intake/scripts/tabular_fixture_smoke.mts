@@ -76,6 +76,7 @@ await runCli(help, async (args) => {
           source_input: scenario.sourceInput,
           source_rows: scenario.sourceCount,
           mapped_records: scenario.mappedCount,
+          grouped_records: scenario.groupedCount,
           stage_records: scenario.stageCount,
         })),
         database_summary: summary,
@@ -94,6 +95,7 @@ interface ScenarioRun {
   stageRowsPath: string;
   sourceCount: number;
   mappedCount: number;
+  groupedCount: number;
   stageCount: number;
 }
 
@@ -143,6 +145,10 @@ async function buildScenarioOutputs(outputDir: string): Promise<ScenarioRun[]> {
         "--config",
         path.join(invoiceFixture, "mappings", "invoice_rows_to_demo_invoice_lines.json"),
       ],
+      groupArgs: [
+        "--module",
+        path.join(invoiceFixture, "mappings", "invoice_rows_to_demo_invoices.mts"),
+      ],
       outputDir,
     }),
   ];
@@ -153,6 +159,7 @@ async function runScenario(config: {
   sourceInput: string;
   extractArgs: string[];
   mapArgs: string[];
+  groupArgs?: string[];
   outputDir: string;
 }): Promise<ScenarioRun> {
   const scenarioDir = path.join(config.outputDir, config.name);
@@ -167,7 +174,11 @@ async function runScenario(config: {
   await fs.writeFile(sourceRowsPath, sourceRows, "utf8");
 
   const mappedRows = await runNodeScript("tabular_map.mts", [...config.mapArgs, "--input", sourceRowsPath]);
-  await fs.writeFile(mappedRecordsPath, mappedRows, "utf8");
+  const groupedRows = config.groupArgs
+    ? await runNodeScript("tabular_group.mts", [...config.groupArgs, "--input", sourceRowsPath])
+    : "";
+  const combinedMappedRows = joinNdjson(mappedRows, groupedRows);
+  await fs.writeFile(mappedRecordsPath, combinedMappedRows, "utf8");
 
   const stageRows = await runNodeScript("tabular_stage_rye.mts", ["--input", sourceRowsPath, "--status", "extracted"]);
   await fs.writeFile(stageRowsPath, stageRows, "utf8");
@@ -179,7 +190,8 @@ async function runScenario(config: {
     mappedRecordsPath,
     stageRowsPath,
     sourceCount: countNdjson(sourceRows),
-    mappedCount: countNdjson(mappedRows),
+    mappedCount: countNdjson(combinedMappedRows),
+    groupedCount: countNdjson(groupedRows),
     stageCount: countNdjson(stageRows),
   };
 }
@@ -407,4 +419,11 @@ async function runPsqlCommand(target: PsqlTarget, sql: string): Promise<void> {
 
 function countNdjson(text: string): number {
   return text.split(/\r?\n/).filter((line) => line.trim().length > 0).length;
+}
+
+function joinNdjson(...chunks: string[]): string {
+  const lines = chunks
+    .flatMap((chunk) => chunk.split(/\r?\n/))
+    .filter((line) => line.trim().length > 0);
+  return lines.length > 0 ? `${lines.join("\n")}\n` : "";
 }

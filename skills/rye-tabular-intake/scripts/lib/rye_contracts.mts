@@ -2,6 +2,8 @@ import {
   isMappedRecord,
   isRyeStageRecord,
   isSourceRow,
+  primarySourceFromRecord,
+  sourceSetFromRecord,
   type MappedRecord,
   type PipelineRecord,
   type SourceDescriptor,
@@ -66,9 +68,9 @@ export function buildRowNodeProperties(input: {
   scenario?: string;
 }): Record<string, unknown> {
   return {
-    schema_type: "rye.tabular_intake.row_node.v1",
-    schema_version: 1,
-    source: input.record.source,
+    schema_type: "rye.tabular_intake.row_node.v2",
+    schema_version: 2,
+    source_set: sourceSetFromRecord(input.record),
     scenario: input.scenario ?? null,
     latest_run_id: input.runId,
     latest_event_type: eventTypeForRecord(input.record),
@@ -123,12 +125,12 @@ export function buildRowEventProperties(input: {
   record: PipelineRecord;
 }): Record<string, unknown> {
   return {
-    schema_type: "rye.tabular_intake.row_event_properties.v1",
-    schema_version: 1,
+    schema_type: "rye.tabular_intake.row_event_properties.v2",
+    schema_version: 2,
     run_id: input.runId,
     scenario: input.scenario ?? null,
     input_kind: input.record.kind,
-    source: input.record.source,
+    source_set: sourceSetFromRecord(input.record),
     stage_status: statusForRecord(input.record),
     lineage: "lineage" in input.record ? input.record.lineage : [],
     mapping: isMappedRecord(input.record) ? input.record.mapping : null,
@@ -160,13 +162,13 @@ export function buildClaim(input: {
 
   if (isMappedRecord(input.record)) {
     return {
-      schema_type: "rye.tabular_intake.mapped_record_claim.v1",
-      schema_version: 1,
+      schema_type: "rye.tabular_intake.mapped_record_claim.v2",
+      schema_version: 2,
       kind: input.record.kind,
       mapping: input.record.mapping,
       destination_table: input.record.destination_table,
       operation: input.record.operation,
-      source: input.record.source,
+      source_set: input.record.source_set,
       lineage: input.record.lineage,
       record: input.record.record,
       meta: input.record.meta,
@@ -179,12 +181,12 @@ export function buildClaim(input: {
   }
 
   return {
-    schema_type: "rye.tabular_intake.stage_record_claim.v1",
-    schema_version: 1,
+    schema_type: "rye.tabular_intake.stage_record_claim.v2",
+    schema_version: 2,
     kind: input.record.kind,
     node_type: input.record.node_type,
     label: input.record.label,
-    source: input.record.source,
+    source_set: input.record.source_set,
     lineage: input.record.lineage,
     properties: input.record.properties,
     run_id: input.runId,
@@ -199,14 +201,10 @@ export function buildStageProperties(input: {
   status: string;
 }): Record<string, unknown> {
   const base: Record<string, unknown> = {
-    schema_type: "rye.tabular_intake.stage_properties.v1",
-    schema_version: 1,
+    schema_type: "rye.tabular_intake.stage_properties.v2",
+    schema_version: 2,
     ingest_status: input.status,
-    source_format: input.record.source.format,
-    source_path: input.record.source.path,
-    source_table: input.record.source.table_name,
-    source_sheet: input.record.source.sheet_name,
-    source_row_number: input.record.source.row_number,
+    source_set: sourceSetFromRecord(input.record),
   };
 
   if (input.record.kind === "source_row") {
@@ -279,13 +277,21 @@ export function statusForRecord(record: PipelineRecord): string {
 }
 
 export function summaryForRecord(record: PipelineRecord): string {
+  const source = primarySourceFromRecord(record);
+  const sourceSet = sourceSetFromRecord(record);
   if (isSourceRow(record)) {
-    return `Extracted ${record.source.table_name} row ${record.source.row_number}`;
+    return `Extracted ${source.table_name} row ${source.row_number}`;
   }
   if (isMappedRecord(record)) {
-    return `Mapped ${record.source.table_name} row ${record.source.row_number} to ${record.destination_table}`;
+    if (sourceSet.row_count > 1) {
+      return `Mapped ${sourceSet.row_count} ${source.table_name} rows to ${record.destination_table}`;
+    }
+    return `Mapped ${source.table_name} row ${source.row_number} to ${record.destination_table}`;
   }
-  return `Staged ${record.source.table_name} row ${record.source.row_number}`;
+  if (sourceSet.row_count > 1) {
+    return `Staged ${sourceSet.row_count} ${source.table_name} rows`;
+  }
+  return `Staged ${source.table_name} row ${source.row_number}`;
 }
 
 export function schemaFileForClaim(record: PipelineRecord): string {

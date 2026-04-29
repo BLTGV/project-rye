@@ -9,18 +9,15 @@ INSERT INTO public.demo_invoices (
     total_amount
 )
 SELECT
-    payload->'row'->>'Invoice Number' AS invoice_number,
-    max(payload->'row'->>'Customer External ID') AS customer_external_id,
-    max((payload->'row'->>'Invoice Date')::date) AS invoice_date,
-    max(payload->'row'->>'Currency') AS currency,
-    count(*)::integer AS line_count,
-    sum(
-        ((payload->'row'->>'Quantity')::numeric) *
-        ((payload->'row'->>'Unit Price')::numeric)
-    )::numeric(12,2) AS total_amount
-FROM public.demo_tabular_source_rows
+    payload->'record'->>'invoice_number' AS invoice_number,
+    payload->'record'->>'customer_external_id' AS customer_external_id,
+    (payload->'record'->>'invoice_date')::date AS invoice_date,
+    payload->'record'->>'currency' AS currency,
+    (payload->'record'->>'line_count')::integer AS line_count,
+    (payload->'record'->>'total_amount')::numeric(12,2) AS total_amount
+FROM public.demo_tabular_mapped_records
 WHERE scenario = 'invoice-lines-many-to-one'
-GROUP BY payload->'row'->>'Invoice Number'
+  AND payload->>'destination_table' = 'demo_invoices'
 ON CONFLICT (invoice_number) DO UPDATE
 SET customer_external_id = EXCLUDED.customer_external_id,
     invoice_date = EXCLUDED.invoice_date,

@@ -7,7 +7,7 @@
     "kind",
     "node_type",
     "label",
-    "source",
+    "source_set",
     "lineage",
     "properties",
     "run_id",
@@ -16,22 +16,49 @@
     "recorded_via"
   ],
   "properties": {
-    "schema_type": { "const": "rye.tabular_intake.stage_record_claim.v1" },
-    "schema_version": { "const": 1 },
+    "schema_type": { "const": "rye.tabular_intake.stage_record_claim.v2" },
+    "schema_version": { "const": 2 },
     "kind": { "const": "rye_stage_record" },
     "node_type": { "type": "string" },
     "label": { "type": "string" },
-    "source": {
+    "source_set": {
       "type": "object",
-      "required": ["path", "format", "table_name", "sheet_name", "header_row", "row_number", "record_number"],
+      "required": ["group_key", "primary", "sources", "row_count"],
       "properties": {
-        "path": { "type": "string" },
-        "format": { "enum": ["csv", "xlsx"] },
-        "table_name": { "type": "string" },
-        "sheet_name": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
-        "header_row": { "type": "integer", "minimum": 1 },
-        "row_number": { "type": "integer", "minimum": 1 },
-        "record_number": { "type": "integer", "minimum": 1 }
+        "group_key": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "primary": {
+          "type": "object",
+          "required": ["path", "format", "table_name", "sheet_name", "header_row", "row_number", "record_number"],
+          "properties": {
+            "path": { "type": "string" },
+            "format": { "enum": ["csv", "xlsx"] },
+            "table_name": { "type": "string" },
+            "sheet_name": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+            "header_row": { "type": "integer", "minimum": 1 },
+            "row_number": { "type": "integer", "minimum": 1 },
+            "record_number": { "type": "integer", "minimum": 1 }
+          },
+          "additionalProperties": false
+        },
+        "sources": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["path", "format", "table_name", "sheet_name", "header_row", "row_number", "record_number"],
+            "properties": {
+              "path": { "type": "string" },
+              "format": { "enum": ["csv", "xlsx"] },
+              "table_name": { "type": "string" },
+              "sheet_name": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+              "header_row": { "type": "integer", "minimum": 1 },
+              "row_number": { "type": "integer", "minimum": 1 },
+              "record_number": { "type": "integer", "minimum": 1 }
+            },
+            "additionalProperties": false
+          }
+        },
+        "row_count": { "type": "integer", "minimum": 1 }
       },
       "additionalProperties": false
     },
@@ -45,21 +72,53 @@
         "schema_type",
         "schema_version",
         "ingest_status",
-        "source_format",
-        "source_path",
-        "source_table",
-        "source_sheet",
-        "source_row_number"
+        "source_set"
       ],
       "properties": {
-        "schema_type": { "const": "rye.tabular_intake.stage_properties.v1" },
-        "schema_version": { "const": 1 },
+        "schema_type": { "const": "rye.tabular_intake.stage_properties.v2" },
+        "schema_version": { "const": 2 },
         "ingest_status": { "type": "string" },
-        "source_format": { "enum": ["csv", "xlsx"] },
-        "source_path": { "type": "string" },
-        "source_table": { "type": "string" },
-        "source_sheet": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
-        "source_row_number": { "type": "integer", "minimum": 1 },
+        "source_set": {
+          "type": "object",
+          "required": ["group_key", "primary", "sources", "row_count"],
+          "properties": {
+            "group_key": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+            "primary": {
+              "type": "object",
+              "required": ["path", "format", "table_name", "sheet_name", "header_row", "row_number", "record_number"],
+              "properties": {
+                "path": { "type": "string" },
+                "format": { "enum": ["csv", "xlsx"] },
+                "table_name": { "type": "string" },
+                "sheet_name": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+                "header_row": { "type": "integer", "minimum": 1 },
+                "row_number": { "type": "integer", "minimum": 1 },
+                "record_number": { "type": "integer", "minimum": 1 }
+              },
+              "additionalProperties": false
+            },
+            "sources": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": ["path", "format", "table_name", "sheet_name", "header_row", "row_number", "record_number"],
+                "properties": {
+                  "path": { "type": "string" },
+                  "format": { "enum": ["csv", "xlsx"] },
+                  "table_name": { "type": "string" },
+                  "sheet_name": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+                  "header_row": { "type": "integer", "minimum": 1 },
+                  "row_number": { "type": "integer", "minimum": 1 },
+                  "record_number": { "type": "integer", "minimum": 1 }
+                },
+                "additionalProperties": false
+              }
+            },
+            "row_count": { "type": "integer", "minimum": 1 }
+          },
+          "additionalProperties": false
+        },
         "raw_fields": {
           "type": "object",
           "additionalProperties": {

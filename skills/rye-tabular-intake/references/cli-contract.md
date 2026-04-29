@@ -1,5 +1,7 @@
 # CLI Contract
 
+This file defines command and NDJSON contracts. For guidance on building a domain-specific skill that consumes these contracts, read [extension-patterns.md](extension-patterns.md).
+
 ## Commands
 
 ### `tabular_inspect.mts`
@@ -37,6 +39,19 @@ Input:
 Output:
 - NDJSON stream of `mapped_record` objects
 
+### `tabular_group.mts`
+
+Input:
+- NDJSON on stdin or `--input <path>`
+- `--module <path>` required
+- `--key-export <name>` optional, default `groupKey`
+- `--reduce-export <name>` optional, default `reduce`
+- `--mapping <name>` optional override for output metadata
+
+Output:
+- NDJSON stream of grouped `mapped_record` objects
+- each output has a multi-row `source_set`
+
 ### `tabular_stage_rye.mts`
 
 Input:
@@ -53,12 +68,14 @@ Output:
 Input:
 - NDJSON on `--input <path>`
 - `--db-url <url>` or `--docker-container <name>` required
+- `--emit-sql` optional alternative to `--db-url` / `--docker-container`
 - `--run-id <value>` optional
 - `--scenario <value>` optional
 - `--allow-duplicate-source` optional override to permit a repeated source-file SHA1 fingerprint for the same run kind
 
 Output:
-- one JSON summary describing the Rye run node and inserted counts
+- direct execution mode: one JSON summary describing the Rye run node and inserted counts
+- SQL-only mode: one PostgreSQL SQL script ending with a summary `SELECT`
 - the summary includes `source_files[].content_sha1` and `run_fingerprint_sha1`
 
 ## When PostgreSQL Is Written
@@ -68,10 +85,13 @@ Only `tabular_commit_rye.mts` writes to PostgreSQL.
 - `tabular_inspect.mts` is read-only
 - `tabular_extract.mts` is read-only
 - `tabular_map.mts` is read-only
+- `tabular_group.mts` is read-only
 - `tabular_stage_rye.mts` is read-only
 - `tabular_commit_rye.mts` is the database write step
 
 That means you can inspect, extract, map, and stage files freely without creating Rye records, as long as you do not run `tabular_commit_rye.mts`.
+
+`tabular_commit_rye.mts --emit-sql` does not connect to PostgreSQL by itself. It prints the SQL that will write to PostgreSQL when executed by another tool.
 
 ## Run Identity vs Duplicate Detection
 
@@ -101,6 +121,39 @@ So the behavior is:
   - allowed, because the fingerprint differs
 - same file content, same run kind, `--allow-duplicate-source`
   - allowed intentionally
+
+## SQL-Only Commit Mode
+
+Use `--emit-sql` when the agent cannot open a PostgreSQL connection but can execute SQL through another surface, such as a SQL console or Supabase MCP.
+
+```bash
+node skills/rye-tabular-intake/scripts/tabular_commit_rye.mts \
+  --emit-sql \
+  --input /tmp/parent-records.ndjson \
+  --run-id example-domain:parents:2026-04-29 \
+  > /tmp/rye-tabular-intake-commit.sql
+```
+
+Then execute `/tmp/rye-tabular-intake-commit.sql` through the SQL-only tool.
+
+Requirements:
+
+- run the whole script in one call/session
+- the SQL tool must allow multi-statement scripts
+- the SQL tool must allow a temporary table inside a transaction
+- Rye must already be installed in the target database
+- the source files referenced by the NDJSON must be readable locally when the SQL is generated, because the CLI computes source hashes before emitting SQL
+
+The emitted script:
+
+- starts a transaction
+- sets `search_path` locally
+- creates a temporary context table for generated UUIDs
+- applies the same duplicate-source guard unless `--allow-duplicate-source` is used
+- writes run, row, event, assertion, and artifact records
+- commits and ends with a JSON summary `SELECT`
+
+If the SQL-only tool rejects duplicate source content, regenerate the script with `--allow-duplicate-source` only when the repeated import is intentional.
 
 ## NDJSON Objects
 
@@ -135,14 +188,29 @@ So the behavior is:
   "mapping": "customers_to_contacts",
   "destination_table": "contacts",
   "operation": "upsert",
-  "source": {
-    "path": "/abs/path/customers.xlsx",
-    "format": "xlsx",
-    "table_name": "Customers",
-    "sheet_name": "Customers",
-    "header_row": 1,
-    "row_number": 2,
-    "record_number": 1
+  "source_set": {
+    "group_key": null,
+    "primary": {
+      "path": "/abs/path/customers.xlsx",
+      "format": "xlsx",
+      "table_name": "Customers",
+      "sheet_name": "Customers",
+      "header_row": 1,
+      "row_number": 2,
+      "record_number": 1
+    },
+    "sources": [
+      {
+        "path": "/abs/path/customers.xlsx",
+        "format": "xlsx",
+        "table_name": "Customers",
+        "sheet_name": "Customers",
+        "header_row": 1,
+        "row_number": 2,
+        "record_number": 1
+      }
+    ],
+    "row_count": 1
   },
   "lineage": ["extract:Customers", "map:customers_to_contacts"],
   "record": {
@@ -161,25 +229,59 @@ So the behavior is:
   "kind": "rye_stage_record",
   "node_type": "rye_tabular_intake_stage_row",
   "label": "Customers row 2",
-  "source": {
-    "path": "/abs/path/customers.xlsx",
-    "format": "xlsx",
-    "table_name": "Customers",
-    "sheet_name": "Customers",
-    "header_row": 1,
-    "row_number": 2,
-    "record_number": 1
+  "source_set": {
+    "group_key": null,
+    "primary": {
+      "path": "/abs/path/customers.xlsx",
+      "format": "xlsx",
+      "table_name": "Customers",
+      "sheet_name": "Customers",
+      "header_row": 1,
+      "row_number": 2,
+      "record_number": 1
+    },
+    "sources": [
+      {
+        "path": "/abs/path/customers.xlsx",
+        "format": "xlsx",
+        "table_name": "Customers",
+        "sheet_name": "Customers",
+        "header_row": 1,
+        "row_number": 2,
+        "record_number": 1
+      }
+    ],
+    "row_count": 1
   },
   "lineage": ["extract:Customers"],
   "properties": {
-    "schema_type": "rye.tabular_intake.stage_properties.v1",
-    "schema_version": 1,
+    "schema_type": "rye.tabular_intake.stage_properties.v2",
+    "schema_version": 2,
     "ingest_status": "extracted",
-    "source_format": "xlsx",
-    "source_path": "/abs/path/customers.xlsx",
-    "source_table": "Customers",
-    "source_sheet": "Customers",
-    "source_row_number": 2,
+    "source_set": {
+      "group_key": null,
+      "primary": {
+        "path": "/abs/path/customers.xlsx",
+        "format": "xlsx",
+        "table_name": "Customers",
+        "sheet_name": "Customers",
+        "header_row": 1,
+        "row_number": 2,
+        "record_number": 1
+      },
+      "sources": [
+        {
+          "path": "/abs/path/customers.xlsx",
+          "format": "xlsx",
+          "table_name": "Customers",
+          "sheet_name": "Customers",
+          "header_row": 1,
+          "row_number": 2,
+          "record_number": 1
+        }
+      ],
+      "row_count": 1
+    },
     "raw_fields": {
       "Customer ID": "C-100",
       "Name": "Ada Lovelace"
@@ -187,6 +289,15 @@ So the behavior is:
   }
 }
 ```
+
+### `source_set`
+
+`mapped_record` and `rye_stage_record` use `source_set` instead of a single source row.
+
+- row-level outputs set `group_key` to `null` and contain one source
+- grouped outputs set `group_key` and contain every source row that contributed to the parent record
+- `primary` is the first deterministic source reference for labels and compact summaries
+- `row_count` is the number of unique source row references
 
 ## Mapping Module API
 
@@ -238,6 +349,66 @@ export function transform(input: SourceRow): MapRecordSpec | null {
       external_id: input.row["Customer ID"],
       full_name: input.row.Name,
       email: String(input.row.Email).toLowerCase()
+    }
+  };
+}
+```
+
+## Grouping Module API
+
+`tabular_group.mts` loads a TypeScript module and calls `groupKey(input)` for each input record, then calls `reduce(group)` once per group.
+
+Accepted input:
+- `source_row`
+- `mapped_record`
+
+Expected `groupKey(input)` return value:
+- string or number to include the row in a group
+- `null`, `undefined`, or empty string to drop the row
+
+Expected `reduce(group)` return value:
+- `null` to drop the group
+- one `MapRecordSpec`
+- an array of `MapRecordSpec`
+
+The group object has:
+
+```ts
+type GroupContext = {
+  key: string;
+  records: Array<SourceRow | MappedRecord>;
+  source_set: SourceSet;
+  first(field: string): unknown;
+  distinct(field: string): unknown[];
+  sum(field: string | ((record) => unknown)): number;
+};
+```
+
+Grouped outputs are emitted as `mapped_record` objects with `lineage` ending in `group:<mapping-name>` and a multi-row `source_set`.
+
+## Grouping Module Example
+
+```ts
+export const mapping = {
+  name: "invoice_rows_to_invoices"
+};
+
+export function groupKey(input) {
+  return input.kind === "source_row" ? input.row["Invoice Number"] : null;
+}
+
+export function reduce(group) {
+  return {
+    destination_table: "invoices",
+    operation: "upsert",
+    record: {
+      invoice_number: group.key,
+      customer_external_id: group.first("Customer External ID"),
+      line_count: group.records.length,
+      total_amount: group.sum((record) => {
+        const row = record.kind === "source_row" ? record.row : record.record;
+        return Number(row.Quantity ?? 0) * Number(row["Unit Price"] ?? 0);
+      })
     }
   };
 }
@@ -335,6 +506,14 @@ node skills/rye-tabular-intake/scripts/tabular_extract.mts --input data/customer
   | node skills/rye-tabular-intake/scripts/tabular_map.mts --module mappings/contacts_to_assignments.mts
 ```
 
+Use `tabular_group.mts` when multiple rows should produce a parent record:
+
+```bash
+node skills/rye-tabular-intake/scripts/tabular_extract.mts --input data/invoice_lines.csv > /tmp/invoice-lines.ndjson
+node skills/rye-tabular-intake/scripts/tabular_map.mts --input /tmp/invoice-lines.ndjson --config mappings/invoice_lines.json > /tmp/invoice-line-records.ndjson
+node skills/rye-tabular-intake/scripts/tabular_group.mts --input /tmp/invoice-lines.ndjson --module mappings/invoices.mts > /tmp/invoice-records.ndjson
+```
+
 For conversational setup, it is often better to build a JSON config first, then upgrade to TypeScript only if the mapping stops fitting the declarative format.
 
 ## Rye Tracking Guidance
@@ -344,7 +523,7 @@ The staging CLI does not write to PostgreSQL. It emits a stable envelope that ca
 `tabular_commit_rye.mts` stores the intake trail in Rye as:
 
 - one run node in `nodes`
-- one row node per source row in `nodes`
+- one row node per `source_set` in `nodes`
 - `rye_tabular_intake_run_started`, `rye_tabular_intake_run_completed`, `rye_tabular_intake_row_extracted`, `rye_tabular_intake_row_mapped`, and `rye_tabular_intake_row_staged` entries in `events`
 - `rye_tabular_intake_source_row`, `rye_tabular_intake_mapped_record`, and `rye_tabular_intake_stage_record` entries in `assertions`
 - `rye_tabular_intake_source_file` entries in `artifacts`
@@ -360,7 +539,7 @@ The concrete JSON Schema files live under `skills/rye-tabular-intake/assets/sche
 
 Run-level duplicate protection works like this:
 
-- `tabular_commit_rye.mts` reads the original source file paths from the NDJSON records
+- `tabular_commit_rye.mts` reads the original source file paths from the NDJSON records and their `source_set.sources`
 - each distinct source file is hashed with SHA1
 - the CLI builds a run fingerprint from:
   - source file SHA1 values
@@ -372,7 +551,7 @@ Run-level duplicate protection works like this:
 
 It can then be turned into final domain records by:
 
-- creating a `rye_tabular_intake_row` node per source row
+- creating a `rye_tabular_intake_row` node per source row or grouped `source_set`
 - storing `raw_fields` and mapped payloads in `properties`
 - asserting load state such as `extracted`, `mapped`, `loaded`, or `rejected`
 - recording import events with `record_event(...)`

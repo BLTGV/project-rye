@@ -10,6 +10,13 @@ export interface SourceDescriptor {
   record_number: number;
 }
 
+export interface SourceSet {
+  group_key: string | null;
+  primary: SourceDescriptor;
+  sources: SourceDescriptor[];
+  row_count: number;
+}
+
 export interface SourceRow {
   kind: "source_row";
   source: SourceDescriptor;
@@ -23,7 +30,7 @@ export interface MappedRecord {
   mapping: string;
   destination_table: string;
   operation: "insert" | "upsert" | "update";
-  source: SourceDescriptor;
+  source_set: SourceSet;
   lineage: string[];
   record: Record<string, unknown>;
   meta: Record<string, unknown>;
@@ -34,7 +41,7 @@ export interface RyeStageRecord {
   kind: "rye_stage_record";
   node_type: string;
   label: string;
-  source: SourceDescriptor;
+  source_set: SourceSet;
   lineage: string[];
   properties: Record<string, unknown>;
 }
@@ -61,7 +68,7 @@ export function isObject(value: unknown): value is Record<string, unknown> {
 }
 
 export function isSourceRow(value: unknown): value is SourceRow {
-  return isObject(value) && value.kind === "source_row" && isObject(value.source) && isObject(value.row);
+  return isObject(value) && value.kind === "source_row" && isSourceDescriptor(value.source) && isObject(value.row);
 }
 
 export function isMappedRecord(value: unknown): value is MappedRecord {
@@ -70,7 +77,7 @@ export function isMappedRecord(value: unknown): value is MappedRecord {
     value.kind === "mapped_record" &&
     typeof value.mapping === "string" &&
     typeof value.destination_table === "string" &&
-    isObject(value.source) &&
+    isSourceSet(value.source_set) &&
     isObject(value.record)
   );
 }
@@ -85,8 +92,39 @@ export function isRyeStageRecord(value: unknown): value is RyeStageRecord {
     value.kind === "rye_stage_record" &&
     typeof value.node_type === "string" &&
     typeof value.label === "string" &&
-    isObject(value.source) &&
+    isSourceSet(value.source_set) &&
     isObject(value.properties)
+  );
+}
+
+export function isSourceDescriptor(value: unknown): value is SourceDescriptor {
+  return (
+    isObject(value) &&
+    typeof value.path === "string" &&
+    (value.format === "csv" || value.format === "xlsx") &&
+    typeof value.table_name === "string" &&
+    ("sheet_name" in value) &&
+    (typeof value.sheet_name === "string" || value.sheet_name === null) &&
+    Number.isInteger(value.header_row) &&
+    value.header_row >= 1 &&
+    Number.isInteger(value.row_number) &&
+    value.row_number >= 1 &&
+    Number.isInteger(value.record_number) &&
+    value.record_number >= 1
+  );
+}
+
+export function isSourceSet(value: unknown): value is SourceSet {
+  return (
+    isObject(value) &&
+    ("group_key" in value) &&
+    (typeof value.group_key === "string" || value.group_key === null) &&
+    isSourceDescriptor(value.primary) &&
+    Array.isArray(value.sources) &&
+    value.sources.length > 0 &&
+    value.sources.every(isSourceDescriptor) &&
+    Number.isInteger(value.row_count) &&
+    value.row_count === value.sources.length
   );
 }
 
@@ -95,8 +133,60 @@ export function appendLineage(existing: unknown, step: string): string[] {
   return [...lineage, step];
 }
 
-export function sourceFromRecord(record: SourceRow | MappedRecord | RyeStageRecord): SourceDescriptor {
-  return record.source;
+export function sourceSetFromSource(source: SourceDescriptor, groupKey: string | null = null): SourceSet {
+  return {
+    group_key: groupKey,
+    primary: source,
+    sources: [source],
+    row_count: 1,
+  };
+}
+
+export function sourceSetFromRecord(record: SourceRow | MappedRecord | RyeStageRecord): SourceSet {
+  if (record.kind === "source_row") {
+    return sourceSetFromSource(record.source);
+  }
+  return record.source_set;
+}
+
+export function primarySourceFromRecord(record: SourceRow | MappedRecord | RyeStageRecord): SourceDescriptor {
+  return sourceSetFromRecord(record).primary;
+}
+
+export function mergeSourceSets(records: Array<SourceRow | MappedRecord | RyeStageRecord>, groupKey: string | null): SourceSet {
+  const sources = dedupeSources(records.flatMap((record) => sourceSetFromRecord(record).sources));
+  const primary = sources[0];
+  if (!primary) {
+    throw new Error("Cannot build a source_set from an empty group.");
+  }
+  return {
+    group_key: groupKey,
+    primary,
+    sources,
+    row_count: sources.length,
+  };
+}
+
+export function dedupeSources(sources: SourceDescriptor[]): SourceDescriptor[] {
+  const byKey = new Map<string, SourceDescriptor>();
+  for (const source of sources) {
+    const key = sourceKey(source);
+    if (!byKey.has(key)) {
+      byKey.set(key, source);
+    }
+  }
+  return Array.from(byKey.values()).sort((left, right) => sourceKey(left).localeCompare(sourceKey(right)));
+}
+
+export function sourceKey(source: SourceDescriptor): string {
+  return [
+    source.path,
+    source.table_name,
+    source.sheet_name ?? "",
+    source.header_row,
+    source.row_number,
+    source.record_number,
+  ].join("|");
 }
 
 export function slugify(value: string): string {

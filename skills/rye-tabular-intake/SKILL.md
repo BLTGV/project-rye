@@ -1,6 +1,6 @@
 ---
 name: rye-tabular-intake
-description: Extract CSV and XLSX source tables for Rye-tracked imports. Use when a user needs to inspect tabular source files, emit row-level NDJSON with lineage, map source fields into one or more destination-table records, or stage extracted data for Rye load tracking with composable TypeScript CLI scripts.
+description: Extract CSV and XLSX source tables for Rye-tracked imports. Use when a user needs to inspect tabular source files, emit row-level NDJSON with lineage, map source fields into destination records, group many source rows into parent records with source_set lineage, stage extracted data, or build a domain-specific intake skill on top of generic tabular primitives.
 ---
 
 # Rye Tabular Intake
@@ -10,7 +10,8 @@ Use this skill when source data starts in CSV or XLSX files and needs to be:
 1. inspected before mapping
 2. extracted into row-level NDJSON with stable source lineage
 3. mapped into destination-table shaped records
-4. staged as Rye tracking records before final database load
+4. grouped into parent records when many source rows describe one destination record
+5. staged as Rye tracking records before final database load
 
 ## Conversation First
 
@@ -26,6 +27,8 @@ Confirm:
 
 Prefer a declarative JSON mapping config when the requested mapping is mostly column selection and coercion. Use a TypeScript mapping module when the logic is conditional, one-to-many, or depends on prior mapped output.
 
+If the user is creating a domain-specific intake skill on top of this one, keep this skill generic and put source-column aliases, validation rules, destination-table choices, and domain examples in the consuming skill.
+
 ## Workflow
 
 1. Inspect the file first:
@@ -39,8 +42,11 @@ Prefer a declarative JSON mapping config when the requested mapping is mostly co
    - `node skills/rye-tabular-intake/scripts/tabular_extract.mts --input data/customers.xlsx --sheet Customers | node skills/rye-tabular-intake/scripts/tabular_map.mts --module mappings/customers_to_contacts.mts`
 4. Stage extracted or mapped rows for Rye load tracking:
    - `node skills/rye-tabular-intake/scripts/tabular_extract.mts --input data/customers.xlsx --sheet Customers | node skills/rye-tabular-intake/scripts/tabular_stage_rye.mts --node-type rye_tabular_intake_stage_row`
-5. Commit the intake trail into Rye:
+5. For many-to-one records, group extracted or mapped rows:
+   - `node skills/rye-tabular-intake/scripts/tabular_extract.mts --input data/interests.xlsx | node skills/rye-tabular-intake/scripts/tabular_group.mts --module mappings/interests_to_opportunities.mts`
+6. Commit the intake trail into Rye:
    - `node skills/rye-tabular-intake/scripts/tabular_commit_rye.mts --db-url "$DATABASE_URL" --input /tmp/source_rows.ndjson --run-id customer-import-2026-03-10`
+   - if only SQL execution is available: `node skills/rye-tabular-intake/scripts/tabular_commit_rye.mts --emit-sql --input /tmp/source_rows.ndjson --run-id customer-import-2026-03-10 > /tmp/rye-intake.sql`
 
 ## When It Writes
 
@@ -52,12 +58,17 @@ The pipeline is read-only until the commit step.
   - reads CSV/XLSX and emits `source_row` NDJSON
 - `tabular_map.mts`
   - reads NDJSON and emits `mapped_record` NDJSON
+- `tabular_group.mts`
+  - reads NDJSON and emits grouped `mapped_record` NDJSON with multi-row `source_set` lineage
 - `tabular_stage_rye.mts`
   - reads NDJSON and emits `rye_stage_record` NDJSON
 - `tabular_commit_rye.mts`
   - reads NDJSON and writes Rye nodes, events, assertions, and artifacts into PostgreSQL
+  - with `--emit-sql`, prints a SQL script instead of connecting to PostgreSQL
 
 If the user wants to inspect, extract, map, or stage data without touching the database, stop before `tabular_commit_rye.mts`.
+
+If the user has no `DATABASE_URL` but can execute SQL through a tool such as a SQL console or Supabase MCP, use `tabular_commit_rye.mts --emit-sql`, then execute the generated SQL in one call/session. The source files referenced by the NDJSON must still be readable locally when the SQL is generated so the tool can compute source hashes.
 
 ## Runs And Duplicates
 
@@ -88,11 +99,15 @@ The duplicate check is database-wide for the connected Rye instance. If a later 
   - emits one `source_row` JSON object per data row
 - `tabular_map.mts`
   - reads NDJSON from stdin or file and applies either a declarative JSON mapping config or a TypeScript transform module
+- `tabular_group.mts`
+  - groups `source_row` or `mapped_record` input and reduces each group into one or more `mapped_record` outputs
+  - emits `source_set` lineage for every source row that contributed to the grouped output
 - `tabular_stage_rye.mts`
   - wraps extracted or mapped rows in a Rye-friendly staging envelope
 - `tabular_commit_rye.mts`
   - writes extracted, mapped, or staged records into Rye nodes, events, assertions, and source-file artifacts
   - fingerprints original source files with SHA1 and rejects duplicate runs of the same run kind unless `--allow-duplicate-source` is passed
+  - can emit a transaction SQL script for SQL-only environments
 
 ## Mapping Strategy
 
@@ -108,6 +123,8 @@ TypeScript modules remain the escape hatch for:
 - chained transforms over prior mapped output
 - filtering rows by returning `null`
 
+Use `tabular_group.mts` when many source rows produce one destination record, such as invoice lines grouped into invoices or vetted interests grouped into acquisition opportunities.
+
 Read [references/cli-contract.md](references/cli-contract.md) when you need:
 
 - the NDJSON object contracts
@@ -120,6 +137,8 @@ Read [references/cli-contract.md](references/cli-contract.md) when you need:
 
 Read [references/mapping-conversation.md](references/mapping-conversation.md) when the user wants to configure mappings interactively in chat before you write the config or module.
 
+Read [references/extension-patterns.md](references/extension-patterns.md) when you need to create or evaluate a domain-specific skill that consumes these CLIs, especially for many-to-one grouped imports.
+
 Read [references/testing-fixtures.md](references/testing-fixtures.md) when you need Docker-runnable fixture data for one-to-one, one-to-many, or many-to-one import scenarios.
 
 ## Guardrails
@@ -128,6 +147,8 @@ Read [references/testing-fixtures.md](references/testing-fixtures.md) when you n
 - When column meaning is ambiguous, ask the user before hard-coding a conversion.
 - Keep extraction lossless. Preserve source lineage and raw field names before coercing into destination shapes.
 - Use `tabular_map.mts` for deterministic transforms; avoid ad hoc one-off rewrites in chat when a reusable module is appropriate.
+- Use `tabular_group.mts` for many-to-one reductions; keep domain-specific grouping rules in the consuming skill or mapping module.
 - Use Rye staging records to track intake status before writing final domain-table records.
 - Prefer `tabular_commit_rye.mts` when the user wants extraction and staging history stored in Rye itself.
+- Prefer `--emit-sql` when the available database interface can execute SQL but cannot provide a connection string.
 - Prefer pipelines that keep stdout machine-readable and stderr reserved for actionable errors.

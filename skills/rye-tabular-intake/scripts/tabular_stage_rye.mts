@@ -4,6 +4,8 @@ import {
   isMappedRecord,
   isSourceRow,
   appendLineage,
+  primarySourceFromRecord,
+  sourceSetFromRecord,
   type MappedRecord,
   type RyeStageRecord,
   type SourceRow,
@@ -55,7 +57,11 @@ async function buildStageRecord(
   status: string,
   labelPrefix?: string,
 ): Promise<RyeStageRecord> {
-  const baseLabel = `${input.source.table_name} row ${input.source.row_number}`;
+  const source = primarySourceFromRecord(input);
+  const sourceSet = sourceSetFromRecord(input);
+  const baseLabel = sourceSet.row_count > 1
+    ? `${source.table_name} group ${sourceSet.group_key ?? source.row_number} (${sourceSet.row_count} rows)`
+    : `${source.table_name} row ${source.row_number}`;
   const label = labelPrefix ? `${labelPrefix} ${baseLabel}` : baseLabel;
   const properties = buildStageProperties({ record: input, status });
 
@@ -63,12 +69,12 @@ async function buildStageRecord(
     kind: "rye_stage_record",
     node_type: nodeType,
     label,
-    source: input.source,
+    source_set: sourceSet,
     lineage: appendLineage(input.lineage, `stage:${status}`),
     properties,
   };
 
-  await assertStageProperties(record.properties, input.source.table_name, input.source.row_number);
+  await assertStageProperties(record.properties, source.table_name, source.row_number);
   return record;
 }
 

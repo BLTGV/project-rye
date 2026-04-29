@@ -12,6 +12,7 @@ Ask only what is needed to write a deterministic mapping config or module:
 4. What conversions are needed?
 5. What values should be defaulted, dropped, or treated as null?
 6. Should invalid rows fail, be skipped, or be emitted with issues?
+7. If many rows make one parent record, what source columns define the grouping key?
 
 ## Prefer Declarative Config When
 
@@ -27,6 +28,12 @@ Ask only what is needed to write a deterministic mapping config or module:
 - the transform depends on prior `mapped_record` output
 - the user wants custom dedupe, lookups, or cross-field logic
 
+## Prefer Grouping Module When
+
+- many source rows produce one parent destination record
+- the parent needs aggregates, counts, or distinct values from child rows
+- grouped output must preserve every contributing source row in `source_set`
+
 ## Suggested Prompt Shape
 
 After `tabular_inspect.mts`, summarize the source columns and ask for only the unresolved decisions. Example:
@@ -39,5 +46,6 @@ Capture the agreed mapping in one of:
 
 - `mappings/<name>.json` for declarative config
 - `mappings/<name>.mts` for custom transform logic
+- `mappings/<name>.mts` with `groupKey()` and `reduce()` for grouped many-to-one logic
 
 Treat that file as the durable mapping contract for repeat runs.

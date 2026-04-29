@@ -7,7 +7,7 @@ This skill includes a fixture pack for three mapping shapes:
 - `org-profiles-one-to-many`
   - one row becomes one org plus one or two location records
 - `invoice-lines-many-to-one`
-  - many child rows collapse into one parent invoice plus many invoice lines
+  - many child rows group into parent invoices plus row-level invoice lines
 
 ## Files
 
@@ -52,6 +52,18 @@ docker exec rye-fixture-db bash -lc "cd /workspace && DATABASE_URL='postgresql:/
 node skills/rye-tabular-intake/scripts/tabular_fixture_smoke.mts --docker-container rye-fixture-db
 ```
 
+If your environment cannot provide a connection string but can execute SQL, generate a commit script:
+
+```bash
+node skills/rye-tabular-intake/scripts/tabular_commit_rye.mts \
+  --emit-sql \
+  --input /tmp/source_rows.ndjson \
+  --run-id fixture:sql-only \
+  > /tmp/rye-tabular-intake.sql
+```
+
+Execute the generated SQL as one script in the target SQL tool. The source files referenced by the NDJSON must be readable when the SQL is generated so the fixture can include source hashes.
+
 4. Inspect the demo tables:
 
 ```bash
@@ -76,11 +88,12 @@ psql "$DATABASE_URL" -c "SELECT source_table, count(*) FROM rye.node_source_map 
 2. clears prior fixture data
 3. extracts source rows into NDJSON
 4. maps rows into destination-shaped records
-5. stages extracted rows as Rye-friendly envelopes
-6. commits extracted, mapped, and staged records into Rye via `tabular_commit_rye.mts`
-7. loads fixture JSON into demo PostgreSQL tables used for destination-table verification
-8. materializes destination tables
-9. links fixture stage rows into Rye via `link_record()` for backward-compatible demo coverage
+5. groups invoice rows into parent invoice records with `tabular_group.mts`
+6. stages extracted rows as Rye-friendly envelopes
+7. commits extracted, mapped, grouped, and staged records into Rye via `tabular_commit_rye.mts`
+8. loads fixture JSON into demo PostgreSQL tables used for destination-table verification
+9. materializes destination tables
+10. links fixture stage rows into Rye via `link_record()` for backward-compatible demo coverage
 
 The Rye-side smoke data uses distinct, namespaced types:
 
@@ -89,6 +102,8 @@ The Rye-side smoke data uses distinct, namespaced types:
 - assertion types prefixed with `rye_tabular_intake_`
 - artifact type `rye_tabular_intake_source_file`
 - JSONB payloads tagged with `schema_type` and `schema_version`
+
+Grouped mapped records carry a multi-row `source_set`. This is the generic many-to-one extension point for domain skills, such as grouping vetted-interest rows into acquisition-opportunity records by buyer ID.
 
 The commit step also fingerprints each original source file with SHA1 and stores that in the Rye run metadata and source-file artifacts. Duplicate runs for the same source content and run kind are rejected unless `--allow-duplicate-source` is used.
 
