@@ -24,7 +24,7 @@ export async function readXlsxWorkbook(filePath: string): Promise<XlsxSheet[]> {
     if (!target) {
       continue;
     }
-    const entry = path.posix.normalize(path.posix.join("xl", target));
+    const entry = workbookRelationshipEntry(target);
     const xml = await unzipText(filePath, entry);
     results.push({
       name: sheet.name,
@@ -33,6 +33,13 @@ export async function readXlsxWorkbook(filePath: string): Promise<XlsxSheet[]> {
   }
 
   return results;
+}
+
+function workbookRelationshipEntry(target: string): string {
+  if (target.startsWith("/")) {
+    return path.posix.normalize(target.slice(1));
+  }
+  return path.posix.normalize(path.posix.join("xl", target));
 }
 
 async function unzipText(filePath: string, entry: string): Promise<string> {
