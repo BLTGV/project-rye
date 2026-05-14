@@ -52,6 +52,27 @@ Output:
 - NDJSON stream of grouped `mapped_record` objects
 - each output has a multi-row `source_set`
 
+### `tabular_change_plan.mts`
+
+Input:
+- mapped_record NDJSON on `--input <path>` required
+- existing target-table snapshot on `--existing <path>` optional
+- `--mode <create|update|append|merge_review>` optional, default `merge_review`
+- `--key <table:field[,field]>` optional and repeatable for table-specific identity keys
+- `--default-key <field[,field]>` optional fallback key for tables without a table-specific key
+- `--clear-nulls` optional; by default blank/null mapped values do not clear existing values
+
+Output:
+- one JSON review document with:
+  - planned record counts by table
+  - existing snapshot counts by table
+  - action counts
+  - table/action classification for every planned row
+  - field-level before/after diffs where an existing row matched
+  - review reasons for ambiguous or non-idempotent writes
+
+The command is read-only and table-independent. It never connects to, writes to, or assumes a specific destination system.
+
 ### `tabular_stage_rye.mts`
 
 Input:

@@ -44,7 +44,9 @@ If the user is creating a domain-specific intake skill on top of this one, keep 
    - `node skills/rye-tabular-intake/scripts/tabular_extract.mts --input data/customers.xlsx --sheet Customers | node skills/rye-tabular-intake/scripts/tabular_stage_rye.mts --node-type rye_tabular_intake_stage_row`
 5. For many-to-one records, group extracted or mapped rows:
    - `node skills/rye-tabular-intake/scripts/tabular_extract.mts --input data/interests.xlsx | node skills/rye-tabular-intake/scripts/tabular_group.mts --module mappings/interests_to_opportunities.mts`
-6. Commit the intake trail into Rye:
+6. For updates, appends, or agent-assisted merges, compare mapped records with a target-table snapshot:
+   - `node skills/rye-tabular-intake/scripts/tabular_change_plan.mts --input /tmp/mapped.ndjson --existing /tmp/existing-target.json --key contacts:external_id --mode merge_review > /tmp/change-plan.json`
+7. Commit the intake trail into Rye:
    - `node skills/rye-tabular-intake/scripts/tabular_commit_rye.mts --db-url "$DATABASE_URL" --input /tmp/source_rows.ndjson --run-id customer-import-2026-03-10`
    - if only SQL execution is available: `node skills/rye-tabular-intake/scripts/tabular_commit_rye.mts --emit-sql --input /tmp/source_rows.ndjson --run-id customer-import-2026-03-10 > /tmp/rye-intake.sql`
 
@@ -60,6 +62,8 @@ The pipeline is read-only until the commit step.
   - reads NDJSON and emits `mapped_record` NDJSON
 - `tabular_group.mts`
   - reads NDJSON and emits grouped `mapped_record` NDJSON with multi-row `source_set` lineage
+- `tabular_change_plan.mts`
+  - reads mapped records plus an optional existing target-table snapshot and emits a read-only change-review plan
 - `tabular_stage_rye.mts`
   - reads NDJSON and emits `rye_stage_record` NDJSON
 - `tabular_commit_rye.mts`
@@ -102,6 +106,10 @@ The duplicate check is database-wide for the connected Rye instance. If a later 
 - `tabular_group.mts`
   - groups `source_row` or `mapped_record` input and reduces each group into one or more `mapped_record` outputs
   - emits `source_set` lineage for every source row that contributed to the grouped output
+- `tabular_change_plan.mts`
+  - compares destination-table shaped `mapped_record` objects with an existing target snapshot
+  - classifies each planned row as `create`, `update`, `append`, `possible_merge`, `no_change`, or `needs_review`
+  - treats blank or omitted mapped values as no change and never writes to the database
 - `tabular_stage_rye.mts`
   - wraps extracted or mapped rows in a Rye-friendly staging envelope
 - `tabular_commit_rye.mts`
@@ -124,6 +132,26 @@ TypeScript modules remain the escape hatch for:
 - filtering rows by returning `null`
 
 Use `tabular_group.mts` when many source rows produce one destination record, such as invoice lines grouped into invoices or vetted interests grouped into acquisition opportunities.
+
+## Update And Change Review
+
+Use `tabular_change_plan.mts` when a mapped import may update, append to, or merge with existing target-table records.
+
+The change planner is table-independent. It only looks at `mapped_record.destination_table`, mapped `record` values, caller-supplied key fields, and a caller-supplied existing snapshot. It does not know about any destination database, API, or write path.
+
+Existing snapshots may be JSON or NDJSON. Useful shapes include:
+
+- a list of objects with `destination_table` and `record`
+- an object keyed by destination table name
+- an object with generic wrappers such as `data`, `rows`, `records`, or `results`
+
+Default policy:
+
+- blank or omitted mapped values mean no change
+- field clearing requires `--clear-nulls` and explicit review
+- exact key collisions in append mode are classified as `needs_review`
+- fuzzy or agent-assisted matches are classified as `possible_merge` or `needs_review`
+- the command is read-only; final writes belong to the consuming domain skill
 
 Read [references/cli-contract.md](references/cli-contract.md) when you need:
 
@@ -148,6 +176,7 @@ Read [references/testing-fixtures.md](references/testing-fixtures.md) when you n
 - Keep extraction lossless. Preserve source lineage and raw field names before coercing into destination shapes.
 - Use `tabular_map.mts` for deterministic transforms; avoid ad hoc one-off rewrites in chat when a reusable module is appropriate.
 - Use `tabular_group.mts` for many-to-one reductions; keep domain-specific grouping rules in the consuming skill or mapping module.
+- Use `tabular_change_plan.mts` before rare update, append, or merge writes so due diligence is separate from final target-specific SQL or API calls.
 - Use Rye staging records to track intake status before writing final domain-table records.
 - Prefer `tabular_commit_rye.mts` when the user wants extraction and staging history stored in Rye itself.
 - Prefer `--emit-sql` when the available database interface can execute SQL but cannot provide a connection string.
