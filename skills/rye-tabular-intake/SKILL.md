@@ -46,7 +46,9 @@ If the user is creating a domain-specific intake skill on top of this one, keep 
    - `node skills/rye-tabular-intake/scripts/tabular_extract.mts --input data/interests.xlsx | node skills/rye-tabular-intake/scripts/tabular_group.mts --module mappings/interests_to_opportunities.mts`
 6. For updates, appends, or agent-assisted merges, compare mapped records with a target-table snapshot:
    - `node skills/rye-tabular-intake/scripts/tabular_change_plan.mts --input /tmp/mapped.ndjson --existing /tmp/existing-target.json --key contacts:external_id --mode merge_review > /tmp/change-plan.json`
-7. Commit the intake trail into Rye:
+7. Validate the import/change process before target writes when the consuming workflow needs an explicit gate:
+   - `node skills/rye-import-inspector/scripts/inspect_import_run.mjs --source /tmp/source.ndjson --mapped /tmp/mapped.ndjson --change-plan /tmp/change-plan.json --metadata /tmp/import-metadata.json --phase prewrite > /tmp/import-inspection.json`
+8. Commit the intake trail into Rye:
    - `node skills/rye-tabular-intake/scripts/tabular_commit_rye.mts --db-url "$DATABASE_URL" --input /tmp/source_rows.ndjson --run-id customer-import-2026-03-10`
    - if only SQL execution is available: `node skills/rye-tabular-intake/scripts/tabular_commit_rye.mts --emit-sql --input /tmp/source_rows.ndjson --run-id customer-import-2026-03-10 > /tmp/rye-intake.sql`
 
@@ -118,6 +120,9 @@ The duplicate check is database-wide for the connected Rye instance. If a later 
   - writes extracted, mapped, or staged records into Rye nodes, events, assertions, and source-file artifacts
   - fingerprints original source files with SHA1 and rejects duplicate runs of the same run kind unless `--allow-duplicate-source` is passed
   - can emit a transaction SQL script for SQL-only environments
+- `rye-import-inspector`
+  - validates source rows, mapped records, change plans, metadata, old-value evidence, target table declarations, approvals, and post-write verification
+  - emits `rye_stage_record` validation reports that can be committed through `tabular_commit_rye.mts`
 
 ## Mapping Strategy
 
@@ -180,6 +185,7 @@ Read [references/testing-fixtures.md](references/testing-fixtures.md) when you n
 - Use `tabular_map.mts` for deterministic transforms; avoid ad hoc one-off rewrites in chat when a reusable module is appropriate.
 - Use `tabular_group.mts` for many-to-one reductions; keep domain-specific grouping rules in the consuming skill or mapping module.
 - Use `tabular_change_plan.mts` before rare update, append, or merge writes so due diligence is separate from final target-specific SQL or API calls.
+- Use `rye-import-inspector` as the generic validation gate before and after target writes; keep domain-specific policy in consuming skills.
 - Use Rye staging records to track intake status before writing final domain-table records.
 - Prefer `tabular_commit_rye.mts` when the user wants extraction and staging history stored in Rye itself.
 - Prefer `--emit-sql` when the available database interface can execute SQL but cannot provide a connection string.

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Rye Import Inspector"
+  short_description: "Validate Rye import traceability and change evidence"
+  default_prompt: "Use $rye-import-inspector to validate mapped records, change plans, metadata, Rye audit evidence, and post-write verification for an import run."
