@@ -54,6 +54,8 @@ If the user is creating a domain-specific intake skill on top of this one, keep 
 
 The pipeline is read-only until the commit step.
 
+Local NDJSON, snapshot, change-plan, and SQL files are intermediate execution artifacts. Rye is the durable traceability record once `tabular_commit_rye.mts` writes run nodes, events, assertions, and source-file artifacts.
+
 - `tabular_inspect.mts`
   - reads CSV/XLSX and prints one JSON inspection document
 - `tabular_extract.mts`
@@ -152,6 +154,7 @@ Default policy:
 - exact key collisions in append mode are classified as `needs_review`
 - fuzzy or agent-assisted matches are classified as `possible_merge` or `needs_review`
 - the command is read-only; final writes belong to the consuming domain skill
+- before target writes, the consuming skill should record the source, mapped records, old values or target snapshot, change-plan outcome, approval, target tables, operation types, touched IDs, and verification result in Rye
 
 Read [references/cli-contract.md](references/cli-contract.md) when you need:
 
