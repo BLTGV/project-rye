@@ -5,6 +5,18 @@ description: Operate Rye data safely for LLM agents. Use when implementing or ex
 
 # Rye Agent Ops
 
+## Session Setup (Required)
+
+Before any query, set the session context. On stateless connections (Supabase MCP, serverless, transaction-mode poolers), this must be done in **every call**:
+
+```sql
+SELECT set_config('app.current_role', 'admin', false);
+SELECT set_config('app.current_user_id', 'user-123', false);
+SELECT set_config('app.current_teams', 'engineering', false);
+```
+
+Without this, RLS will block access. Use `set_config()` (not `SET` syntax) for portability.
+
 ## Orient
 
 1. Run `SELECT rye_catalog()` to see what's in the instance — node types, edge types, assertion types, tracked tables, and totals.

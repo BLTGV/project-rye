@@ -1,5 +1,19 @@
 # Rye Agent SQL Patterns
 
+## Session setup
+
+Every query that touches RLS-protected tables must first set the session context. On standard PostgreSQL connections this persists for the session. On **stateless connections** (Supabase MCP, serverless functions, connection poolers in transaction mode), set the context in **every call**:
+
+```sql
+SELECT set_config('app.current_role', 'admin', false);
+SELECT set_config('app.current_user_id', 'user-123', false);
+SELECT set_config('app.current_teams', 'engineering,product', false);
+```
+
+Without these, RLS will block access to all team-scoped and classified data.
+
+Note: `SET app.current_role = 'admin'` works in `psql` but not through all APIs (e.g., Supabase MCP rejects the syntax). Always prefer `set_config()` for portability.
+
 ## Record an event
 
 Always use `record_event()` to create events with participants:

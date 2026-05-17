@@ -175,6 +175,43 @@ Views: `current_assertions` (non-superseded only), `node_context` (full node con
 - **Extensions:** `pgcrypto`, `btree_gin`, `pg_trgm`.
 - **Table creation order matters** due to FK dependencies: nodes -> edges -> events -> event_participants -> assertions -> artifacts -> supporting tables -> views.
 
+## Supabase Deployment
+
+Rye is compatible with Supabase (PostgreSQL 15+). Key differences from a self-hosted install:
+
+### Session variables are per-call
+
+Supabase MCP's `execute_sql` uses a fresh connection per call. Session variables (`app.current_role`, etc.) **do not persist** between calls. Every query that touches RLS-protected tables must set the session context in the same call:
+
+```sql
+SELECT set_config('app.current_role', 'admin', false);
+SELECT set_config('app.current_user_id', 'user-123', false);
+SELECT set_config('app.current_teams', 'engineering,product', false);
+-- now run your actual query
+SELECT * FROM rye.nodes;
+```
+
+`SET app.current_role = 'admin'` syntax does **not** work through the MCP — use `set_config()` instead.
+
+### `postgres` is not a superuser
+
+On Supabase, the `postgres` role has `rolsuper = false`. This means:
+- RLS applies to `postgres` on every query (even without `FORCE ROW LEVEL SECURITY`).
+- All administrative queries **must** set `app.current_role = 'admin'` or they will be blocked.
+- `SECURITY DEFINER` functions run as `postgres` (table owner, not superuser) — this is fine.
+
+### Extensions
+
+`pgcrypto` is pre-installed in the `extensions` schema. `btree_gin` and `pg_trgm` are available but must be created. `gen_random_uuid()` is built into `pg_catalog` on PG15+, so it works without `pgcrypto`.
+
+### Schema isolation
+
+The `rye` schema coexists with Supabase's existing tables and schemas without conflicts. `rye_migrations` goes into `public` alongside any existing Supabase tables.
+
+### Auth integration
+
+Supabase Auth uses JWT-based roles (`anon`, `authenticated`, `service_role`). Rye uses session variables. These are orthogonal — Rye does not use Supabase Auth roles. To integrate them, a backend or Edge Function would map JWT claims to `SET app.current_*` session variables before each query.
+
 ## Voice and Tone (for Documentation)
 
 - Clear over clever. Practical over theoretical. Lead with examples.

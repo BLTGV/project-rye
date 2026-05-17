@@ -25,6 +25,19 @@ description: Install, migrate, verify, and test Rye PostgreSQL deployments. Use 
 
 After install, run `SELECT rye_catalog()` to confirm the instance is ready and see what's connected.
 
+## Supabase Deployment
+
+Rye can be deployed to Supabase via its MCP `apply_migration` or `execute_sql` tools:
+
+1. Create missing extensions: `btree_gin`, `pg_trgm` (pgcrypto is pre-installed).
+2. Apply each migration file (0001 through 0007, plus profiles) via `apply_migration`.
+3. Verify with `SELECT rye.rye_catalog()`.
+
+Key differences from self-hosted:
+- `postgres` is not a superuser — RLS applies to all queries. Always set session vars.
+- Session variables reset per call. Prefix every query with `set_config()` calls.
+- `SET app.current_role = 'admin'` syntax fails through the MCP. Use `set_config('app.current_role', 'admin', false)` instead.
+
 ## Notes
 
 - Target PostgreSQL 15+.
