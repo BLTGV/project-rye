@@ -1,0 +1,4 @@
+interface:
+  display_name: "Rye Pattern Library"
+  short_description: "Draft reusable Rye modeling contracts"
+  default_prompt: "Use $rye-pattern-library to define a reusable Rye pattern contract with node, edge, assertion, event, artifact, and JSON Schema guidance."

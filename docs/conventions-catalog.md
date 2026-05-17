@@ -11,6 +11,23 @@ Types are open conventions — write a new value and it exists, no migration req
 
 Run `SELECT rye_catalog()` to see which types are in use in a given instance.
 
+## Pattern Library Convention
+
+When a domain needs repeatable modeling guidance but not a core migration, define a pattern contract before writing implementation SQL.
+
+A pattern contract should describe:
+
+- node, edge, assertion, event, and artifact type values
+- required and optional JSONB fields
+- assertion keying and supersession rules
+- provenance and artifact rules
+- security and classification expectations
+- example writes and conformance checks
+
+The pattern library skill provides reusable templates and schema guidance:
+
+- `skills/rye-pattern-library/SKILL.md`
+
 ## Assertion Key Convention
 
 Use `assertion_key` to define uniqueness scope for active facts:

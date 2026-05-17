@@ -1,0 +1,144 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": [
+    "schema_type",
+    "schema_version",
+    "name",
+    "status",
+    "purpose"
+  ],
+  "properties": {
+    "schema_type": { "const": "rye.pattern_library.pattern_contract.v1" },
+    "schema_version": { "const": 1 },
+    "name": { "type": "string", "minLength": 1 },
+    "status": { "enum": ["draft", "reviewed", "adopted", "deprecated"] },
+    "purpose": { "type": "string", "minLength": 1 },
+    "non_goals": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "node_contracts": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/node_contract" }
+    },
+    "edge_contracts": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/edge_contract" }
+    },
+    "assertion_contracts": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/assertion_contract" }
+    },
+    "event_contracts": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/event_contract" }
+    },
+    "artifact_contracts": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/artifact_contract" }
+    },
+    "source_integration": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "security": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "read_models": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "tests": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "node_contract": {
+      "type": "object",
+      "required": ["node_type", "purpose"],
+      "properties": {
+        "node_type": { "type": "string", "minLength": 1 },
+        "purpose": { "type": "string", "minLength": 1 },
+        "required_properties": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "optional_properties": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "label_rule": { "type": "string" },
+        "properties_schema": { "type": "string" },
+        "source_policy": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "edge_contract": {
+      "type": "object",
+      "required": ["edge_type", "direction"],
+      "properties": {
+        "edge_type": { "type": "string", "minLength": 1 },
+        "direction": { "type": "string", "minLength": 1 },
+        "temporal": { "type": "boolean" },
+        "required_properties": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "optional_properties": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "properties_schema": { "type": "string" },
+        "notes": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "assertion_contract": {
+      "type": "object",
+      "required": ["assertion_type", "subject", "key_rule", "supersession"],
+      "properties": {
+        "assertion_type": { "type": "string", "minLength": 1 },
+        "subject": { "type": "string", "minLength": 1 },
+        "key_rule": { "type": "string", "minLength": 1 },
+        "claim_schema": { "type": "string" },
+        "supersession": { "type": "string", "minLength": 1 },
+        "notes": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "event_contract": {
+      "type": "object",
+      "required": ["event_type", "purpose"],
+      "properties": {
+        "event_type": { "type": "string", "minLength": 1 },
+        "purpose": { "type": "string", "minLength": 1 },
+        "participant_roles": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "properties": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "properties_schema": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "artifact_contract": {
+      "type": "object",
+      "required": ["artifact_type", "purpose"],
+      "properties": {
+        "artifact_type": { "type": "string", "minLength": 1 },
+        "purpose": { "type": "string", "minLength": 1 },
+        "content_schema": { "type": "string" },
+        "location_schema": { "type": "string" },
+        "dedup_key": { "type": "string" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

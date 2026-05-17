@@ -96,3 +96,5 @@ Skill folders are under `skills/`:
 - `rye-installer`
 - `rye-agent-ops`
 - `rye-domain-onboarding`
+- `rye-pattern-library`
+- `rye-tabular-intake`

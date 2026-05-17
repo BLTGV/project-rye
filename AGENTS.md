@@ -78,6 +78,8 @@ skills/
   rye-installer/            — Install and migrate Rye
   rye-agent-ops/            — Safe agent read/write patterns
   rye-domain-onboarding/    — Add new domain conventions
+  rye-pattern-library/      — Reusable Rye modeling pattern contracts
+  rye-tabular-intake/       — CSV/XLSX intake, mapping, grouping, and staging
 docs/
   data-dictionary.md        — Every table, view, and function: what it does and why
   agent-ops-guide.md        — Agent operations guide
