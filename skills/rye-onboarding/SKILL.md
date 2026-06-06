@@ -64,13 +64,38 @@ Use this sequence when the user says they are starting from scratch:
    - remote:
      `curl -fsSL https://projectrye.dev/onboard | sh -s -- --remote "$DATABASE_URL"`
 3. Check installation with `./scripts/rye status`.
-4. Ask for the first limited workflow Rye should assist. Do not ask the user
+4. If running inside Codex or another coding-agent harness, orient from the
+   current project folder first:
+   - read `.rye.env` if present, but do not print secrets
+   - run `./scripts/rye status`
+   - summarize whether Rye is installed and whether any onboarding scopes
+     already exist
+5. Ask for the first limited workflow Rye should assist. Do not ask the user
    for graph node and edge types first; derive the initial policy from purpose,
    boundary, source plans, and review needs.
-5. Create the first onboarding scope with `./scripts/rye onboard --label ...
+6. Create the first onboarding scope with `./scripts/rye onboard --label ...
    --purpose ...`.
-6. Only after the scope exists, connect source metadata with
+7. Only after the scope exists, connect source metadata with
    `rye-source-context` conventions.
+
+## Codex Harness Prompt
+
+After installing the skill with:
+
+```bash
+npx skills add BLTGV/project-rye --skill rye-onboarding
+```
+
+Start Codex in the project folder and use this prompt:
+
+```text
+Use the Rye onboarding skill. Check whether Rye is installed, run
+./scripts/rye status, then help me create the first onboarding scope.
+
+Start by asking what limited workflow or organizational purpose Rye should
+assist first. Do not ingest sources or promote facts until the scope, boundary,
+expected contexts, and review policy exist.
+```
 
 ## Naming Guardrail
 

@@ -140,8 +140,16 @@ agent will work:
 
   npx skills add BLTGV/project-rye --skill rye-onboarding
 
-Then ask the agent:
+Then open Codex in this project folder and ask:
 
   Use the Rye onboarding skill to create the first onboarding scope and connect
   the first source. Start with source metadata and do not promote facts yet.
+
+For a stricter fresh-start prompt:
+
+  Use the Rye onboarding skill. Check whether Rye is installed, run
+  ./scripts/rye status, then help me create the first onboarding scope.
+  Start by asking what limited workflow or organizational purpose Rye should
+  assist first. Do not ingest sources or promote facts until the scope,
+  boundary, expected contexts, and review policy exist.
 EOF

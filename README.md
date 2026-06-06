@@ -27,15 +27,26 @@ curl -fsSL https://projectrye.dev/onboard | sh -s -- --remote "$DATABASE_URL"
 
 ### Agent-Led Onboarding
 
-Install the Rye onboarding skill with Vercel's skills CLI:
+Install the Rye onboarding skill with Vercel's skills CLI in the project folder
+where your agent will work:
 
 ```bash
 npx skills add BLTGV/project-rye --skill rye-onboarding
 ```
 
-Then ask the agent to use the Rye onboarding skill to create the first
-onboarding scope and connect the first source. The scope should be named after
-the organizational purpose or workflow, not the source or retrieval channel.
+Then open Codex in that same folder and start with:
+
+```text
+Use the Rye onboarding skill. Check whether Rye is installed, run
+./scripts/rye status, then help me create the first onboarding scope.
+
+Start by asking what limited workflow or organizational purpose Rye should
+assist first. Do not ingest sources or promote facts until the scope, boundary,
+expected contexts, and review policy exist.
+```
+
+The scope should be named after the organizational purpose or workflow, not the
+source or retrieval channel.
 
 ### Repo-Local Commands
 
