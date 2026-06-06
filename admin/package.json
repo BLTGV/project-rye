@@ -1,0 +1,47 @@
+{
+  "name": "project-rye-admin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:ui": "vite",
+    "dev:api": "tsx src/server/node-dev.ts",
+    "build": "tsc -b && vite build",
+    "preview": "wrangler dev",
+    "deploy": "npm run build && wrangler deploy",
+    "typecheck": "tsc -b"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.0.2",
+    "@hono/zod-validator": "^0.4.2",
+    "@tanstack/react-query": "^5.62.0",
+    "@tanstack/react-table": "^8.20.5",
+    "clsx": "^2.1.1",
+    "cmdk": "^1.0.4",
+    "cytoscape": "^3.30.4",
+    "dotenv": "^17.4.2",
+    "hono": "^4.6.14",
+    "lucide-react": "^0.469.0",
+    "postgres": "^3.4.5",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-router": "^7.1.1",
+    "recharts": "^2.15.0",
+    "tsx": "^4.22.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241218.0",
+    "@tailwindcss/vite": "^4.0.0",
+    "@types/cytoscape": "^3.21.8",
+    "@types/node": "^25.8.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "tailwindcss": "^4.0.0",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.7",
+    "wrangler": "^4.0.0"
+  }
+}

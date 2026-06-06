@@ -1,0 +1,139 @@
+@import "tailwindcss";
+
+@theme {
+  --color-canvas: #0a0b0f;
+  --color-surface: #11131b;
+  --color-surface-2: #181b26;
+  --color-surface-3: #20242f;
+  --color-line: #262a36;
+  --color-line-soft: #1c1f29;
+  --color-ink: #eef1f8;
+  --color-ink-muted: #9aa0b3;
+  --color-ink-dim: #5d6376;
+
+  --color-rye: #d8b948; /* wheat gold, the brand accent */
+  --color-rye-soft: #ecd97a;
+  --color-rye-glow: rgba(216, 185, 72, 0.18);
+
+  --color-cyan: #5ee0ff;
+  --color-violet: #a78bfa;
+  --color-rose: #ff6f91;
+  --color-emerald: #4ade80;
+
+  --font-sans: "InterVariable", "Inter", ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo,
+    Consolas, monospace;
+  --font-display: "InterVariable", "Inter", ui-sans-serif, system-ui, sans-serif;
+
+  --shadow-soft: 0 1px 0 rgba(255, 255, 255, 0.03), 0 16px 40px -16px rgba(0, 0, 0, 0.5);
+  --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.04), 0 24px 64px -24px rgba(0, 0, 0, 0.7);
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    background: radial-gradient(
+        1200px 600px at 90% -20%,
+        rgba(216, 185, 72, 0.06),
+        transparent 60%
+      ),
+      radial-gradient(
+        1000px 600px at -10% 110%,
+        rgba(94, 224, 255, 0.05),
+        transparent 60%
+      ),
+      var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-feature-settings: "cv11", "ss01";
+    -webkit-font-smoothing: antialiased;
+  }
+  ::selection {
+    background: var(--color-rye);
+    color: #0a0b0f;
+  }
+  a {
+    color: inherit;
+  }
+  /* Tabular numerals everywhere metric-like */
+  .num {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-xl border border-[color:var(--color-line)] bg-[color:var(--color-surface)] p-5;
+    box-shadow: var(--shadow-card);
+  }
+  .card-flat {
+    @apply rounded-xl border border-[color:var(--color-line)] bg-[color:var(--color-surface)] p-5;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-full border border-[color:var(--color-line)] px-2 py-0.5 text-[11px] uppercase tracking-wider text-[color:var(--color-ink-muted)];
+  }
+  .pill {
+    @apply inline-flex items-center gap-1.5 rounded-md border border-[color:var(--color-line)] bg-[color:var(--color-surface-2)] px-2 py-1 font-mono text-xs text-[color:var(--color-ink-muted)];
+  }
+  .btn {
+    @apply inline-flex items-center gap-2 rounded-md border border-[color:var(--color-line)] bg-[color:var(--color-surface-2)] px-3 py-1.5 text-sm text-[color:var(--color-ink)] transition hover:border-[color:var(--color-rye)] hover:text-white;
+  }
+  .btn-primary {
+    @apply inline-flex items-center gap-2 rounded-md bg-[color:var(--color-rye)] px-3 py-1.5 text-sm font-medium text-black transition hover:bg-[color:var(--color-rye-soft)];
+  }
+  .input {
+    @apply w-full rounded-md border border-[color:var(--color-line)] bg-[color:var(--color-surface-2)] px-3 py-2 text-sm placeholder:text-[color:var(--color-ink-dim)] focus:border-[color:var(--color-rye)] focus:outline-none;
+  }
+  .h-divider {
+    @apply h-px w-full bg-[color:var(--color-line)];
+  }
+  .scrollbar {
+    scrollbar-color: var(--color-line) transparent;
+    scrollbar-width: thin;
+  }
+  .grid-tile {
+    background-image: linear-gradient(
+        to right,
+        rgba(255, 255, 255, 0.02) 1px,
+        transparent 1px
+      ),
+      linear-gradient(to bottom, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+    background-size: 32px 32px;
+  }
+  .field-label {
+    @apply font-mono text-[10px] uppercase tracking-wider text-[color:var(--color-ink-dim)];
+  }
+}
+
+/* Subtle pulsating dot for live indicators */
+.live-dot::before {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: 9999px;
+  background: var(--color-emerald);
+  opacity: 0.25;
+  animation: live-pulse 1.6s ease-out infinite;
+}
+.live-dot {
+  position: relative;
+  width: 8px;
+  height: 8px;
+  border-radius: 9999px;
+  background: var(--color-emerald);
+}
+@keyframes live-pulse {
+  0% {
+    transform: scale(1);
+    opacity: 0.35;
+  }
+  100% {
+    transform: scale(2.2);
+    opacity: 0;
+  }
+}

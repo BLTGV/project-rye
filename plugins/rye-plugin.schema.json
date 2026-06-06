@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://project-rye.local/schemas/rye-plugin.schema.json",
+  "title": "Rye Plugin Manifest",
+  "type": "object",
+  "required": ["id", "version", "label", "contributes"],
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "version": { "type": "string", "minLength": 1 },
+    "label": { "type": "string", "minLength": 1 },
+    "description": { "type": "string" },
+    "dependencies": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "supersedes": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "conflicts": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "contributes": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "node_types": { "type": "array", "items": { "type": "string" } },
+        "edge_types": { "type": "array", "items": { "type": "string" } },
+        "assertion_types": { "type": "array", "items": { "type": "string" } },
+        "event_types": { "type": "array", "items": { "type": "string" } },
+        "artifact_types": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "onboarding": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "scope_questions": { "type": "array", "items": { "type": "string" } },
+        "source_questions": { "type": "array", "items": { "type": "string" } },
+        "retention_questions": { "type": "array", "items": { "type": "string" } },
+        "evidence_questions": { "type": "array", "items": { "type": "string" } },
+        "default_policies": { "type": "array", "items": { "type": "object" } },
+        "never_infer_defaults": { "type": "array", "items": { "type": "string" } },
+        "agent_autonomy_rules": { "type": "array", "items": { "type": "object" } }
+      }
+    },
+    "validation": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "candidate_validators": { "type": "array", "items": { "type": "string" } },
+        "promotion_validators": { "type": "array", "items": { "type": "string" } },
+        "conformance_tests": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "admin": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "detail_tabs": { "type": "array", "items": { "type": "object" } },
+        "dashboard_cards": { "type": "array", "items": { "type": "object" } },
+        "candidate_groupings": { "type": "array", "items": { "type": "object" } },
+        "policy_views": { "type": "array", "items": { "type": "object" } }
+      }
+    }
+  }
+}

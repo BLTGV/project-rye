@@ -1,0 +1,74 @@
+{
+  "id": "rye-org",
+  "version": "0.1.0",
+  "label": "Organization Model",
+  "description": "People, systems, departments, mission, vision, goals, related organizations, policies, and procedures.",
+  "dependencies": [],
+  "supersedes": [],
+  "conflicts": [],
+  "contributes": {
+    "node_types": [
+      "person",
+      "system",
+      "department",
+      "mission",
+      "vision",
+      "goal",
+      "related_org",
+      "policy",
+      "procedure",
+      "role",
+      "responsibility"
+    ],
+    "edge_types": [
+      "member_of",
+      "reports_to",
+      "responsible_for",
+      "owns_policy",
+      "follows_procedure",
+      "uses_system",
+      "supports_goal",
+      "related_to_org",
+      "governed_by_policy"
+    ],
+    "assertion_types": [
+      "person_role",
+      "department_purpose",
+      "system_purpose",
+      "goal_status",
+      "policy_status",
+      "procedure_status",
+      "responsibility_scope"
+    ],
+    "event_types": [],
+    "artifact_types": []
+  },
+  "onboarding": {
+    "scope_questions": [
+      "Who understands this function?",
+      "Which people or departments are involved?",
+      "Which systems are used?",
+      "Which policies or procedures govern this work?",
+      "What goals does this function support?"
+    ],
+    "source_questions": [],
+    "retention_questions": [],
+    "evidence_questions": [],
+    "default_policies": [],
+    "never_infer_defaults": [
+      "Do not infer employment, department membership, responsibility, or policy ownership from source membership alone."
+    ],
+    "agent_autonomy_rules": []
+  },
+  "validation": {
+    "candidate_validators": [],
+    "promotion_validators": [],
+    "conformance_tests": ["tests/conformance/13_onboarding_scope_plugins.sql"]
+  },
+  "admin": {
+    "detail_tabs": [],
+    "dashboard_cards": [],
+    "candidate_groupings": [],
+    "policy_views": []
+  }
+}

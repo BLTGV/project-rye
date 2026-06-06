@@ -28,6 +28,13 @@ export DATABASE_URL='postgresql://user:pass@host:5432/dbname'
 ./scripts/verify.sh
 ```
 
+## Design Docs
+
+- `docs/onboarding.md` describes onboarding scopes, source/channel/context
+  separation, expected contexts, context gaps, and plugin policy helpers.
+- `docs/roadmap.md` records the undated improvement roadmap.
+- `docs/conventions-catalog.md` lists graph conventions and type vocabulary.
+
 ## Conformance tests
 
 ```bash
@@ -96,5 +103,7 @@ Skill folders are under `skills/`:
 - `rye-installer`
 - `rye-agent-ops`
 - `rye-domain-onboarding`
+- `rye-onboarding`
 - `rye-pattern-library`
+- `rye-source-context-intake`
 - `rye-tabular-intake`

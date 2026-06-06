@@ -1,0 +1,40 @@
+{
+  "id": "rye-evidence-anchor",
+  "version": "0.1.0",
+  "label": "Evidence Anchor",
+  "description": "Evidence anchors for exact provider links, document/page spans, bounding boxes, rows, cells, and log entries.",
+  "dependencies": [],
+  "supersedes": [],
+  "conflicts": [],
+  "contributes": {
+    "node_types": ["evidence_anchor"],
+    "edge_types": ["anchors_claim", "extracted_from"],
+    "assertion_types": ["evidence_policy"],
+    "event_types": ["evidence_anchor_recorded"],
+    "artifact_types": ["text_span", "bounding_box", "row_anchor", "cell_anchor", "provider_permalink"]
+  },
+  "onboarding": {
+    "scope_questions": [],
+    "source_questions": [],
+    "retention_questions": [
+      "Which source material must be kept exactly because accepted knowledge links back to it?"
+    ],
+    "evidence_questions": [
+      "Does review require a provider permalink, text span, row/cell reference, page, or bounding box?"
+    ],
+    "default_policies": [],
+    "never_infer_defaults": [],
+    "agent_autonomy_rules": []
+  },
+  "validation": {
+    "candidate_validators": [],
+    "promotion_validators": [],
+    "conformance_tests": ["tests/conformance/13_onboarding_scope_plugins.sql"]
+  },
+  "admin": {
+    "detail_tabs": [],
+    "dashboard_cards": [],
+    "candidate_groupings": [],
+    "policy_views": []
+  }
+}

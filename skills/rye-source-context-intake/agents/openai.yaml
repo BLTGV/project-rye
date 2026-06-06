@@ -1,0 +1,4 @@
+interface:
+  display_name: "Rye Source Context Intake"
+  short_description: "Classify and confirm connector-neutral source context before Rye knowledge writes"
+  default_prompt: "Register source accounts, containers, and items neutrally; validate source purpose and confirmation state before creating semantic Rye connections."

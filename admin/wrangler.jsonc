@@ -1,0 +1,21 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "project-rye-admin",
+  "main": "src/server/worker.ts",
+  "compatibility_date": "2026-02-19",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": "./dist/client",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application"
+  },
+  "observability": {
+    "enabled": true
+  },
+  // Per-instance config is supplied via the RYE_INSTANCES secret as JSON:
+  //   wrangler secret put RYE_INSTANCES
+  //   [{"id":"lectromec","label":"Lectromec","databaseUrl":"postgresql://..."}]
+  "vars": {
+    "DEFAULT_INSTANCE": "lectromec"
+  }
+}

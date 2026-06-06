@@ -9,7 +9,37 @@ Types are open conventions — write a new value and it exists, no migration req
 - **Assertion types** (`assertion_type`): `project_status`, `task_status`, `deal_stage`, `health_score`, `churn_risk`, `sentiment`, `ownership`, `title_opinion`, `interview_feedback`, `candidate_stage`, `ticket_status`, `decision_status`
 - **Event types** (`event_type`): `meeting`, `phone_call`, `email`, `escalation`, `incident_update`, `interview`, `agent_query`, `domain_change`, `task_created`, `status_change`, `comment`, `time_log`, `dispute_raised`, `dispute_resolved`, `opportunity_created`, `node_merge`, `node_properties_updated`
 
+Onboarding and plugin metadata add convention-owned infrastructure types:
+
+- **Node types:** `onboarding_scope`, `intake_profile`, `retrieval_channel`, `intake_run`, `plugin`
+- **Edge types:** `scope_uses_profile`, `scope_enables_plugin`, `scope_applies_to_source`, `scope_uses_retrieval_channel`, `retrieved_via`, `observed_in_run`, `expected_by_profile`, `scope_has_context_gap`
+- **Assertion types:** `scope_status`, `scope_purpose`, `scope_boundary`, `scope_owner`, `expected_contexts`, `holding_context`, `unexpected_context_policy`, `blocked_contexts`, `retention_policy`, `evidence_policy`, `review_gate`, `agent_autonomy_policy`, `accepted_knowledge_policy`, `plugin_policy_binding`
+- **Event types:** `onboarding_started`, `scope_policy_recorded`, `plugin_policy_bound`, `onboarding_completed`, `scope_revision_proposed`
+
 Run `SELECT rye_catalog()` to see which types are in use in a given instance.
+
+## Onboarding Scope Convention
+
+Rye onboarding is scope-first. A Rye instance usually starts by assisting one
+limited function or workflow. Store that setup as an `onboarding_scope` node,
+not as an organization-wide assumption.
+
+Name the scope after the organizational context, not the source or retrieval
+channel. Use labels such as `Glamies Project` or `Lead Follow-Up`; avoid labels
+such as `Glamies Slack Pilot` or `Composio Email Intake` unless Slack or
+Composio is itself the process being modeled.
+
+Use `expected_contexts` instead of hard context whitelists. Expected contexts
+are known safe routing expectations for a source/profile. If source material
+does not match, route it to a `holding_context` or create a `context_gap`
+candidate according to `unexpected_context_policy`.
+
+Use `blocked_contexts` and `never_infer` for hard boundaries.
+
+The implementation reference lives in:
+
+- `docs/onboarding.md`
+- `schema/migrations/0010_onboarding_scope_plugins.sql`
 
 ## Pattern Library Convention
 

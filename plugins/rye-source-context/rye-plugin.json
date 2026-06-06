@@ -1,0 +1,54 @@
+{
+  "id": "rye-source-context",
+  "version": "0.1.0",
+  "label": "Source Context",
+  "description": "Connector-neutral source accounts, containers, items, retrieval channels, expected contexts, and confirmation policy.",
+  "dependencies": [],
+  "supersedes": [],
+  "conflicts": [],
+  "contributes": {
+    "node_types": ["source_account", "source_container", "source_item", "retrieval_channel", "intake_run", "review_context"],
+    "edge_types": ["contains_item", "retrieved_via", "observed_in_run", "reviewed_under", "expected_by_profile"],
+    "assertion_types": ["source_purpose", "source_context_confirmation", "classification_rationale", "expected_contexts", "holding_context", "unexpected_context_policy", "blocked_contexts"],
+    "event_types": ["source_context_record_observed", "source_context_confirmed", "source_context_intake_started", "source_context_intake_completed"],
+    "artifact_types": ["source_context_record", "source_item_raw"]
+  },
+  "onboarding": {
+    "scope_questions": [
+      "What limited function is this source expected to help with?"
+    ],
+    "source_questions": [
+      "Where does this information originate?",
+      "How is Rye retrieving or observing it?",
+      "Does this source have one dominant purpose, several expected purposes, or no reliable purpose?"
+    ],
+    "retention_questions": [
+      "Which records should be retained as evidence, collapsed, counted, or excluded?"
+    ],
+    "evidence_questions": [
+      "What original link, thread, file, row, or transcript reference is needed for review?"
+    ],
+    "default_policies": [
+      {
+        "assertion_type": "unexpected_context_policy",
+        "claim": { "action": "create_context_gap_candidate" }
+      }
+    ],
+    "never_infer_defaults": [
+      "Source metadata is provenance, not business truth.",
+      "Channel, folder, mailbox, or account membership does not imply semantic business relationships."
+    ],
+    "agent_autonomy_rules": []
+  },
+  "validation": {
+    "candidate_validators": [],
+    "promotion_validators": [],
+    "conformance_tests": ["tests/conformance/13_onboarding_scope_plugins.sql"]
+  },
+  "admin": {
+    "detail_tabs": [],
+    "dashboard_cards": [],
+    "candidate_groupings": [],
+    "policy_views": []
+  }
+}

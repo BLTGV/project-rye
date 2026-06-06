@@ -1,0 +1,4 @@
+interface:
+  display_name: "Rye Knowledge Reader"
+  short_description: "Read Rye knowledge, status, history, and provenance without writing"
+  default_prompt: "Use read-only Rye queries to separate accepted knowledge, action status, pending candidates, evidence, and historical/as-of context."

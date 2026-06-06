@@ -1,0 +1,46 @@
+{
+  "id": "rye-logging",
+  "version": "0.1.0",
+  "label": "Logging",
+  "description": "Process, model, tool, and application log records as source material and audit evidence.",
+  "dependencies": [],
+  "supersedes": [],
+  "conflicts": [],
+  "contributes": {
+    "node_types": ["process_log", "log_stream", "log_entry"],
+    "edge_types": ["logged_by", "observed_in_run", "supports_diagnosis"],
+    "assertion_types": ["log_retention_policy", "log_parse_policy"],
+    "event_types": ["log_entry_observed", "log_batch_ingested"],
+    "artifact_types": ["log_excerpt", "log_batch"]
+  },
+  "onboarding": {
+    "scope_questions": [
+      "Which process or system logs should Rye observe?"
+    ],
+    "source_questions": [
+      "Are logs the source of truth, a retrieval channel, or indirect evidence of another source?"
+    ],
+    "retention_questions": [
+      "Which logs are audit evidence and which can be summarized or counted?"
+    ],
+    "evidence_questions": [
+      "Do facts need exact log-entry anchors?"
+    ],
+    "default_policies": [],
+    "never_infer_defaults": [
+      "Do not infer user intent from logs alone without supporting evidence."
+    ],
+    "agent_autonomy_rules": []
+  },
+  "validation": {
+    "candidate_validators": [],
+    "promotion_validators": [],
+    "conformance_tests": []
+  },
+  "admin": {
+    "detail_tabs": [],
+    "dashboard_cards": [],
+    "candidate_groupings": [],
+    "policy_views": []
+  }
+}

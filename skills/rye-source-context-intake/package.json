@@ -1,0 +1,14 @@
+{
+  "name": "rye-source-context-intake",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "mcp": "node scripts/rye_mcp_server.mts",
+    "check": "node --check scripts/rye_mcp_server.mts && node --check scripts/source_context_commit_rye.mts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "zod": "4.4.3"
+  }
+}

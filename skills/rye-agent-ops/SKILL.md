@@ -47,6 +47,40 @@ Do not insert into `events` and `event_participants` separately.
 - For multi-valued facts: use stable domain keys in `assertion_key`.
 - Do not run direct `UPDATE assertions`.
 
+## Knowledge Candidates and Promotion
+
+Use the candidate workflow when source material has plausible facts, tasks,
+decisions, risks, procedures, preferences, or semantic edges but the knowledge
+has not been accepted yet.
+
+1. Create proposed candidates with `create_knowledge_candidate(...)`.
+2. Link candidates to source evidence with `supported_by` and to import/run
+   context with `derived_from` using the helper function parameters.
+3. Keep candidate status as `proposed` or `needs_review` until a user or trusted
+   reviewer accepts, rejects, marks duplicate, or asks for promotion.
+4. Promote accepted candidates only through:
+   - `promote_candidate_to_assertion(...)`
+   - `promote_candidate_to_task(...)`
+   - `promote_candidate_to_edge(...)`
+5. Store candidate provenance in promoted assertion/edge/task attrs. The helper
+   functions already preserve candidate and source refs.
+6. If source accounts or containers are still `needs_confirmation`, do not rely
+   on their default context to promote knowledge. Use only item-level evidence
+   and explicit reviewer decisions.
+
+Candidate statuses are:
+
+- `proposed`
+- `accepted`
+- `rejected`
+- `needs_review`
+- `duplicate`
+- `superseded`
+
+Do not bulk-promote a candidate queue just because a parser generated it. A bulk
+promotion must have an explicit approval decision, target shape, and provenance
+policy.
+
 ## Provenance
 
 - Log agent queries with `log_agent_query(agent_id, query, summary, node_ids)`.

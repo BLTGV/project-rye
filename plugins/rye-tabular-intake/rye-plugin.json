@@ -1,0 +1,47 @@
+{
+  "id": "rye-tabular-intake",
+  "version": "0.1.0",
+  "label": "Tabular Intake",
+  "description": "CSV/XLSX inspection, row extraction, mapping, grouping, change planning, staging, and Rye lineage commits.",
+  "dependencies": [],
+  "supersedes": [],
+  "conflicts": [],
+  "contributes": {
+    "node_types": ["rye_tabular_intake_run", "rye_tabular_intake_row", "rye_tabular_intake_stage_row"],
+    "edge_types": ["materialized_as", "derived_from", "contains_item"],
+    "assertion_types": ["tabular_source_row", "tabular_mapped_record", "tabular_staged_record"],
+    "event_types": ["tabular_row_extracted", "tabular_row_mapped", "tabular_record_staged"],
+    "artifact_types": ["rye_tabular_intake_source_file", "tabular_change_plan", "import_inspection"]
+  },
+  "onboarding": {
+    "scope_questions": [
+      "Which limited import or update process is Rye tracking?"
+    ],
+    "source_questions": [
+      "Which sheet/table and columns matter?",
+      "Which destination table or plugin owns the final data?"
+    ],
+    "retention_questions": [
+      "Should raw rows, mapped records, change plans, and verification outputs be retained?"
+    ],
+    "evidence_questions": [
+      "Do accepted changes need row, cell, or source-file anchors?"
+    ],
+    "default_policies": [],
+    "never_infer_defaults": [
+      "Do not treat source column names as confirmed domain meaning until mapping is confirmed."
+    ],
+    "agent_autonomy_rules": []
+  },
+  "validation": {
+    "candidate_validators": [],
+    "promotion_validators": [],
+    "conformance_tests": []
+  },
+  "admin": {
+    "detail_tabs": [],
+    "dashboard_cards": [],
+    "candidate_groupings": [],
+    "policy_views": []
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "id": "rye-crm",
+  "version": "0.1.0",
+  "label": "CRM",
+  "description": "CRM-oriented contacts, organizations, opportunities, campaigns, territories, and pipeline conventions.",
+  "dependencies": ["rye-org"],
+  "supersedes": [],
+  "conflicts": [],
+  "contributes": {
+    "node_types": ["person", "org", "opportunity", "pipeline", "territory", "campaign"],
+    "edge_types": ["employs", "affiliated_with", "primary_contact", "secondary_contact", "pipeline_member", "territory_member", "campaign_target", "assigned_to", "targets", "referral"],
+    "assertion_types": ["deal_stage", "deal_value", "sentiment", "contact_info", "lead_score", "win_probability", "do_not_contact"],
+    "event_types": ["email", "phone_call", "meeting", "note", "offer_sent", "stage_change"],
+    "artifact_types": []
+  },
+  "onboarding": {
+    "scope_questions": [
+      "Is this scope actually managing CRM concepts, or only observing lead/contact evidence?"
+    ],
+    "source_questions": [],
+    "retention_questions": [],
+    "evidence_questions": [],
+    "default_policies": [],
+    "never_infer_defaults": [
+      "Do not create opportunities or pipeline stage facts from source chatter without scope policy."
+    ],
+    "agent_autonomy_rules": []
+  },
+  "validation": {
+    "candidate_validators": [],
+    "promotion_validators": [],
+    "conformance_tests": []
+  },
+  "admin": {
+    "detail_tabs": [],
+    "dashboard_cards": [],
+    "candidate_groupings": [],
+    "policy_views": []
+  }
+}

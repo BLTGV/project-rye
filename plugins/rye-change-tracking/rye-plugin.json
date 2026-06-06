@@ -1,0 +1,44 @@
+{
+  "id": "rye-change-tracking",
+  "version": "0.1.0",
+  "label": "Change Tracking",
+  "description": "Domain table and workflow changes, before/after diffs, verification evidence, and audit trails.",
+  "dependencies": [],
+  "supersedes": [],
+  "conflicts": [],
+  "contributes": {
+    "node_types": ["change_plan", "change_set", "verification_result"],
+    "edge_types": ["changes_record", "verified_by", "materialized_as"],
+    "assertion_types": ["change_policy", "verification_policy"],
+    "event_types": ["domain_change", "change_plan_created", "change_verified"],
+    "artifact_types": ["change_plan", "verification_report"]
+  },
+  "onboarding": {
+    "scope_questions": [
+      "Which changes should Rye track and why?"
+    ],
+    "source_questions": [
+      "Which table, API, app, import, or workflow produces the changes?"
+    ],
+    "retention_questions": [
+      "How long should before/after diffs and verification results be kept?"
+    ],
+    "evidence_questions": [
+      "What proof is required that the change happened correctly?"
+    ],
+    "default_policies": [],
+    "never_infer_defaults": [],
+    "agent_autonomy_rules": []
+  },
+  "validation": {
+    "candidate_validators": [],
+    "promotion_validators": [],
+    "conformance_tests": []
+  },
+  "admin": {
+    "detail_tabs": [],
+    "dashboard_cards": [],
+    "candidate_groupings": [],
+    "policy_views": []
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "id": "rye-project-management",
+  "version": "0.1.0",
+  "label": "Project Management",
+  "description": "Tasks, projects, milestones, sprints, workflow templates, blockers, dependencies, and assignment conventions.",
+  "dependencies": ["rye-org"],
+  "supersedes": [],
+  "conflicts": [],
+  "contributes": {
+    "node_types": ["task", "project", "milestone", "sprint", "workflow_template"],
+    "edge_types": ["contains", "subtask_of", "blocks", "depends_on", "assigned_to", "milestone_target", "sprint_member", "project_member", "regarding", "originated_from"],
+    "assertion_types": ["task_status", "task_priority", "estimate", "progress", "project_status", "sprint_goal_status", "milestone_status"],
+    "event_types": ["status_change", "comment", "time_log", "assignment_change", "blocker_added", "blocker_resolved", "review_requested", "task_created"],
+    "artifact_types": []
+  },
+  "onboarding": {
+    "scope_questions": [
+      "Is this scope tracking work itself, or only preserving project-related evidence?"
+    ],
+    "source_questions": [],
+    "retention_questions": [],
+    "evidence_questions": [],
+    "default_policies": [],
+    "never_infer_defaults": [
+      "Do not infer project membership or task ownership from channel participation alone."
+    ],
+    "agent_autonomy_rules": []
+  },
+  "validation": {
+    "candidate_validators": [],
+    "promotion_validators": [],
+    "conformance_tests": []
+  },
+  "admin": {
+    "detail_tabs": [],
+    "dashboard_cards": [],
+    "candidate_groupings": [],
+    "policy_views": []
+  }
+}
