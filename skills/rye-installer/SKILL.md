@@ -7,14 +7,29 @@ description: Install, migrate, verify, and test Rye PostgreSQL deployments. Use 
 
 ## Workflow
 
-1. Validate target database connection (`DATABASE_URL`) and target profiles (`crm`, `pm`, or none).
-2. Run `./scripts/install.sh --profiles ...` to apply migrations in order.
-3. Optionally run `./scripts/install.sh --seed` for quickstart data.
-4. Run `./scripts/verify.sh` to validate required objects and policies.
-5. Run `./scripts/conformance.sh` for gate checks.
+1. For a new local trial, run `curl -fsSL https://projectrye.dev/onboard | sh`.
+2. For a remote PostgreSQL database, run
+   `curl -fsSL https://projectrye.dev/onboard | sh -s -- --remote "$DATABASE_URL"`.
+3. Install the agent onboarding skill with
+   `npx skills add BLTGV/project-rye --skill rye-onboarding`.
+4. Start the first adoption unit with `./scripts/rye onboard --label ... --purpose ...`.
+5. Use `./scripts/rye status` to confirm the selected database and active
+   onboarding scope.
+6. Use the lower-level install/conformance commands only when debugging
+   migrations or release gates.
+
+The first-run path writes `.rye.env` so later commands use the same database
+without the user re-entering the connection string.
 
 ## Commands
 
+- Local trial: `curl -fsSL https://projectrye.dev/onboard | sh`
+- Remote install: `curl -fsSL https://projectrye.dev/onboard | sh -s -- --remote "$DATABASE_URL"`
+- Agent skill: `npx skills add BLTGV/project-rye --skill rye-onboarding`
+- Repo-local trial: `./scripts/rye local --fresh`
+- Repo-local remote install: `./scripts/rye remote --db-url "$DATABASE_URL"`
+- First scope: `./scripts/rye onboard --label "First Scope" --purpose "..."`
+- Status: `./scripts/rye status`
 - Core only: `./scripts/install.sh --profiles ''`
 - Core + CRM: `./scripts/install.sh --profiles crm`
 - Core + PM: `./scripts/install.sh --profiles pm`

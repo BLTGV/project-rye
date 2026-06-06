@@ -1,6 +1,6 @@
 ---
 name: rye-knowledge-reader
-description: Read Rye safely without writing. Use when an agent needs to understand what Rye currently knows, what was true as of a time, what tasks are open or done, what candidates still need review, or how accepted knowledge traces back to source evidence. This skill is read-only: SELECT queries only, no events, assertions, candidate status changes, promotions, inserts, updates, deletes, or audit writes.
+description: "Read Rye safely without writing. Use when an agent needs to understand what Rye currently knows, what was true as of a time, what tasks are open or done, what candidates still need review, or how accepted knowledge traces back to source evidence. This skill is read-only: SELECT queries only, no events, assertions, candidate status changes, promotions, inserts, updates, deletes, or audit writes."
 ---
 
 # Rye Knowledge Reader

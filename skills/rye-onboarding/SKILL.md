@@ -18,6 +18,13 @@ may do without human review.
 
 ## Workflow
 
+0. If Rye is not installed in the current project, use the public bootstrap:
+   - Local trial: `curl -fsSL https://projectrye.dev/onboard | sh`
+   - Remote database:
+     `curl -fsSL https://projectrye.dev/onboard | sh -s -- --remote "$DATABASE_URL"`
+   - The bootstrap clones Rye, installs the schema, and writes `.rye.env`.
+   - This skill can be installed with:
+     `npx skills add BLTGV/project-rye --skill rye-onboarding`
 1. Define the `onboarding_scope` in human terms:
    - label and key based on the organizational purpose, project, function, or
      workflow, not the source or retrieval channel
@@ -43,6 +50,27 @@ may do without human review.
    instructions to collector, classifier, or promotion agents.
 6. Activate with `activate_onboarding_scope(...)` only after policy and plugin
    bindings are present.
+
+## Fresh Setup Path
+
+Use this sequence when the user says they are starting from scratch:
+
+1. Confirm whether they want:
+   - local trial first, with a Docker Postgres database they can migrate away
+     from later
+   - remote install into a PostgreSQL 15+ database they already control
+2. Run the bootstrap:
+   - local: `curl -fsSL https://projectrye.dev/onboard | sh`
+   - remote:
+     `curl -fsSL https://projectrye.dev/onboard | sh -s -- --remote "$DATABASE_URL"`
+3. Check installation with `./scripts/rye status`.
+4. Ask for the first limited workflow Rye should assist. Do not ask the user
+   for graph node and edge types first; derive the initial policy from purpose,
+   boundary, source plans, and review needs.
+5. Create the first onboarding scope with `./scripts/rye onboard --label ...
+   --purpose ...`.
+6. Only after the scope exists, connect source metadata with
+   `rye-source-context` conventions.
 
 ## Naming Guardrail
 

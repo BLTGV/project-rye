@@ -1,5 +1,7 @@
 .claude/
 .mcp.json
 .env
+.rye.env
+.rye/
 *.log
 tmp/

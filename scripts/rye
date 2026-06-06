@@ -1,0 +1,477 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ENV_FILE="${RYE_ENV_FILE:-${ROOT_DIR}/.rye.env}"
+LOG_DIR="${RYE_LOG_DIR:-${ROOT_DIR}/.rye}"
+INSTALL_LOG="${RYE_INSTALL_LOG:-${LOG_DIR}/install.log}"
+DEFAULT_PROFILES="${RYE_PROFILES:-crm,pm}"
+DEFAULT_SCHEMA="${RYE_SCHEMA:-rye}"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  ./scripts/rye local [--fresh] [--seed] [--profiles crm,pm]
+  ./scripts/rye remote --db-url <postgresql://...> [--seed] [--profiles crm,pm]
+  ./scripts/rye onboard --label <name> --purpose <text> [--key <slug>] [--owner <name>]
+  ./scripts/rye status
+
+Fast paths:
+  ./scripts/rye local --fresh
+      Try Rye locally in Docker. Drops the local Rye Docker volume, installs Rye,
+      writes .rye.env, and keeps Postgres running.
+
+  ./scripts/rye remote --db-url "$DATABASE_URL"
+      Install Rye into an existing PostgreSQL 15+ database and write .rye.env.
+      This does not drop or reset remote data.
+
+  ./scripts/rye onboard --label "Glamies Project" --purpose "Assist the Glamies project with evidence-backed coordination."
+      Create and activate the first onboarding scope using the database in
+      .rye.env or DATABASE_URL.
+EOF
+}
+
+die() {
+  echo "error: $*" >&2
+  exit 1
+}
+
+info() {
+  echo "==> $*"
+}
+
+run_logged() {
+  local label="$1"
+  shift
+
+  mkdir -p "$LOG_DIR"
+  info "$label"
+  if "$@" > "$INSTALL_LOG" 2>&1; then
+    echo "    ok (log: $INSTALL_LOG)"
+    return
+  fi
+
+  echo "    failed (log: $INSTALL_LOG)" >&2
+  echo >&2
+  tail -n 80 "$INSTALL_LOG" >&2 || true
+  exit 1
+}
+
+shell_quote() {
+  printf "%q" "$1"
+}
+
+sql_literal() {
+  local value="${1//\'/\'\'}"
+  printf "'%s'" "$value"
+}
+
+write_env() {
+  local mode="$1"
+  local db_url="$2"
+  local profiles="$3"
+  local schema="$4"
+  local container_db_url="${5:-}"
+
+  {
+    echo "# Created by ./scripts/rye. This file is local config; do not commit secrets."
+    echo "export DATABASE_URL=$(shell_quote "$db_url")"
+    echo "export RYE_PROFILES=$(shell_quote "$profiles")"
+    echo "export RYE_SCHEMA=$(shell_quote "$schema")"
+    echo "export RYE_DB_MODE=$(shell_quote "$mode")"
+    if [[ -n "$container_db_url" ]]; then
+      echo "export RYE_CONTAINER_DATABASE_URL=$(shell_quote "$container_db_url")"
+    fi
+  } > "$ENV_FILE"
+}
+
+load_env_if_present() {
+  if [[ -f "$ENV_FILE" ]]; then
+    # shellcheck disable=SC1090
+    source "$ENV_FILE"
+  fi
+}
+
+find_compose_cmd() {
+  if docker compose version >/dev/null 2>&1; then
+    COMPOSE_CMD=(docker compose)
+    return
+  fi
+
+  if command -v docker-compose >/dev/null 2>&1; then
+    COMPOSE_CMD=(docker-compose)
+    return
+  fi
+
+  die "Docker Compose is required for local Rye."
+}
+
+compose() {
+  "${COMPOSE_CMD[@]}" -f "${RYE_DOCKER_COMPOSE_FILE:-${ROOT_DIR}/docker-compose.yml}" "$@"
+}
+
+wait_for_db() {
+  local attempts=60
+
+  for ((i=1; i<=attempts; i++)); do
+    if compose exec -T rye-db pg_isready -U "${POSTGRES_USER:-rye}" -d "${POSTGRES_DB:-rye}" >/dev/null 2>&1; then
+      return
+    fi
+    sleep 1
+  done
+
+  compose logs rye-db || true
+  die "Postgres did not become ready in time."
+}
+
+psql_exec() {
+  local sql="$1"
+  load_env_if_present
+
+  if [[ "${RYE_DB_MODE:-}" == "local" ]]; then
+    find_compose_cmd
+    compose exec -T rye-db psql "${RYE_CONTAINER_DATABASE_URL:-postgresql://rye:rye@127.0.0.1:5432/rye}" -v ON_ERROR_STOP=1 <<<"$sql"
+    return
+  fi
+
+  local db_url="${DATABASE_URL:-}"
+  [[ -n "$db_url" ]] || die "DATABASE_URL is not set. Run ./scripts/rye local or ./scripts/rye remote first."
+  command -v psql >/dev/null 2>&1 || die "psql is required for remote database commands."
+  psql "$db_url" -v ON_ERROR_STOP=1 <<<"$sql"
+}
+
+local_install() {
+  local fresh="$1"
+  local seed="$2"
+  local profiles="$3"
+  local schema="$4"
+  local container_db_url
+  local install_cmd
+
+  find_compose_cmd
+
+  if [[ "$fresh" -eq 1 ]]; then
+    compose down -v --remove-orphans
+  fi
+
+  compose up -d rye-db
+  wait_for_db
+
+  container_db_url="postgresql://${POSTGRES_USER:-rye}:${POSTGRES_PASSWORD:-rye}@127.0.0.1:5432/${POSTGRES_DB:-rye}"
+  install_cmd="cd /workspace && DATABASE_URL=$(shell_quote "$container_db_url") ./scripts/install.sh --profiles $(shell_quote "$profiles") --schema $(shell_quote "$schema")"
+
+  if [[ "$seed" -eq 1 ]]; then
+    install_cmd+=" --seed"
+  fi
+
+  compose exec -T rye-db bash -lc "$install_cmd"
+}
+
+slugify() {
+  echo "$1" \
+    | tr '[:upper:]' '[:lower:]' \
+    | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//' \
+    | sed -E 's/^-?$/scope/'
+}
+
+cmd_local() {
+  local fresh=0
+  local seed=0
+  local profiles="$DEFAULT_PROFILES"
+  local schema="$DEFAULT_SCHEMA"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --fresh)
+        fresh=1
+        shift
+        ;;
+      --seed)
+        seed=1
+        shift
+        ;;
+      --profiles)
+        profiles="${2:-}"
+        shift 2
+        ;;
+      --schema)
+        schema="${2:-}"
+        shift 2
+        ;;
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      *)
+        die "Unknown local option: $1"
+        ;;
+    esac
+  done
+
+  run_logged "Installing Rye locally in Docker" local_install "$fresh" "$seed" "$profiles" "$schema"
+
+  local host_port="${RYE_POSTGRES_PORT:-54329}"
+  local db_url="postgresql://${POSTGRES_USER:-rye}:${POSTGRES_PASSWORD:-rye}@127.0.0.1:${host_port}/${POSTGRES_DB:-rye}"
+  local container_db_url="postgresql://${POSTGRES_USER:-rye}:${POSTGRES_PASSWORD:-rye}@127.0.0.1:5432/${POSTGRES_DB:-rye}"
+  write_env "local" "$db_url" "$profiles" "$schema" "$container_db_url"
+
+  cat <<EOF
+
+Rye is installed locally.
+Database: $db_url
+Config:   $ENV_FILE
+
+Next:
+  ./scripts/rye onboard --label "First Scope" --purpose "Describe the limited workflow Rye should assist first."
+EOF
+}
+
+cmd_remote() {
+  local db_url="${DATABASE_URL:-}"
+  local seed=0
+  local profiles="$DEFAULT_PROFILES"
+  local schema="$DEFAULT_SCHEMA"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --db-url)
+        db_url="${2:-}"
+        shift 2
+        ;;
+      --seed)
+        seed=1
+        shift
+        ;;
+      --profiles)
+        profiles="${2:-}"
+        shift 2
+        ;;
+      --schema)
+        schema="${2:-}"
+        shift 2
+        ;;
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      *)
+        die "Unknown remote option: $1"
+        ;;
+    esac
+  done
+
+  [[ -n "$db_url" ]] || die "remote requires --db-url or DATABASE_URL."
+  command -v psql >/dev/null 2>&1 || die "psql is required for remote installs."
+
+  local args=(--db-url "$db_url" --profiles "$profiles" --schema "$schema")
+  if [[ "$seed" -eq 1 ]]; then
+    args+=(--seed)
+  fi
+
+  run_logged "Installing Rye into remote database" "${ROOT_DIR}/scripts/install.sh" "${args[@]}"
+  write_env "remote" "$db_url" "$profiles" "$schema"
+
+  cat <<EOF
+
+Rye is installed in the remote database.
+Config: $ENV_FILE
+
+Next:
+  ./scripts/rye onboard --label "First Scope" --purpose "Describe the limited workflow Rye should assist first."
+EOF
+}
+
+cmd_onboard() {
+  local label=""
+  local purpose=""
+  local key=""
+  local owner="${USER:-}"
+  local in_scope="initial limited workflow"
+  local out_of_scope="full organization-wide rollout|automatic source ingestion|promotion of facts without review"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --label)
+        label="${2:-}"
+        shift 2
+        ;;
+      --purpose)
+        purpose="${2:-}"
+        shift 2
+        ;;
+      --key)
+        key="${2:-}"
+        shift 2
+        ;;
+      --owner)
+        owner="${2:-}"
+        shift 2
+        ;;
+      --in-scope)
+        in_scope="${2:-}"
+        shift 2
+        ;;
+      --out-of-scope)
+        out_of_scope="${2:-}"
+        shift 2
+        ;;
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      *)
+        die "Unknown onboard option: $1"
+        ;;
+    esac
+  done
+
+  [[ -n "$label" ]] || die "onboard requires --label."
+  [[ -n "$purpose" ]] || die "onboard requires --purpose."
+  if [[ -z "$key" ]]; then
+    key="$(slugify "$label")"
+  fi
+
+  local key_sql label_sql purpose_sql owner_sql in_scope_sql out_of_scope_sql
+  key_sql="$(sql_literal "$key")"
+  label_sql="$(sql_literal "$label")"
+  purpose_sql="$(sql_literal "$purpose")"
+  owner_sql="$(sql_literal "$owner")"
+  in_scope_sql="$(sql_literal "$in_scope")"
+  out_of_scope_sql="$(sql_literal "$out_of_scope")"
+
+  local sql
+  sql="$(cat <<SQL
+SET search_path = rye, public, pg_catalog;
+DO \$\$
+DECLARE
+    v_scope uuid;
+BEGIN
+    PERFORM set_config('app.current_role', 'admin', true);
+    PERFORM set_config('app.current_user_id', 'rye:first-run', true);
+    PERFORM set_config('app.current_teams', 'system', true);
+
+    v_scope := create_onboarding_scope(
+        p_scope_key := ${key_sql},
+        p_label     := ${label_sql},
+        p_purpose   := ${purpose_sql},
+        p_boundary  := jsonb_build_object(
+            'in_scope', to_jsonb(string_to_array(${in_scope_sql}, '|')),
+            'out_of_scope', to_jsonb(string_to_array(${out_of_scope_sql}, '|'))
+        ),
+        p_owner     := ${owner_sql},
+        p_created_by := 'rye:first-run',
+        p_properties := jsonb_build_object('created_by_command', './scripts/rye onboard')
+    );
+
+    PERFORM record_scope_policy(v_scope, 'expected_contexts', jsonb_build_object(
+        'contexts', jsonb_build_array(),
+        'meaning', 'No source-specific expected contexts have been confirmed yet.'
+    ), 'default', 'rye:first-run');
+
+    PERFORM record_scope_policy(v_scope, 'holding_context', jsonb_build_object(
+        'context_id', 'needs_context',
+        'label', 'Needs Context'
+    ), 'default', 'rye:first-run');
+
+    PERFORM record_scope_policy(v_scope, 'unexpected_context_policy', jsonb_build_object(
+        'action', 'create_context_gap_candidate'
+    ), 'default', 'rye:first-run');
+
+    PERFORM record_scope_policy(v_scope, 'retention_policy', jsonb_build_object(
+        'default_retention_class', 'review_window',
+        'low_signal', 'collapsed',
+        'future_pruning_needed', true
+    ), 'default', 'rye:first-run');
+
+    PERFORM record_scope_policy(v_scope, 'evidence_policy', jsonb_build_object(
+        'promotion_requires_review', true,
+        'metadata_is_provenance_not_business_truth', true,
+        'source_context_must_be_confirmed_before_default_routing', true
+    ), 'default', 'rye:first-run');
+
+    PERFORM record_scope_policy(v_scope, 'allowed_node_types', jsonb_build_object(
+        'types', jsonb_build_array('source_account', 'source_container', 'source_item', 'review_context', 'knowledge_candidate', 'task', 'person', 'organization', 'system', 'department', 'policy', 'procedure')
+    ), 'default', 'rye:first-run');
+
+    PERFORM record_scope_policy(v_scope, 'allowed_edge_types', jsonb_build_object(
+        'types', jsonb_build_array('contains_item', 'reviewed_under', 'supported_by', 'derived_from', 'promoted_to', 'scope_has_context_gap', 'scope_applies_to_source', 'scope_uses_profile', 'scope_uses_retrieval_channel', 'scope_enables_plugin')
+    ), 'default', 'rye:first-run');
+
+    PERFORM enable_plugin_for_scope(v_scope, 'rye-source-context', 'Source Context', jsonb_build_object('version', '0.1.0'), 'rye:first-run');
+    PERFORM enable_plugin_for_scope(v_scope, 'rye-evidence-anchor', 'Evidence Anchor', jsonb_build_object('version', '0.1.0'), 'rye:first-run');
+    PERFORM enable_plugin_for_scope(v_scope, 'rye-org', 'Organization Model', jsonb_build_object('version', '0.1.0'), 'rye:first-run');
+    PERFORM enable_plugin_for_scope(v_scope, 'rye-project-management', 'Project Management', jsonb_build_object('version', '0.1.0'), 'rye:first-run');
+
+    PERFORM activate_onboarding_scope(v_scope, 'rye:first-run');
+END
+\$\$;
+SQL
+)"
+
+  info "Creating first onboarding scope"
+  psql_exec "$sql"
+
+  cat <<EOF
+
+Onboarding scope is active.
+Scope key: $key
+
+Next:
+  Connect a source and classify it under this scope. Start with source metadata,
+  not accepted business facts.
+EOF
+}
+
+cmd_status() {
+  local sql
+  sql="$(cat <<'SQL'
+SET search_path = rye, public, pg_catalog;
+SELECT 'nodes' AS kind, node_type AS type, count(*)::text AS count
+FROM nodes
+WHERE archived_at IS NULL
+GROUP BY node_type
+UNION ALL
+SELECT 'scopes' AS kind, n.label AS type, coalesce(a.claim->>'status', 'unknown') AS count
+FROM nodes n
+LEFT JOIN current_valid_assertions a
+  ON a.subject_node_id = n.id
+ AND a.assertion_type = 'scope_status'
+WHERE n.archived_at IS NULL
+  AND n.node_type = 'onboarding_scope'
+ORDER BY kind, type;
+SQL
+)"
+  psql_exec "$sql"
+}
+
+main() {
+  local command="${1:-help}"
+  if [[ $# -gt 0 ]]; then
+    shift
+  fi
+
+  cd "$ROOT_DIR"
+
+  case "$command" in
+    local)
+      cmd_local "$@"
+      ;;
+    remote)
+      cmd_remote "$@"
+      ;;
+    onboard)
+      cmd_onboard "$@"
+      ;;
+    status)
+      cmd_status "$@"
+      ;;
+    help|-h|--help)
+      usage
+      ;;
+    *)
+      die "Unknown command: $command"
+      ;;
+  esac
+}
+
+main "$@"

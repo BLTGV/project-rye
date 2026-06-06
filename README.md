@@ -1,6 +1,52 @@
 # Project Rye Implementation Scaffold
 
-This repo now includes an executable Rye implementation scaffold based on the design docs.
+This repo includes an executable Rye implementation scaffold based on the design docs.
+
+## Fast Start
+
+Use the hosted onboarding script to choose where Rye should live.
+
+### Try Rye Locally
+
+This starts PostgreSQL in Docker, installs Rye, writes `.rye.env`, and leaves
+the database running. It is the fastest way to try Rye before migrating to a
+remote database later.
+
+```bash
+curl -fsSL https://projectrye.dev/onboard | sh
+```
+
+### Install Into A Remote Database
+
+Use an existing PostgreSQL 15+ database. Rye installs its schema alongside
+existing tables and does not reset remote data.
+
+```bash
+curl -fsSL https://projectrye.dev/onboard | sh -s -- --remote "$DATABASE_URL"
+```
+
+### Agent-Led Onboarding
+
+Install the Rye onboarding skill with Vercel's skills CLI:
+
+```bash
+npx skills add BLTGV/project-rye --skill rye-onboarding
+```
+
+Then ask the agent to use the Rye onboarding skill to create the first
+onboarding scope and connect the first source. The scope should be named after
+the organizational purpose or workflow, not the source or retrieval channel.
+
+### Repo-Local Commands
+
+If you already cloned the repo:
+
+```bash
+./scripts/rye local --fresh
+./scripts/rye remote --db-url "$DATABASE_URL"
+./scripts/rye onboard --label "First Scope" --purpose "Describe the limited workflow Rye should assist first."
+./scripts/rye status
+```
 
 ## Requirements
 
@@ -9,7 +55,7 @@ This repo now includes an executable Rye implementation scaffold based on the de
   - `psql` CLI available in PATH, or
   - Docker + Docker Compose (`docker compose` or `docker-compose`)
 
-## Install
+## Lower-Level Install
 
 ```bash
 export DATABASE_URL='postgresql://user:pass@host:5432/dbname'
@@ -53,9 +99,10 @@ Override the role name with:
 RYE_TEST_ROLE=my_test_role ./scripts/conformance.sh
 ```
 
-## Docker test flow (recommended on MBP)
+## Docker Test Flow
 
-This path does not require host `psql`; everything runs inside Docker.
+This path is for full install and conformance testing. New users should prefer
+`./scripts/rye local --fresh`.
 
 ```bash
 # Full reset + install + seed + conformance
@@ -103,6 +150,8 @@ Skill folders are under `skills/`:
 - `rye-installer`
 - `rye-agent-ops`
 - `rye-domain-onboarding`
+- `rye-import-inspector`
+- `rye-knowledge-reader`
 - `rye-onboarding`
 - `rye-pattern-library`
 - `rye-source-context-intake`

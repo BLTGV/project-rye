@@ -1,0 +1,147 @@
+#!/bin/sh
+set -eu
+
+RYE_REPO_URL="${RYE_REPO_URL:-https://github.com/BLTGV/project-rye.git}"
+RYE_BRANCH="${RYE_BRANCH:-main}"
+RYE_DIR="${RYE_DIR:-project-rye}"
+RYE_MODE="${RYE_MODE:-local}"
+RYE_DB_URL="${DATABASE_URL:-}"
+RYE_SEED=0
+RYE_FRESH=1
+
+usage() {
+  cat <<'EOF'
+Project Rye onboarding bootstrap
+
+Usage:
+  curl -fsSL https://projectrye.dev/onboard | sh
+  curl -fsSL https://projectrye.dev/onboard | sh -s -- --remote "$DATABASE_URL"
+
+Options:
+  --local              Install Rye into local Docker Postgres. Default.
+  --remote <db-url>    Install Rye into an existing PostgreSQL 15+ database.
+  --db-url <db-url>    Same as --remote.
+  --dir <path>         Clone/use repo directory. Default: project-rye.
+  --repo <url>         Git repo URL. Default: https://github.com/BLTGV/project-rye.git
+  --branch <name>      Git branch. Default: main.
+  --seed               Add quickstart seed data.
+  --keep-local-data    For local mode, do not drop the Docker Rye volume.
+  -h, --help           Show this help.
+
+After install, add the Rye onboarding skill for your coding agent:
+  npx skills add BLTGV/project-rye --skill rye-onboarding
+EOF
+}
+
+say() {
+  printf '%s\n' "==> $*"
+}
+
+die() {
+  printf '%s\n' "error: $*" >&2
+  exit 1
+}
+
+need() {
+  command -v "$1" >/dev/null 2>&1 || die "$1 is required."
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --local)
+      RYE_MODE="local"
+      shift
+      ;;
+    --remote|--db-url)
+      RYE_MODE="remote"
+      RYE_DB_URL="${2:-}"
+      shift 2
+      ;;
+    --dir)
+      RYE_DIR="${2:-}"
+      shift 2
+      ;;
+    --repo)
+      RYE_REPO_URL="${2:-}"
+      shift 2
+      ;;
+    --branch)
+      RYE_BRANCH="${2:-}"
+      shift 2
+      ;;
+    --seed)
+      RYE_SEED=1
+      shift
+      ;;
+    --keep-local-data)
+      RYE_FRESH=0
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      die "Unknown option: $1"
+      ;;
+  esac
+done
+
+need git
+
+if [ ! -d "$RYE_DIR/.git" ]; then
+  say "Cloning Rye into $RYE_DIR"
+  git clone --branch "$RYE_BRANCH" "$RYE_REPO_URL" "$RYE_DIR"
+else
+  say "Using existing Rye repo at $RYE_DIR"
+  (
+    cd "$RYE_DIR"
+    git fetch origin "$RYE_BRANCH"
+    git checkout "$RYE_BRANCH"
+    git pull --ff-only origin "$RYE_BRANCH"
+  )
+fi
+
+cd "$RYE_DIR"
+
+if [ "$RYE_MODE" = "remote" ]; then
+  [ -n "$RYE_DB_URL" ] || die "Remote mode requires --remote <db-url> or DATABASE_URL."
+  need psql
+  say "Installing Rye into remote database"
+  if [ "$RYE_SEED" -eq 1 ]; then
+    ./scripts/rye remote --db-url "$RYE_DB_URL" --seed
+  else
+    ./scripts/rye remote --db-url "$RYE_DB_URL"
+  fi
+else
+  need docker
+  if ! docker compose version >/dev/null 2>&1 && ! command -v docker-compose >/dev/null 2>&1; then
+    die "Docker Compose is required for local mode."
+  fi
+
+  say "Installing Rye locally"
+  local_args="local"
+  if [ "$RYE_FRESH" -eq 1 ]; then
+    local_args="$local_args --fresh"
+  fi
+  if [ "$RYE_SEED" -eq 1 ]; then
+    local_args="$local_args --seed"
+  fi
+  # shellcheck disable=SC2086
+  ./scripts/rye $local_args
+fi
+
+cat <<'EOF'
+
+Rye is ready.
+
+For an agent-led setup, install the onboarding skill in the project where the
+agent will work:
+
+  npx skills add BLTGV/project-rye --skill rye-onboarding
+
+Then ask the agent:
+
+  Use the Rye onboarding skill to create the first onboarding scope and connect
+  the first source. Start with source metadata and do not promote facts yet.
+EOF
