@@ -38,6 +38,9 @@ where your agent will work:
 npx skills add BLTGV/project-rye --skill rye-onboarding
 ```
 
+The onboarding skill will install `rye-installer` on demand if the agent needs
+installation, migration, verification, or conformance guidance.
+
 Then open Codex in that same folder and start with:
 
 ```text

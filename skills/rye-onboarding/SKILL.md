@@ -19,6 +19,12 @@ may do without human review.
 ## Workflow
 
 0. If Rye is not installed in the current project, use the public bootstrap:
+   - If the task includes installation, migration, verification, schema
+     debugging, or conformance checks, make sure the installer skill exists:
+     `test -f skills/rye-installer/SKILL.md || npx skills add BLTGV/project-rye --skill rye-installer`
+   - After installing it, read `skills/rye-installer/SKILL.md` directly if
+     the agent harness does not automatically refresh available skills in the
+     current session.
    - Local trial: `curl -fsSL https://projectrye.dev/onboard | sh`
    - Remote database:
      `curl -fsSL https://projectrye.dev/onboard | sh -s -- --remote "$DATABASE_URL"`
@@ -58,28 +64,35 @@ may do without human review.
 
 Use this sequence when the user says they are starting from scratch:
 
-1. Confirm whether they want:
+1. Ensure installer guidance is available:
+   - If `skills/rye-installer/SKILL.md` exists, read it for install,
+     migration, verification, and conformance details.
+   - If it is missing and `npx` is available, run
+     `npx skills add BLTGV/project-rye --skill rye-installer`.
+   - If the install succeeds but the skill does not auto-load in the current
+     turn, read `skills/rye-installer/SKILL.md` directly and continue.
+2. Confirm whether they want:
    - local trial first, with a Docker Postgres database they can migrate away
      from later
    - remote install into a PostgreSQL 15+ database they already control
-2. Run the bootstrap:
+3. Run the bootstrap:
    - local: `curl -fsSL https://projectrye.dev/onboard | sh`
    - remote:
      `curl -fsSL https://projectrye.dev/onboard | sh -s -- --remote "$DATABASE_URL"`
-3. Check installation with `./scripts/rye status`.
-4. If running inside Codex or another coding-agent harness, orient from the
+4. Check installation with `./scripts/rye status`.
+5. If running inside Codex or another coding-agent harness, orient from the
    current project folder first:
    - read `.rye.env` if present, but do not print secrets
    - run `./scripts/rye status`
    - run `./scripts/rye plugins list` to see installed vocabulary metadata
    - summarize whether Rye is installed and whether any onboarding scopes
      already exist
-5. Ask for the first limited workflow Rye should assist. Do not ask the user
+6. Ask for the first limited workflow Rye should assist. Do not ask the user
    for graph node and edge types first; derive the initial policy from purpose,
    boundary, source plans, and review needs.
-6. Create the first onboarding scope with `./scripts/rye onboard --label ...
+7. Create the first onboarding scope with `./scripts/rye onboard --label ...
    --purpose ...`.
-7. Only after the scope exists, connect source metadata with
+8. Only after the scope exists, connect source metadata with
    `rye-source-context` conventions.
 
 ## Codex Harness Prompt
