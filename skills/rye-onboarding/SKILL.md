@@ -21,10 +21,12 @@ may do without human review.
 0. If Rye is not installed in the current project, use the public bootstrap:
    - If the task includes installation, migration, verification, schema
      debugging, or conformance checks, make sure the installer skill exists:
-     `test -f skills/rye-installer/SKILL.md || npx skills add BLTGV/project-rye --skill rye-installer`
+     `test -f .agents/skills/rye-installer/SKILL.md || test -f skills/rye-installer/SKILL.md || npx skills add BLTGV/project-rye --skill rye-installer`
    - After installing it, read `skills/rye-installer/SKILL.md` directly if
      the agent harness does not automatically refresh available skills in the
-     current session.
+     current session. In a fresh consumer project, the installed file is usually
+     `.agents/skills/rye-installer/SKILL.md`; in a Rye checkout it may be
+     `skills/rye-installer/SKILL.md`.
    - Local trial:
 
      ```bash
@@ -82,12 +84,13 @@ may do without human review.
 Use this sequence when the user says they are starting from scratch:
 
 1. Ensure installer guidance is available:
-   - If `skills/rye-installer/SKILL.md` exists, read it for install,
-     migration, verification, and conformance details.
+   - If `.agents/skills/rye-installer/SKILL.md` or
+     `skills/rye-installer/SKILL.md` exists, read it for install, migration,
+     verification, and conformance details.
    - If it is missing and `npx` is available, run
      `npx skills add BLTGV/project-rye --skill rye-installer`.
    - If the install succeeds but the skill does not auto-load in the current
-     turn, read `skills/rye-installer/SKILL.md` directly and continue.
+     turn, read `.agents/skills/rye-installer/SKILL.md` directly and continue.
 2. Confirm whether they want:
    - local trial first, with a Docker Postgres database they can migrate away
      from later
