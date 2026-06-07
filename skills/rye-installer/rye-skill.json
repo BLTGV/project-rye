@@ -1,0 +1,40 @@
+{
+  "$schema": "../rye-skill.schema.json",
+  "id": "rye-installer",
+  "version": "0.1.0",
+  "label": "Rye Installer",
+  "description": "Install, migrate, verify, and test Rye PostgreSQL deployments for local and remote databases.",
+  "source": {
+    "type": "github",
+    "repo": "BLTGV/project-rye",
+    "path": "skills/rye-installer"
+  },
+  "install": {
+    "manager": "vercel-skills",
+    "package": "BLTGV/project-rye",
+    "skill": "rye-installer",
+    "command": "npx skills add BLTGV/project-rye --skill rye-installer"
+  },
+  "requires": {
+    "plugins": [],
+    "db_functions": ["rye_catalog"],
+    "db_views": [],
+    "cli_commands": ["./scripts/rye init local", "./scripts/rye init remote", "./scripts/rye doctor"]
+  },
+  "capabilities": [
+    {
+      "id": "install-rye",
+      "label": "Install Rye",
+      "kind": "skill",
+      "description": "Guide local or remote Rye installation, migration, metadata sync, verification, and conformance checks.",
+      "read_only": false,
+      "requires": {
+        "cli_commands": ["./scripts/rye init local", "./scripts/rye init remote"]
+      },
+      "entrypoints": [
+        { "type": "skill_install", "command": "npx skills add BLTGV/project-rye --skill rye-installer" },
+        { "type": "cli_command", "command": "./scripts/rye init local --fresh" }
+      ]
+    }
+  ]
+}

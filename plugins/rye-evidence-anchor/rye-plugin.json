@@ -13,6 +13,21 @@
     "event_types": ["evidence_anchor_recorded"],
     "artifact_types": ["text_span", "bounding_box", "row_anchor", "cell_anchor", "provider_permalink"]
   },
+  "capabilities": [
+    {
+      "id": "anchor-evidence",
+      "label": "Anchor Evidence",
+      "kind": "plugin_contract",
+      "description": "Preserve source links, spans, rows, cells, and provider permalinks for reviewable claims.",
+      "read_only": false,
+      "requires": {
+        "db_functions": ["record_artifact", "record_assertion"]
+      },
+      "entrypoints": [
+        { "type": "db_function", "name": "record_artifact" }
+      ]
+    }
+  ],
   "onboarding": {
     "scope_questions": [],
     "source_questions": [],

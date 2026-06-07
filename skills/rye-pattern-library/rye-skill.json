@@ -1,0 +1,39 @@
+{
+  "$schema": "../rye-skill.schema.json",
+  "id": "rye-pattern-library",
+  "version": "0.1.0",
+  "label": "Rye Pattern Library",
+  "description": "Select and draft reusable Rye modeling patterns, JSON Schema contracts, assertion keys, and examples.",
+  "source": {
+    "type": "github",
+    "repo": "BLTGV/project-rye",
+    "path": "skills/rye-pattern-library"
+  },
+  "install": {
+    "manager": "vercel-skills",
+    "package": "BLTGV/project-rye",
+    "skill": "rye-pattern-library",
+    "command": "npx skills add BLTGV/project-rye --skill rye-pattern-library"
+  },
+  "requires": {
+    "plugins": [],
+    "db_functions": ["rye_catalog", "rye_plugin_catalog"],
+    "db_views": [],
+    "cli_commands": ["./scripts/rye catalog plugins"]
+  },
+  "capabilities": [
+    {
+      "id": "draft-rye-pattern",
+      "label": "Draft Rye Pattern",
+      "kind": "skill",
+      "description": "Guide reusable node, edge, assertion, event, artifact, and JSON Schema contract design.",
+      "read_only": true,
+      "requires": {
+        "db_functions": ["rye_catalog", "rye_plugin_catalog"]
+      },
+      "entrypoints": [
+        { "type": "skill_install", "command": "npx skills add BLTGV/project-rye --skill rye-pattern-library" }
+      ]
+    }
+  ]
+}

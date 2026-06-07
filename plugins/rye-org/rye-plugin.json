@@ -43,6 +43,21 @@
     "event_types": [],
     "artifact_types": []
   },
+  "capabilities": [
+    {
+      "id": "model-organization",
+      "label": "Model Organization",
+      "kind": "plugin_contract",
+      "description": "Represent people, systems, departments, mission, vision, goals, related organizations, policies, and procedures.",
+      "read_only": false,
+      "requires": {
+        "db_functions": ["record_assertion", "record_event"]
+      },
+      "entrypoints": [
+        { "type": "plugin", "name": "rye-org" }
+      ]
+    }
+  ],
   "onboarding": {
     "scope_questions": [
       "Who understands this function?",

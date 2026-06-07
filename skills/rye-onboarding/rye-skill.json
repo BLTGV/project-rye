@@ -1,0 +1,41 @@
+{
+  "$schema": "../rye-skill.schema.json",
+  "id": "rye-onboarding",
+  "version": "0.1.0",
+  "label": "Rye Onboarding",
+  "description": "Create or revise onboarding scopes, source context policies, plugin bindings, and context-gap review packets before agents promote evidence.",
+  "source": {
+    "type": "github",
+    "repo": "BLTGV/project-rye",
+    "path": "skills/rye-onboarding"
+  },
+  "install": {
+    "manager": "vercel-skills",
+    "package": "BLTGV/project-rye",
+    "skill": "rye-onboarding",
+    "command": "npx skills add BLTGV/project-rye --skill rye-onboarding"
+  },
+  "requires": {
+    "plugins": ["rye-source-context", "rye-evidence-anchor", "rye-org"],
+    "db_functions": ["create_onboarding_scope", "record_scope_policy", "enable_plugin_for_scope", "activate_onboarding_scope", "compile_scope_policy", "rye_agent_context"],
+    "db_views": ["current_valid_assertions"],
+    "cli_commands": ["./scripts/rye onboard create", "./scripts/rye context"]
+  },
+  "capabilities": [
+    {
+      "id": "create-onboarding-scope",
+      "label": "Create Onboarding Scope",
+      "kind": "skill",
+      "description": "Guide first-scope and scope-revision conversations before source intake or fact promotion.",
+      "read_only": false,
+      "requires": {
+        "plugins": ["rye-source-context", "rye-evidence-anchor", "rye-org"],
+        "db_functions": ["create_onboarding_scope", "record_scope_policy", "enable_plugin_for_scope", "activate_onboarding_scope"]
+      },
+      "entrypoints": [
+        { "type": "skill_install", "command": "npx skills add BLTGV/project-rye --skill rye-onboarding" },
+        { "type": "cli_command", "command": "./scripts/rye onboard create --label <name> --purpose <text>" }
+      ]
+    }
+  ]
+}

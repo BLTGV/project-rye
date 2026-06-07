@@ -1,0 +1,39 @@
+{
+  "$schema": "../rye-skill.schema.json",
+  "id": "rye-agent-ops",
+  "version": "0.1.0",
+  "label": "Rye Agent Ops",
+  "description": "Operate Rye data safely for LLM agent read/write flows, domain table links, assertion keys, provenance, and auditable SQL.",
+  "source": {
+    "type": "github",
+    "repo": "BLTGV/project-rye",
+    "path": "skills/rye-agent-ops"
+  },
+  "install": {
+    "manager": "vercel-skills",
+    "package": "BLTGV/project-rye",
+    "skill": "rye-agent-ops",
+    "command": "npx skills add BLTGV/project-rye --skill rye-agent-ops"
+  },
+  "requires": {
+    "plugins": [],
+    "db_functions": ["rye_catalog", "agent_node_summary", "link_record", "track_table", "record_event", "record_assertion"],
+    "db_views": ["current_valid_assertions"],
+    "cli_commands": ["./scripts/rye status", "./scripts/rye catalog capabilities"]
+  },
+  "capabilities": [
+    {
+      "id": "operate-rye-safely",
+      "label": "Operate Rye Safely",
+      "kind": "skill",
+      "description": "Guide agents through RLS setup, safe reads, auditable writes, provenance, and candidate promotion flows.",
+      "read_only": false,
+      "requires": {
+        "db_functions": ["record_event", "record_assertion", "link_record", "track_table"]
+      },
+      "entrypoints": [
+        { "type": "skill_install", "command": "npx skills add BLTGV/project-rye --skill rye-agent-ops" }
+      ]
+    }
+  ]
+}

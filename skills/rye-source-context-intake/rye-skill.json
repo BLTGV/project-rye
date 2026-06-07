@@ -1,0 +1,42 @@
+{
+  "$schema": "../rye-skill.schema.json",
+  "id": "rye-source-context-intake",
+  "version": "0.1.0",
+  "label": "Rye Source Context Intake",
+  "description": "Register source accounts, containers, items, profiles, and confirmation decisions without assuming connector semantics.",
+  "source": {
+    "type": "github",
+    "repo": "BLTGV/project-rye",
+    "path": "skills/rye-source-context-intake"
+  },
+  "install": {
+    "manager": "vercel-skills",
+    "package": "BLTGV/project-rye",
+    "skill": "rye-source-context-intake",
+    "command": "npx skills add BLTGV/project-rye --skill rye-source-context-intake"
+  },
+  "requires": {
+    "plugins": ["rye-source-context", "rye-evidence-anchor"],
+    "db_functions": ["rye_source_inventory", "rye_pending_context_confirmations", "create_context_gap_candidate"],
+    "db_views": ["current_valid_assertions"],
+    "cli_commands": ["./scripts/rye sources inventory", "./scripts/rye sources pending-context"]
+  },
+  "capabilities": [
+    {
+      "id": "intake-source-context",
+      "label": "Intake Source Context",
+      "kind": "skill_script",
+      "description": "Validate and commit connector-neutral source context records while preserving provenance and confirmation state.",
+      "read_only": false,
+      "requires": {
+        "plugins": ["rye-source-context", "rye-evidence-anchor"],
+        "db_functions": ["rye_source_inventory", "rye_pending_context_confirmations"]
+      },
+      "entrypoints": [
+        { "type": "skill_install", "command": "npx skills add BLTGV/project-rye --skill rye-source-context-intake" },
+        { "type": "cli_command", "command": "node skills/rye-source-context-intake/scripts/source_context_commit_rye.mts" },
+        { "type": "db_function", "name": "rye_source_inventory" }
+      ]
+    }
+  ]
+}

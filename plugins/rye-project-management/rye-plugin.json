@@ -13,6 +13,22 @@
     "event_types": ["status_change", "comment", "time_log", "assignment_change", "blocker_added", "blocker_resolved", "review_requested", "task_created"],
     "artifact_types": []
   },
+  "capabilities": [
+    {
+      "id": "model-project-work",
+      "label": "Model Project Work",
+      "kind": "plugin_contract",
+      "description": "Represent tasks, projects, milestones, blockers, dependencies, assignments, and work status.",
+      "read_only": false,
+      "requires": {
+        "plugins": ["rye-org"],
+        "db_functions": ["record_assertion", "create_knowledge_candidate", "promote_candidate_to_task"]
+      },
+      "entrypoints": [
+        { "type": "plugin", "name": "rye-project-management" }
+      ]
+    }
+  ],
   "onboarding": {
     "scope_questions": [
       "Is this scope tracking work itself, or only preserving project-related evidence?"

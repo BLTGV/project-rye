@@ -13,6 +13,21 @@
     "event_types": ["domain_change", "change_plan_created", "change_verified"],
     "artifact_types": ["change_plan", "verification_report"]
   },
+  "capabilities": [
+    {
+      "id": "track-domain-changes",
+      "label": "Track Domain Changes",
+      "kind": "plugin_contract",
+      "description": "Represent change plans, before/after evidence, and verification results in Rye.",
+      "read_only": false,
+      "requires": {
+        "db_functions": ["track_table", "capture_domain_change", "record_event"]
+      },
+      "entrypoints": [
+        { "type": "db_function", "name": "track_table" }
+      ]
+    }
+  ],
   "onboarding": {
     "scope_questions": [
       "Which changes should Rye track and why?"

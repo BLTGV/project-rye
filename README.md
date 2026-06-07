@@ -16,9 +16,9 @@ remote database later.
 curl -fsSL https://projectrye.dev/onboard | sh
 ```
 
-The bootstrap installs the Rye schema and syncs plugin metadata for contributed
-node, edge, assertion, event, and artifact types. It does not add example data
-unless you pass `--seed`.
+The bootstrap installs the Rye schema and syncs portable Rye metadata for
+plugins, skills, capabilities, and contributed node, edge, assertion, event,
+and artifact types. It does not add example data unless you pass `--seed`.
 
 ### Install Into A Remote Database
 
@@ -60,12 +60,18 @@ source or retrieval channel.
 If you already cloned the repo:
 
 ```bash
-./scripts/rye local --fresh
-./scripts/rye remote --db-url "$DATABASE_URL"
-./scripts/rye plugins list
-./scripts/rye onboard --label "First Scope" --purpose "Describe the limited workflow Rye should assist first."
+./scripts/rye init local --fresh
+./scripts/rye init remote --db-url "$DATABASE_URL"
+./scripts/rye catalog plugins
+./scripts/rye catalog skills
+./scripts/rye catalog capabilities --json
+./scripts/rye context --json
+./scripts/rye onboard create --label "First Scope" --purpose "Describe the limited workflow Rye should assist first."
 ./scripts/rye status
 ```
+
+The older aliases still work: `local`, `remote`, `plugins list`, and
+`onboard --label ...`.
 
 ## Requirements
 
@@ -83,8 +89,9 @@ export DATABASE_URL='postgresql://user:pass@host:5432/dbname'
 
 ## Optional seed
 
-Seed means quickstart example data, not Rye vocabulary metadata. Plugin
-metadata is installed automatically by the fast-start commands.
+Seed means quickstart example data, not Rye vocabulary or skill metadata.
+Portable plugin, skill, and capability metadata is installed automatically by
+the fast-start commands.
 
 ```bash
 ./scripts/install.sh --profiles crm,pm --seed

@@ -1,0 +1,41 @@
+{
+  "$schema": "../rye-skill.schema.json",
+  "id": "rye-tabular-intake",
+  "version": "0.1.0",
+  "label": "Rye Tabular Intake",
+  "description": "Inspect, extract, map, group, stage, and commit CSV/XLSX source tables with Rye lineage.",
+  "source": {
+    "type": "github",
+    "repo": "BLTGV/project-rye",
+    "path": "skills/rye-tabular-intake"
+  },
+  "install": {
+    "manager": "vercel-skills",
+    "package": "BLTGV/project-rye",
+    "skill": "rye-tabular-intake",
+    "command": "npx skills add BLTGV/project-rye --skill rye-tabular-intake"
+  },
+  "requires": {
+    "plugins": ["rye-tabular-intake", "rye-evidence-anchor"],
+    "db_functions": ["record_event", "record_artifact"],
+    "db_views": ["current_assertions"],
+    "cli_commands": ["node skills/rye-tabular-intake/scripts/tabular_inspect.mts", "node skills/rye-tabular-intake/scripts/tabular_commit_rye.mts"]
+  },
+  "capabilities": [
+    {
+      "id": "intake-tabular-data",
+      "label": "Intake Tabular Data",
+      "kind": "skill_script",
+      "description": "Inspect, extract, map, group, stage, and commit tabular source records with source-set lineage.",
+      "read_only": false,
+      "requires": {
+        "plugins": ["rye-tabular-intake", "rye-evidence-anchor"],
+        "db_functions": ["record_event", "record_artifact"]
+      },
+      "entrypoints": [
+        { "type": "skill_install", "command": "npx skills add BLTGV/project-rye --skill rye-tabular-intake" },
+        { "type": "cli_command", "command": "node skills/rye-tabular-intake/scripts/tabular_commit_rye.mts" }
+      ]
+    }
+  ]
+}

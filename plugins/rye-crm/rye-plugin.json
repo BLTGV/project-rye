@@ -13,6 +13,22 @@
     "event_types": ["email", "phone_call", "meeting", "note", "offer_sent", "stage_change"],
     "artifact_types": []
   },
+  "capabilities": [
+    {
+      "id": "model-crm-context",
+      "label": "Model CRM Context",
+      "kind": "plugin_contract",
+      "description": "Represent CRM contacts, organizations, opportunities, campaigns, and pipeline assertions.",
+      "read_only": false,
+      "requires": {
+        "plugins": ["rye-org"],
+        "db_functions": ["record_assertion", "record_event"]
+      },
+      "entrypoints": [
+        { "type": "plugin", "name": "rye-crm" }
+      ]
+    }
+  ],
   "onboarding": {
     "scope_questions": [
       "Is this scope actually managing CRM concepts, or only observing lead/contact evidence?"

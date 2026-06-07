@@ -7,31 +7,35 @@ LOG_DIR="${RYE_LOG_DIR:-${ROOT_DIR}/.rye}"
 INSTALL_LOG="${RYE_INSTALL_LOG:-${LOG_DIR}/install.log}"
 DEFAULT_PROFILES="${RYE_PROFILES:-crm,pm}"
 DEFAULT_SCHEMA="${RYE_SCHEMA:-rye}"
+OUTPUT_JSON=0
+QUIET=0
+CLI_DB_URL_SET=0
+CLI_SCHEMA_SET=0
 
 usage() {
   cat <<'EOF'
 Usage:
+  ./scripts/rye init local [--fresh] [--seed] [--profiles crm,pm]
+  ./scripts/rye init remote --db-url <postgresql://...> [--seed] [--profiles crm,pm]
+  ./scripts/rye onboard create --label <name> --purpose <text> [--key <slug>] [--owner <name>]
+  ./scripts/rye status [--json]
+  ./scripts/rye doctor [--json]
+  ./scripts/rye catalog plugins|skills|capabilities [--json]
+  ./scripts/rye context [--scope <uuid-or-key>] [--json]
+  ./scripts/rye sources inventory|pending-context [--json]
+
+Aliases:
   ./scripts/rye local [--fresh] [--seed] [--profiles crm,pm]
   ./scripts/rye remote --db-url <postgresql://...> [--seed] [--profiles crm,pm]
-  ./scripts/rye onboard --label <name> --purpose <text> [--key <slug>] [--owner <name>]
+  ./scripts/rye onboard --label <name> --purpose <text> [...]
   ./scripts/rye plugins [sync|list]
-  ./scripts/rye status
 
-Fast paths:
-  ./scripts/rye local --fresh
-      Try Rye locally in Docker. Drops the local Rye Docker volume, installs Rye,
-      writes .rye.env, and keeps Postgres running.
-
-  ./scripts/rye remote --db-url "$DATABASE_URL"
-      Install Rye into an existing PostgreSQL 15+ database and write .rye.env.
-      This does not drop or reset remote data.
-
-  ./scripts/rye onboard --label "Glamies Project" --purpose "Assist the Glamies project with evidence-backed coordination."
-      Create and activate the first onboarding scope using the database in
-      .rye.env or DATABASE_URL.
-
-  ./scripts/rye plugins list
-      Show installed Rye plugin metadata and contributed type counts.
+Global options:
+  --db-url <postgresql://...>   Use this database instead of .rye.env
+  --schema <schema>             Rye schema name. Default: rye
+  --env-file <path>             Local Rye env file. Default: .rye.env
+  --json                        Return machine-readable JSON where supported
+  --quiet                       Reduce non-error output
 EOF
 }
 
@@ -41,7 +45,7 @@ die() {
 }
 
 info() {
-  echo "==> $*"
+  [[ "$QUIET" -eq 1 ]] || echo "==> $*"
 }
 
 run_logged() {
@@ -51,7 +55,7 @@ run_logged() {
   mkdir -p "$LOG_DIR"
   info "$label"
   if "$@" > "$INSTALL_LOG" 2>&1; then
-    echo "    ok (log: $INSTALL_LOG)"
+    [[ "$QUIET" -eq 1 ]] || echo "    ok (log: $INSTALL_LOG)"
     return
   fi
 
@@ -68,6 +72,49 @@ shell_quote() {
 sql_literal() {
   local value="${1//\'/\'\'}"
   printf "'%s'" "$value"
+}
+
+redact_db_url() {
+  sed -E 's#(postgres(ql)?://[^:/@]+:)[^@]*@#\1****@#' <<<"$1"
+}
+
+parse_global_args() {
+  ARGS=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --db-url)
+        DATABASE_URL="${2:-}"
+        RYE_DB_MODE="remote"
+        unset RYE_CONTAINER_DATABASE_URL || true
+        export DATABASE_URL RYE_DB_MODE
+        CLI_DB_URL_SET=1
+        shift 2
+        ;;
+      --schema)
+        RYE_SCHEMA="${2:-}"
+        DEFAULT_SCHEMA="$RYE_SCHEMA"
+        export RYE_SCHEMA
+        CLI_SCHEMA_SET=1
+        shift 2
+        ;;
+      --env-file)
+        ENV_FILE="${2:-}"
+        shift 2
+        ;;
+      --json)
+        OUTPUT_JSON=1
+        shift
+        ;;
+      --quiet)
+        QUIET=1
+        shift
+        ;;
+      *)
+        ARGS+=("$1")
+        shift
+        ;;
+    esac
+  done
 }
 
 write_env() {
@@ -90,9 +137,25 @@ write_env() {
 }
 
 load_env_if_present() {
+  local explicit_db="${DATABASE_URL:-}"
+  local explicit_schema="${RYE_SCHEMA:-}"
+
   if [[ -f "$ENV_FILE" ]]; then
     # shellcheck disable=SC1090
     source "$ENV_FILE"
+  fi
+
+  if [[ "$CLI_DB_URL_SET" -eq 1 ]]; then
+    DATABASE_URL="$explicit_db"
+    RYE_DB_MODE="remote"
+    unset RYE_CONTAINER_DATABASE_URL || true
+    export DATABASE_URL RYE_DB_MODE
+  fi
+
+  if [[ "$CLI_SCHEMA_SET" -eq 1 ]]; then
+    RYE_SCHEMA="$explicit_schema"
+    DEFAULT_SCHEMA="$explicit_schema"
+    export RYE_SCHEMA
   fi
 }
 
@@ -128,20 +191,29 @@ wait_for_db() {
   die "Postgres did not become ready in time."
 }
 
-psql_exec() {
+psql_run() {
   local sql="$1"
+  shift
   load_env_if_present
 
   if [[ "${RYE_DB_MODE:-}" == "local" ]]; then
     find_compose_cmd
-    compose exec -T rye-db psql "${RYE_CONTAINER_DATABASE_URL:-postgresql://rye:rye@127.0.0.1:5432/rye}" -v ON_ERROR_STOP=1 <<<"$sql"
+    compose exec -T rye-db psql "${RYE_CONTAINER_DATABASE_URL:-postgresql://rye:rye@127.0.0.1:5432/rye}" -v ON_ERROR_STOP=1 "$@" <<<"$sql"
     return
   fi
 
   local db_url="${DATABASE_URL:-}"
-  [[ -n "$db_url" ]] || die "DATABASE_URL is not set. Run ./scripts/rye local or ./scripts/rye remote first."
+  [[ -n "$db_url" ]] || die "DATABASE_URL is not set. Run ./scripts/rye init local or ./scripts/rye init remote first."
   command -v psql >/dev/null 2>&1 || die "psql is required for remote database commands."
-  psql "$db_url" -v ON_ERROR_STOP=1 <<<"$sql"
+  psql "$db_url" -v ON_ERROR_STOP=1 "$@" <<<"$sql"
+}
+
+psql_exec() {
+  psql_run "$1"
+}
+
+psql_json() {
+  psql_run "$1" -qAt
 }
 
 local_install() {
@@ -171,7 +243,7 @@ local_install() {
   compose exec -T rye-db bash -lc "$install_cmd"
 }
 
-sync_plugins() {
+sync_metadata() {
   load_env_if_present
 
   if [[ "${RYE_DB_MODE:-}" == "local" ]]; then
@@ -181,7 +253,7 @@ sync_plugins() {
   fi
 
   local db_url="${DATABASE_URL:-}"
-  [[ -n "$db_url" ]] || die "DATABASE_URL is not set. Run ./scripts/rye local or ./scripts/rye remote first."
+  [[ -n "$db_url" ]] || die "DATABASE_URL is not set. Run ./scripts/rye init local or ./scripts/rye init remote first."
   command -v psql >/dev/null 2>&1 || die "psql is required for remote database commands."
   "${ROOT_DIR}/scripts/sync_plugin_metadata.sh" --db-url "$db_url" --schema "${RYE_SCHEMA:-rye}"
 }
@@ -191,6 +263,24 @@ slugify() {
     | tr '[:upper:]' '[:lower:]' \
     | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//' \
     | sed -E 's/^-?$/scope/'
+}
+
+scope_sql_expr() {
+  local scope="${1:-}"
+  if [[ -z "$scope" ]]; then
+    printf 'NULL::uuid'
+    return
+  fi
+
+  if [[ "$scope" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]; then
+    printf '%s::uuid' "$(sql_literal "$scope")"
+    return
+  fi
+
+  printf '(SELECT id FROM rye.nodes WHERE archived_at IS NULL AND node_type = %s AND external_source = %s AND external_id = %s LIMIT 1)' \
+    "$(sql_literal "onboarding_scope")" \
+    "$(sql_literal "rye_onboarding_scope")" \
+    "$(sql_literal "$scope")"
 }
 
 cmd_local() {
@@ -213,10 +303,6 @@ cmd_local() {
         profiles="${2:-}"
         shift 2
         ;;
-      --schema)
-        schema="${2:-}"
-        shift 2
-        ;;
       -h|--help)
         usage
         exit 0
@@ -234,14 +320,15 @@ cmd_local() {
   local container_db_url="postgresql://${POSTGRES_USER:-rye}:${POSTGRES_PASSWORD:-rye}@127.0.0.1:5432/${POSTGRES_DB:-rye}"
   write_env "local" "$db_url" "$profiles" "$schema" "$container_db_url"
 
+  [[ "$QUIET" -eq 1 ]] && return
   cat <<EOF
 
 Rye is installed locally.
-Database: $db_url
+Database: $(redact_db_url "$db_url")
 Config:   $ENV_FILE
 
 Next:
-  ./scripts/rye onboard --label "First Scope" --purpose "Describe the limited workflow Rye should assist first."
+  ./scripts/rye onboard create --label "First Scope" --purpose "Describe the limited workflow Rye should assist first."
 EOF
 }
 
@@ -253,20 +340,12 @@ cmd_remote() {
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --db-url)
-        db_url="${2:-}"
-        shift 2
-        ;;
       --seed)
         seed=1
         shift
         ;;
       --profiles)
         profiles="${2:-}"
-        shift 2
-        ;;
-      --schema)
-        schema="${2:-}"
         shift 2
         ;;
       -h|--help)
@@ -290,17 +369,43 @@ cmd_remote() {
   run_logged "Installing Rye into remote database" "${ROOT_DIR}/scripts/install.sh" "${args[@]}"
   write_env "remote" "$db_url" "$profiles" "$schema"
 
+  [[ "$QUIET" -eq 1 ]] && return
   cat <<EOF
 
 Rye is installed in the remote database.
-Config: $ENV_FILE
+Database: $(redact_db_url "$db_url")
+Config:   $ENV_FILE
 
 Next:
-  ./scripts/rye onboard --label "First Scope" --purpose "Describe the limited workflow Rye should assist first."
+  ./scripts/rye onboard create --label "First Scope" --purpose "Describe the limited workflow Rye should assist first."
 EOF
 }
 
+cmd_init() {
+  local command="${1:-}"
+  [[ $# -gt 0 ]] && shift
+
+  case "$command" in
+    local)
+      cmd_local "$@"
+      ;;
+    remote)
+      cmd_remote "$@"
+      ;;
+    -h|--help|help|"")
+      usage
+      ;;
+    *)
+      die "Unknown init command: $command"
+      ;;
+  esac
+}
+
 cmd_onboard() {
+  if [[ "${1:-}" == "create" ]]; then
+    shift
+  fi
+
   local label=""
   local purpose=""
   local key=""
@@ -350,7 +455,7 @@ cmd_onboard() {
     key="$(slugify "$label")"
   fi
 
-  run_logged "Syncing Rye plugin metadata" sync_plugins
+  run_logged "Syncing Rye metadata" sync_metadata
 
   local key_sql label_sql purpose_sql owner_sql in_scope_sql out_of_scope_sql
   key_sql="$(sql_literal "$key")"
@@ -381,7 +486,7 @@ BEGIN
         ),
         p_owner     := ${owner_sql},
         p_created_by := 'rye:first-run',
-        p_properties := jsonb_build_object('created_by_command', './scripts/rye onboard')
+        p_properties := jsonb_build_object('created_by_command', './scripts/rye onboard create')
     );
 
     PERFORM record_scope_policy(v_scope, 'expected_contexts', jsonb_build_object(
@@ -456,6 +561,7 @@ SQL
   info "Creating first onboarding scope"
   psql_exec "$sql"
 
+  [[ "$QUIET" -eq 1 ]] && return
   cat <<EOF
 
 Onboarding scope is active.
@@ -475,31 +581,21 @@ cmd_plugins() {
 
   case "$command" in
     sync)
-      run_logged "Syncing Rye plugin metadata" sync_plugins
-      echo "Rye plugin metadata synced."
+      run_logged "Syncing Rye metadata" sync_metadata
+      [[ "$QUIET" -eq 1 ]] || echo "Rye metadata synced."
       ;;
     list)
-      psql_exec "SET search_path = rye, public, pg_catalog;
-SELECT
-    label,
-    external_id AS plugin_id,
-    coalesce(properties->>'version', properties->'manifest'->>'version') AS version,
-    coalesce(jsonb_array_length(properties->'contributes'->'node_types'), 0) AS node_types,
-    coalesce(jsonb_array_length(properties->'contributes'->'edge_types'), 0) AS edge_types,
-    coalesce(jsonb_array_length(properties->'contributes'->'assertion_types'), 0) AS assertion_types,
-    coalesce(jsonb_array_length(properties->'contributes'->'event_types'), 0) AS event_types,
-    coalesce(jsonb_array_length(properties->'contributes'->'artifact_types'), 0) AS artifact_types
-FROM nodes
-WHERE archived_at IS NULL
-  AND node_type = 'plugin'
-  AND external_source = 'rye_plugin'
-ORDER BY external_id;"
+      if [[ "$OUTPUT_JSON" -eq 1 ]]; then
+        psql_json "SELECT rye.rye_plugin_catalog();"
+      else
+        catalog_plugins_table
+      fi
       ;;
     -h|--help|help)
       cat <<'EOF'
 Usage:
   ./scripts/rye plugins sync
-  ./scripts/rye plugins list
+  ./scripts/rye plugins list [--json]
 EOF
       ;;
     *)
@@ -508,10 +604,103 @@ EOF
   esac
 }
 
+catalog_plugins_table() {
+  psql_exec "SET search_path = rye, public, pg_catalog;
+SELECT
+    label,
+    external_id AS plugin_id,
+    coalesce(properties->>'version', properties->'manifest'->>'version') AS version,
+    coalesce(jsonb_array_length(properties->'contributes'->'node_types'), 0) AS node_types,
+    coalesce(jsonb_array_length(properties->'contributes'->'edge_types'), 0) AS edge_types,
+    coalesce(jsonb_array_length(properties->'contributes'->'assertion_types'), 0) AS assertion_types,
+    coalesce(jsonb_array_length(properties->'contributes'->'event_types'), 0) AS event_types,
+    coalesce(jsonb_array_length(properties->'contributes'->'artifact_types'), 0) AS artifact_types,
+    coalesce(jsonb_array_length(properties->'capabilities'), 0) AS capabilities
+FROM nodes
+WHERE archived_at IS NULL
+  AND node_type = 'plugin'
+  AND external_source = 'rye_plugin'
+ORDER BY external_id;"
+}
+
+catalog_skills_table() {
+  psql_exec "SET search_path = rye, public, pg_catalog;
+SELECT
+    label,
+    external_id AS skill_id,
+    coalesce(properties->>'version', properties->'manifest'->>'version') AS version,
+    properties->'install'->>'command' AS install_command,
+    coalesce(jsonb_array_length(properties->'capabilities'), 0) AS capabilities
+FROM nodes
+WHERE archived_at IS NULL
+  AND node_type = 'skill'
+  AND external_source = 'rye_skill'
+ORDER BY external_id;"
+}
+
+catalog_capabilities_table() {
+  psql_exec "SET search_path = rye, public, pg_catalog;
+WITH rows AS (
+  SELECT jsonb_array_elements(rye_capability_catalog()->'capabilities') AS c
+)
+SELECT
+  c->>'source_kind' AS source_kind,
+  c->>'source_id' AS source_id,
+  c->>'id' AS capability_id,
+  c->>'kind' AS kind,
+  c->>'read_only' AS read_only,
+  c->>'label' AS label
+FROM rows
+ORDER BY source_kind, source_id, capability_id;"
+}
+
+cmd_catalog() {
+  local topic="${1:-}"
+  [[ $# -gt 0 ]] && shift
+
+  case "$topic" in
+    plugins)
+      if [[ "$OUTPUT_JSON" -eq 1 ]]; then
+        psql_json "SELECT rye.rye_plugin_catalog();"
+      else
+        catalog_plugins_table
+      fi
+      ;;
+    skills)
+      if [[ "$OUTPUT_JSON" -eq 1 ]]; then
+        psql_json "SELECT rye.rye_skill_catalog();"
+      else
+        catalog_skills_table
+      fi
+      ;;
+    capabilities)
+      if [[ "$OUTPUT_JSON" -eq 1 ]]; then
+        psql_json "SELECT rye.rye_capability_catalog();"
+      else
+        catalog_capabilities_table
+      fi
+      ;;
+    -h|--help|help|"")
+      cat <<'EOF'
+Usage:
+  ./scripts/rye catalog plugins [--json]
+  ./scripts/rye catalog skills [--json]
+  ./scripts/rye catalog capabilities [--json]
+EOF
+      ;;
+    *)
+      die "Unknown catalog topic: $topic"
+      ;;
+  esac
+}
+
 cmd_status() {
-  local sql
-  sql="$(cat <<'SQL'
-SET search_path = rye, public, pg_catalog;
+  if [[ "$OUTPUT_JSON" -eq 1 ]]; then
+    psql_json "SELECT rye.rye_agent_context();"
+    return
+  fi
+
+  psql_exec "SET search_path = rye, public, pg_catalog;
 SELECT 'nodes' AS kind, node_type AS type, count(*)::text AS count
 FROM nodes
 WHERE archived_at IS NULL
@@ -524,13 +713,153 @@ LEFT JOIN current_valid_assertions a
  AND a.assertion_type = 'scope_status'
 WHERE n.archived_at IS NULL
   AND n.node_type = 'onboarding_scope'
-ORDER BY kind, type;
-SQL
-)"
-  psql_exec "$sql"
+UNION ALL
+SELECT 'metadata' AS kind, 'plugins' AS type, count(*)::text AS count
+FROM nodes
+WHERE archived_at IS NULL AND node_type = 'plugin' AND external_source = 'rye_plugin'
+UNION ALL
+SELECT 'metadata' AS kind, 'skills' AS type, count(*)::text AS count
+FROM nodes
+WHERE archived_at IS NULL AND node_type = 'skill' AND external_source = 'rye_skill'
+ORDER BY kind, type;"
+}
+
+cmd_doctor() {
+  if [[ "$OUTPUT_JSON" -eq 1 ]]; then
+    psql_json "SELECT jsonb_build_object(
+  'database_reachable', true,
+  'catalog', rye.rye_catalog(),
+  'plugins', rye.rye_plugin_catalog()->'totals',
+  'skills', rye.rye_skill_catalog()->'totals',
+  'capabilities', rye.rye_capability_catalog()->'totals'
+);"
+    return
+  fi
+
+  psql_exec "SET search_path = rye, public, pg_catalog;
+SELECT 'database' AS check, 'reachable' AS status
+UNION ALL
+SELECT 'plugins' AS check, (rye_plugin_catalog()->'totals'->>'plugins') AS status
+UNION ALL
+SELECT 'skills' AS check, (rye_skill_catalog()->'totals'->>'skills') AS status
+UNION ALL
+SELECT 'capabilities' AS check, (rye_capability_catalog()->'totals'->>'capabilities') AS status;"
+}
+
+cmd_context() {
+  local scope=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --scope)
+        scope="${2:-}"
+        shift 2
+        ;;
+      -h|--help)
+        cat <<'EOF'
+Usage:
+  ./scripts/rye context [--scope <uuid-or-key>] [--json]
+EOF
+        return
+        ;;
+      *)
+        die "Unknown context option: $1"
+        ;;
+    esac
+  done
+
+  local scope_expr
+  scope_expr="$(scope_sql_expr "$scope")"
+
+  if [[ "$OUTPUT_JSON" -eq 1 ]]; then
+    psql_json "SELECT rye.rye_agent_context(${scope_expr});"
+    return
+  fi
+
+  psql_exec "SET search_path = rye, public, pg_catalog;
+WITH ctx AS (
+  SELECT rye_agent_context(${scope_expr}) AS j
+),
+active_scopes AS (
+  SELECT jsonb_array_elements(j->'active_scopes') AS s FROM ctx
+)
+SELECT
+  s->>'label' AS active_scope,
+  s->>'scope_key' AS scope_key,
+  s->>'status' AS status,
+  s->>'purpose' AS purpose
+FROM active_scopes
+ORDER BY active_scope;
+
+WITH ctx AS (
+  SELECT rye_agent_context(${scope_expr}) AS j
+)
+SELECT
+  j->'scope_selection'->>'mode' AS selection_mode,
+  j->'scope_selection'->>'selected_scope_id' AS selected_scope_id,
+  j->'scope_selection'->>'selected_scope_found' AS selected_scope_found,
+  j->'plugins'->'totals'->>'plugins' AS plugins,
+  j->'skills'->'totals'->>'skills' AS skills,
+  j->'capabilities'->'totals'->>'capabilities' AS capabilities
+FROM ctx;"
+}
+
+cmd_sources() {
+  local command="${1:-}"
+  [[ $# -gt 0 ]] && shift
+
+  case "$command" in
+    inventory)
+      if [[ "$OUTPUT_JSON" -eq 1 ]]; then
+        psql_json "SELECT rye.rye_source_inventory();"
+      else
+        psql_exec "SET search_path = rye, public, pg_catalog;
+WITH rows AS (
+  SELECT jsonb_array_elements(rye_source_inventory()) AS s
+)
+SELECT
+  s->>'node_type' AS node_type,
+  s->>'label' AS label,
+  coalesce(s->>'confirmation_status', 'unknown') AS confirmation_status,
+  s->>'source_item_count' AS source_items
+FROM rows
+ORDER BY node_type, label;"
+      fi
+      ;;
+    pending-context)
+      if [[ "$OUTPUT_JSON" -eq 1 ]]; then
+        psql_json "SELECT rye.rye_pending_context_confirmations();"
+      else
+        psql_exec "SET search_path = rye, public, pg_catalog;
+WITH rows AS (
+  SELECT jsonb_array_elements(rye_pending_context_confirmations()) AS s
+)
+SELECT
+  s->>'node_type' AS node_type,
+  s->>'label' AS label,
+  s->>'external_source' AS external_source,
+  s->>'external_id' AS external_id
+FROM rows
+ORDER BY node_type, label;"
+      fi
+      ;;
+    -h|--help|help|"")
+      cat <<'EOF'
+Usage:
+  ./scripts/rye sources inventory [--json]
+  ./scripts/rye sources pending-context [--json]
+EOF
+      ;;
+    *)
+      die "Unknown sources command: $command"
+      ;;
+  esac
 }
 
 main() {
+  parse_global_args "$@"
+  set -- "${ARGS[@]}"
+
   local command="${1:-help}"
   if [[ $# -gt 0 ]]; then
     shift
@@ -539,6 +868,9 @@ main() {
   cd "$ROOT_DIR"
 
   case "$command" in
+    init)
+      cmd_init "$@"
+      ;;
     local)
       cmd_local "$@"
       ;;
@@ -551,8 +883,20 @@ main() {
     plugins)
       cmd_plugins "$@"
       ;;
+    catalog)
+      cmd_catalog "$@"
+      ;;
+    context)
+      cmd_context "$@"
+      ;;
+    sources)
+      cmd_sources "$@"
+      ;;
     status)
       cmd_status "$@"
+      ;;
+    doctor)
+      cmd_doctor "$@"
       ;;
     help|-h|--help)
       usage

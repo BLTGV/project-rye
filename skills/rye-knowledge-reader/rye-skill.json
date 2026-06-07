@@ -1,0 +1,41 @@
+{
+  "$schema": "../rye-skill.schema.json",
+  "id": "rye-knowledge-reader",
+  "version": "0.1.0",
+  "label": "Rye Knowledge Reader",
+  "description": "Read Rye knowledge, status, history, candidates, and provenance without writing to the database.",
+  "source": {
+    "type": "github",
+    "repo": "BLTGV/project-rye",
+    "path": "skills/rye-knowledge-reader"
+  },
+  "install": {
+    "manager": "vercel-skills",
+    "package": "BLTGV/project-rye",
+    "skill": "rye-knowledge-reader",
+    "command": "npx skills add BLTGV/project-rye --skill rye-knowledge-reader"
+  },
+  "requires": {
+    "plugins": [],
+    "db_functions": ["rye_catalog", "agent_node_summary", "assertions_as_of", "rye_agent_context"],
+    "db_views": ["current_valid_assertions"],
+    "cli_commands": ["./scripts/rye status --json", "./scripts/rye context --json"]
+  },
+  "capabilities": [
+    {
+      "id": "read-rye-knowledge",
+      "label": "Read Rye Knowledge",
+      "kind": "skill",
+      "description": "Use read-only query patterns to separate accepted knowledge, pending review, provenance, and history.",
+      "read_only": true,
+      "requires": {
+        "db_functions": ["rye_catalog", "agent_node_summary", "assertions_as_of", "rye_agent_context"],
+        "db_views": ["current_valid_assertions"]
+      },
+      "entrypoints": [
+        { "type": "skill_install", "command": "npx skills add BLTGV/project-rye --skill rye-knowledge-reader" },
+        { "type": "db_function", "name": "rye_agent_context" }
+      ]
+    }
+  ]
+}

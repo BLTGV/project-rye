@@ -13,6 +13,21 @@
     "event_types": ["tabular_row_extracted", "tabular_row_mapped", "tabular_record_staged"],
     "artifact_types": ["rye_tabular_intake_source_file", "tabular_change_plan", "import_inspection"]
   },
+  "capabilities": [
+    {
+      "id": "track-tabular-intake",
+      "label": "Track Tabular Intake",
+      "kind": "plugin_contract",
+      "description": "Track CSV/XLSX source rows, mappings, grouped records, staging rows, and lineage commits.",
+      "read_only": false,
+      "requires": {
+        "db_functions": ["record_event", "record_artifact"]
+      },
+      "entrypoints": [
+        { "type": "cli_command", "command": "node skills/rye-tabular-intake/scripts/tabular_commit_rye.mts" }
+      ]
+    }
+  ],
   "onboarding": {
     "scope_questions": [
       "Which limited import or update process is Rye tracking?"

@@ -13,6 +13,22 @@
     "event_types": ["source_context_record_observed", "source_context_confirmed", "source_context_intake_started", "source_context_intake_completed"],
     "artifact_types": ["source_context_record", "source_item_raw"]
   },
+  "capabilities": [
+    {
+      "id": "manage-source-context",
+      "label": "Manage Source Context",
+      "kind": "plugin_contract",
+      "description": "Register connector-neutral source accounts, containers, items, retrieval channels, expected contexts, and context gaps.",
+      "read_only": false,
+      "requires": {
+        "db_functions": ["rye_source_inventory", "rye_pending_context_confirmations", "create_context_gap_candidate"]
+      },
+      "entrypoints": [
+        { "type": "db_function", "name": "rye_source_inventory" },
+        { "type": "db_function", "name": "rye_pending_context_confirmations" }
+      ]
+    }
+  ],
   "onboarding": {
     "scope_questions": [
       "What limited function is this source expected to help with?"

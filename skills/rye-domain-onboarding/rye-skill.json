@@ -1,0 +1,39 @@
+{
+  "$schema": "../rye-skill.schema.json",
+  "id": "rye-domain-onboarding",
+  "version": "0.1.0",
+  "label": "Rye Domain Onboarding",
+  "description": "Add new Rye domain conventions, profile migrations, helper functions, views, and conformance tests without breaking core guarantees.",
+  "source": {
+    "type": "github",
+    "repo": "BLTGV/project-rye",
+    "path": "skills/rye-domain-onboarding"
+  },
+  "install": {
+    "manager": "vercel-skills",
+    "package": "BLTGV/project-rye",
+    "skill": "rye-domain-onboarding",
+    "command": "npx skills add BLTGV/project-rye --skill rye-domain-onboarding"
+  },
+  "requires": {
+    "plugins": [],
+    "db_functions": ["rye_catalog", "link_record", "track_table", "supersede_assertion"],
+    "db_views": ["current_valid_assertions"],
+    "cli_commands": ["./scripts/rye catalog plugins", "./scripts/conformance.sh"]
+  },
+  "capabilities": [
+    {
+      "id": "define-domain-conventions",
+      "label": "Define Domain Conventions",
+      "kind": "skill",
+      "description": "Guide additions of reusable node, edge, assertion, event, artifact, profile, and test conventions.",
+      "read_only": false,
+      "requires": {
+        "db_functions": ["rye_catalog", "link_record", "track_table"]
+      },
+      "entrypoints": [
+        { "type": "skill_install", "command": "npx skills add BLTGV/project-rye --skill rye-domain-onboarding" }
+      ]
+    }
+  ]
+}

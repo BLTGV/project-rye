@@ -1,0 +1,39 @@
+{
+  "$schema": "../rye-skill.schema.json",
+  "id": "rye-import-inspector",
+  "version": "0.1.0",
+  "label": "Rye Import Inspector",
+  "description": "Validate Rye-tracked import and update runs before or after target writes using source, mapping, change-plan, approval, and verification evidence.",
+  "source": {
+    "type": "github",
+    "repo": "BLTGV/project-rye",
+    "path": "skills/rye-import-inspector"
+  },
+  "install": {
+    "manager": "vercel-skills",
+    "package": "BLTGV/project-rye",
+    "skill": "rye-import-inspector",
+    "command": "npx skills add BLTGV/project-rye --skill rye-import-inspector"
+  },
+  "requires": {
+    "plugins": ["rye-change-tracking", "rye-tabular-intake"],
+    "db_functions": [],
+    "db_views": [],
+    "cli_commands": ["node skills/rye-import-inspector/scripts/inspect_import_run.mjs"]
+  },
+  "capabilities": [
+    {
+      "id": "inspect-import-run",
+      "label": "Inspect Import Run",
+      "kind": "skill_script",
+      "description": "Validate import evidence and optionally emit a Rye-stageable inspection record.",
+      "read_only": true,
+      "requires": {
+        "plugins": ["rye-change-tracking", "rye-tabular-intake"]
+      },
+      "entrypoints": [
+        { "type": "cli_command", "command": "node skills/rye-import-inspector/scripts/inspect_import_run.mjs" }
+      ]
+    }
+  ]
+}
