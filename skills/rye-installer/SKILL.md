@@ -7,9 +7,29 @@ description: Install, migrate, verify, and test Rye PostgreSQL deployments. Use 
 
 ## Workflow
 
-1. For a new local trial, run `curl -fsSL https://projectrye.dev/onboard | sh`.
+1. For a new local trial, run the public bootstrap. Prefer
+   `https://projectrye.dev/onboard`; if that hosted endpoint is unavailable,
+   fall back to the GitHub-hosted script:
+
+   ```bash
+   tmp="$(mktemp)"
+   curl -fsSL https://projectrye.dev/onboard -o "$tmp" || \
+     curl -fsSL https://raw.githubusercontent.com/BLTGV/project-rye/main/site/public/onboard -o "$tmp"
+   sh "$tmp"
+   rm -f "$tmp"
+   ```
+
 2. For a remote PostgreSQL database, run
-   `curl -fsSL https://projectrye.dev/onboard | sh -s -- --remote "$DATABASE_URL"`.
+   the same bootstrap with `--remote "$DATABASE_URL"`:
+
+   ```bash
+   tmp="$(mktemp)"
+   curl -fsSL https://projectrye.dev/onboard -o "$tmp" || \
+     curl -fsSL https://raw.githubusercontent.com/BLTGV/project-rye/main/site/public/onboard -o "$tmp"
+   sh "$tmp" --remote "$DATABASE_URL"
+   rm -f "$tmp"
+   ```
+
 3. Install the agent onboarding skill with
    `npx skills add BLTGV/project-rye --skill rye-onboarding`.
 4. Start the first adoption unit with `./scripts/rye onboard --label ... --purpose ...`.
@@ -30,7 +50,9 @@ example data.
 ## Commands
 
 - Local trial: `curl -fsSL https://projectrye.dev/onboard | sh`
+- Local fallback: `curl -fsSL https://raw.githubusercontent.com/BLTGV/project-rye/main/site/public/onboard | sh`
 - Remote install: `curl -fsSL https://projectrye.dev/onboard | sh -s -- --remote "$DATABASE_URL"`
+- Remote fallback: `curl -fsSL https://raw.githubusercontent.com/BLTGV/project-rye/main/site/public/onboard | sh -s -- --remote "$DATABASE_URL"`
 - Agent skill: `npx skills add BLTGV/project-rye --skill rye-onboarding`
 - Repo-local trial: `./scripts/rye local --fresh`
 - Repo-local remote install: `./scripts/rye remote --db-url "$DATABASE_URL"`

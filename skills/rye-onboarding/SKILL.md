@@ -25,9 +25,26 @@ may do without human review.
    - After installing it, read `skills/rye-installer/SKILL.md` directly if
      the agent harness does not automatically refresh available skills in the
      current session.
-   - Local trial: `curl -fsSL https://projectrye.dev/onboard | sh`
+   - Local trial:
+
+     ```bash
+     tmp="$(mktemp)"
+     curl -fsSL https://projectrye.dev/onboard -o "$tmp" || \
+       curl -fsSL https://raw.githubusercontent.com/BLTGV/project-rye/main/site/public/onboard -o "$tmp"
+     sh "$tmp"
+     rm -f "$tmp"
+     ```
+
    - Remote database:
-     `curl -fsSL https://projectrye.dev/onboard | sh -s -- --remote "$DATABASE_URL"`
+
+     ```bash
+     tmp="$(mktemp)"
+     curl -fsSL https://projectrye.dev/onboard -o "$tmp" || \
+       curl -fsSL https://raw.githubusercontent.com/BLTGV/project-rye/main/site/public/onboard -o "$tmp"
+     sh "$tmp" --remote "$DATABASE_URL"
+     rm -f "$tmp"
+     ```
+
    - The bootstrap clones Rye, installs the schema, syncs plugin metadata, and
      writes `.rye.env`.
    - Plugin metadata comes from `plugins/*/rye-plugin.json` and includes
@@ -76,9 +93,26 @@ Use this sequence when the user says they are starting from scratch:
      from later
    - remote install into a PostgreSQL 15+ database they already control
 3. Run the bootstrap:
-   - local: `curl -fsSL https://projectrye.dev/onboard | sh`
+   - local:
+
+     ```bash
+     tmp="$(mktemp)"
+     curl -fsSL https://projectrye.dev/onboard -o "$tmp" || \
+       curl -fsSL https://raw.githubusercontent.com/BLTGV/project-rye/main/site/public/onboard -o "$tmp"
+     sh "$tmp"
+     rm -f "$tmp"
+     ```
+
    - remote:
-     `curl -fsSL https://projectrye.dev/onboard | sh -s -- --remote "$DATABASE_URL"`
+
+     ```bash
+     tmp="$(mktemp)"
+     curl -fsSL https://projectrye.dev/onboard -o "$tmp" || \
+       curl -fsSL https://raw.githubusercontent.com/BLTGV/project-rye/main/site/public/onboard -o "$tmp"
+     sh "$tmp" --remote "$DATABASE_URL"
+     rm -f "$tmp"
+     ```
+
 4. Check installation with `./scripts/rye status`.
 5. If running inside Codex or another coding-agent harness, orient from the
    current project folder first:

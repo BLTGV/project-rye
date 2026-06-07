@@ -33,6 +33,8 @@
       },
       "entrypoints": [
         { "type": "skill_install", "command": "npx skills add BLTGV/project-rye --skill rye-installer" },
+        { "type": "bootstrap_script", "command": "curl -fsSL https://projectrye.dev/onboard | sh" },
+        { "type": "bootstrap_script", "name": "raw-github-fallback", "command": "curl -fsSL https://raw.githubusercontent.com/BLTGV/project-rye/main/site/public/onboard | sh" },
         { "type": "cli_command", "command": "./scripts/rye init local --fresh" }
       ]
     }
