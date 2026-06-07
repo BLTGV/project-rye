@@ -44,6 +44,9 @@ fi
 echo "Installing Rye schema (profiles: ${PROFILES})"
 ./scripts/migrate.sh --db-url "$DB_URL" --profiles "$PROFILES" --schema "$SCHEMA"
 
+echo "Syncing Rye plugin metadata"
+./scripts/sync_plugin_metadata.sh --db-url "$DB_URL" --schema "$SCHEMA"
+
 if [[ "$SEED" -eq 1 ]]; then
   echo "Seeding quickstart data"
   ./scripts/seed_quickstart.sh --db-url "$DB_URL" --schema "$SCHEMA"

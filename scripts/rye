@@ -171,92 +171,19 @@ local_install() {
   compose exec -T rye-db bash -lc "$install_cmd"
 }
 
-plugin_sync_sql() {
-  local sql
-  sql="SET search_path = rye, public, pg_catalog;
-SELECT set_config('app.current_role', 'admin', false);
-SELECT set_config('app.current_user_id', 'rye:plugin-sync', false);
-SELECT set_config('app.current_teams', 'system', false);
-"
-
-  local file
-  for file in "$ROOT_DIR"/plugins/*/rye-plugin.json; do
-    [[ -f "$file" ]] || continue
-
-    local manifest manifest_sql source_path source_path_sql
-    manifest="$(cat "$file")"
-    manifest_sql="$(sql_literal "$manifest")"
-    source_path="${file#"$ROOT_DIR"/}"
-    source_path_sql="$(sql_literal "$source_path")"
-
-    sql+="
-WITH manifest AS (
-    SELECT ${manifest_sql}::jsonb AS data,
-           ${source_path_sql}::text AS source_path
-),
-upserted AS (
-    INSERT INTO nodes (node_type, label, external_source, external_id, properties, attrs)
-    SELECT
-        'plugin',
-        coalesce(nullif(data->>'label', ''), data->>'id'),
-        'rye_plugin',
-        data->>'id',
-        jsonb_build_object(
-            'plugin_id', data->>'id',
-            'version', data->>'version',
-            'description', data->>'description',
-            'manifest', data,
-            'contributes', coalesce(data->'contributes', '{}'::jsonb),
-            'onboarding', coalesce(data->'onboarding', '{}'::jsonb),
-            'validation', coalesce(data->'validation', '{}'::jsonb),
-            'admin', coalesce(data->'admin', '{}'::jsonb),
-            'metadata_source', source_path
-        ),
-        jsonb_build_object('created_by', 'rye:plugin-sync', 'metadata_source', source_path)
-    FROM manifest
-    ON CONFLICT (external_source, external_id)
-        WHERE external_id IS NOT NULL AND archived_at IS NULL
-    DO UPDATE
-        SET label = EXCLUDED.label,
-            properties = nodes.properties || EXCLUDED.properties,
-            updated_at = now()
-    RETURNING id
-),
-manifest_assertion AS (
-    SELECT record_assertion(
-        p_assertion_type  := 'plugin_manifest',
-        p_claim           := jsonb_build_object(
-            'plugin_id', manifest.data->>'id',
-            'version', manifest.data->>'version',
-            'manifest', manifest.data,
-            'metadata_source', manifest.source_path
-        ),
-        p_subject_node_id := upserted.id,
-        p_assertion_key   := 'default',
-        p_confidence      := 1.0,
-        p_mode            := 'current',
-        p_attrs           := jsonb_build_object('metadata_source', manifest.source_path, 'installer', './scripts/rye plugins sync')
-    ) AS id
-    FROM manifest, upserted
-)
-SELECT record_assertion(
-    p_assertion_type  := 'plugin_contributes',
-    p_claim           := coalesce(manifest.data->'contributes', '{}'::jsonb),
-    p_subject_node_id := upserted.id,
-    p_assertion_key   := 'default',
-    p_confidence      := 1.0,
-    p_mode            := 'current',
-    p_attrs           := jsonb_build_object('metadata_source', manifest.source_path, 'installer', './scripts/rye plugins sync')
-)
-FROM manifest, upserted, manifest_assertion;
-"
-  done
-
-  printf '%s\n' "$sql"
-}
-
 sync_plugins() {
-  psql_exec "$(plugin_sync_sql)"
+  load_env_if_present
+
+  if [[ "${RYE_DB_MODE:-}" == "local" ]]; then
+    find_compose_cmd
+    compose exec -T rye-db bash -lc "cd /workspace && ./scripts/sync_plugin_metadata.sh --db-url $(shell_quote "${RYE_CONTAINER_DATABASE_URL:-postgresql://rye:rye@127.0.0.1:5432/rye}") --schema $(shell_quote "${RYE_SCHEMA:-rye}")"
+    return
+  fi
+
+  local db_url="${DATABASE_URL:-}"
+  [[ -n "$db_url" ]] || die "DATABASE_URL is not set. Run ./scripts/rye local or ./scripts/rye remote first."
+  command -v psql >/dev/null 2>&1 || die "psql is required for remote database commands."
+  "${ROOT_DIR}/scripts/sync_plugin_metadata.sh" --db-url "$db_url" --schema "${RYE_SCHEMA:-rye}"
 }
 
 slugify() {
@@ -306,7 +233,6 @@ cmd_local() {
   local db_url="postgresql://${POSTGRES_USER:-rye}:${POSTGRES_PASSWORD:-rye}@127.0.0.1:${host_port}/${POSTGRES_DB:-rye}"
   local container_db_url="postgresql://${POSTGRES_USER:-rye}:${POSTGRES_PASSWORD:-rye}@127.0.0.1:5432/${POSTGRES_DB:-rye}"
   write_env "local" "$db_url" "$profiles" "$schema" "$container_db_url"
-  run_logged "Syncing Rye plugin metadata" sync_plugins
 
   cat <<EOF
 
@@ -363,7 +289,6 @@ cmd_remote() {
 
   run_logged "Installing Rye into remote database" "${ROOT_DIR}/scripts/install.sh" "${args[@]}"
   write_env "remote" "$db_url" "$profiles" "$schema"
-  run_logged "Syncing Rye plugin metadata" sync_plugins
 
   cat <<EOF
 
