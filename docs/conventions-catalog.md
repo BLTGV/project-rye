@@ -25,8 +25,8 @@ limited function or workflow. Store that setup as an `onboarding_scope` node,
 not as an organization-wide assumption.
 
 Name the scope after the organizational context, not the source or retrieval
-channel. Use labels such as `Glamies Project` or `Lead Follow-Up`; avoid labels
-such as `Glamies Slack Pilot` or `Composio Email Intake` unless Slack or
+channel. Use labels such as `Example Project` or `Lead Follow-Up`; avoid labels
+such as `Example Slack Pilot` or `Composio Email Intake` unless Slack or
 Composio is itself the process being modeled.
 
 Use `expected_contexts` instead of hard context whitelists. Expected contexts

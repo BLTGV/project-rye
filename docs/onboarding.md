@@ -43,10 +43,10 @@ the project, function, workflow, process, or purpose. Do not name it after the
 source, retrieval channel, connector, or implementation phase unless that is
 the actual organizational context.
 
-For example, use `Glamies Project`, not `Glamies Slack Pilot`. Slack should be
+For example, use `Example Project`, not `Example Slack Pilot`. Slack should be
 modeled as a `source_container`, and Composio should be modeled as a
 `retrieval_channel`. The intake profile can then describe how that Slack
-channel contributes evidence to the Glamies project scope.
+channel contributes evidence to the Example Project scope.
 
 If a source name is the only available clue, keep the source unconfirmed and
 route items to a holding context until a Rye admin identifies the real domain

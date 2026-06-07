@@ -104,7 +104,7 @@ BEGIN
 
     v_customer_statement := record_declared_statement(
         p_instance_id      := v_instance,
-        p_statement        := 'Foss Land Management is a current customer.',
+        p_statement        := 'Example Client is a current customer.',
         p_statement_type   := 'current_fact',
         p_candidate_kind   := 'fact',
         p_assertion_type   := 'customer_status',
@@ -128,10 +128,10 @@ BEGIN
     v_customer := create_declared_node(
         p_statement_id    := v_customer_statement,
         p_node_type       := 'customer',
-        p_label           := 'Foss Land Management',
+        p_label           := 'Example Client',
         p_properties      := '{"declared_status": "current_customer"}',
         p_external_source := 'declared:owner-weekly-sitrep',
-        p_external_id     := 'customer:foss-land-management',
+        p_external_id     := 'customer:example-client',
         p_actor           := 'test:declared-knowledge'
     );
 
@@ -169,7 +169,7 @@ BEGIN
 
     v_statement := record_declared_statement(
         p_instance_id    := v_instance,
-        p_statement      := 'Glamies is an active project for Foss Land Management.',
+        p_statement      := 'Example Project is an active project for Example Client.',
         p_statement_type := 'current_fact',
         p_candidate_kind := 'edge',
         p_confidence     := 0.9,
@@ -179,9 +179,9 @@ BEGIN
     v_project := create_declared_node(
         p_statement_id    := v_statement,
         p_node_type       := 'project',
-        p_label           := 'Glamies',
+        p_label           := 'Example Project',
         p_external_source := 'declared:owner-weekly-sitrep',
-        p_external_id     := 'project:glamies',
+        p_external_id     := 'project:example-project',
         p_actor           := 'test:declared-knowledge'
     );
 

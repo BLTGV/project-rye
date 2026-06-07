@@ -159,14 +159,14 @@ unless that source/channel is itself the organizational process being modeled.
 
 Good scope labels:
 
-- `Glamies Project`
+- `Example Project`
 - `Lead Follow-Up`
 - `Customer Renewal Review`
 - `Incident Response`
 
 Bad scope labels:
 
-- `Glamies Slack Pilot`
+- `Example Slack Pilot`
 - `Slack Lead Follow-Up`
 - `Composio Email Intake`
 - `Logs Project`
