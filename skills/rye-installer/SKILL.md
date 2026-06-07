@@ -21,6 +21,12 @@ description: Install, migrate, verify, and test Rye PostgreSQL deployments. Use 
 The first-run path writes `.rye.env` so later commands use the same database
 without the user re-entering the connection string.
 
+Install always applies schema migrations and syncs plugin metadata from
+`plugins/*/rye-plugin.json`. That metadata includes contributed node, edge,
+assertion, event, and artifact types plus onboarding questions, never-infer
+defaults, validation hooks, and admin hooks. `--seed` is only for quickstart
+example data.
+
 ## Commands
 
 - Local trial: `curl -fsSL https://projectrye.dev/onboard | sh`
@@ -28,6 +34,7 @@ without the user re-entering the connection string.
 - Agent skill: `npx skills add BLTGV/project-rye --skill rye-onboarding`
 - Repo-local trial: `./scripts/rye local --fresh`
 - Repo-local remote install: `./scripts/rye remote --db-url "$DATABASE_URL"`
+- Plugin metadata: `./scripts/rye plugins list`
 - First scope: `./scripts/rye onboard --label "First Scope" --purpose "..."`
 - Status: `./scripts/rye status`
 - Core only: `./scripts/install.sh --profiles ''`

@@ -22,7 +22,10 @@ may do without human review.
    - Local trial: `curl -fsSL https://projectrye.dev/onboard | sh`
    - Remote database:
      `curl -fsSL https://projectrye.dev/onboard | sh -s -- --remote "$DATABASE_URL"`
-   - The bootstrap clones Rye, installs the schema, and writes `.rye.env`.
+   - The bootstrap clones Rye, installs the schema, syncs plugin metadata, and
+     writes `.rye.env`.
+   - Plugin metadata comes from `plugins/*/rye-plugin.json` and includes
+     contributed node, edge, assertion, event, and artifact types.
    - This skill can be installed with:
      `npx skills add BLTGV/project-rye --skill rye-onboarding`
 1. Define the `onboarding_scope` in human terms:
@@ -68,6 +71,7 @@ Use this sequence when the user says they are starting from scratch:
    current project folder first:
    - read `.rye.env` if present, but do not print secrets
    - run `./scripts/rye status`
+   - run `./scripts/rye plugins list` to see installed vocabulary metadata
    - summarize whether Rye is installed and whether any onboarding scopes
      already exist
 5. Ask for the first limited workflow Rye should assist. Do not ask the user

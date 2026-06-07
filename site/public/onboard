@@ -135,6 +135,10 @@ cat <<'EOF'
 
 Rye is ready.
 
+The schema and Rye plugin metadata are installed. Plugin metadata includes
+contributed node, edge, assertion, event, and artifact types. Example data is
+only installed when you pass --seed.
+
 For an agent-led setup, install the onboarding skill in the project where the
 agent will work:
 
