@@ -21,8 +21,8 @@ BEGIN
       AND node_type = 'plugin'
       AND external_source = 'rye_plugin';
 
-    IF v_plugin_count < 8 THEN
-        RAISE EXCEPTION 'Expected at least 8 synced Rye plugin nodes, got %', v_plugin_count;
+    IF v_plugin_count < 9 THEN
+        RAISE EXCEPTION 'Expected at least 9 synced Rye plugin nodes, got %', v_plugin_count;
     END IF;
 
     SELECT array_agg(expected_id ORDER BY expected_id)
@@ -31,6 +31,7 @@ BEGIN
         SELECT unnest(ARRAY[
             'rye-change-tracking',
             'rye-crm',
+            'rye-declared-knowledge',
             'rye-evidence-anchor',
             'rye-logging',
             'rye-org',
@@ -107,6 +108,21 @@ BEGIN
           AND p.properties->'onboarding'->'never_infer_defaults' ? 'Do not infer employment, department membership, responsibility, or policy ownership from source membership alone.'
     ) THEN
         RAISE EXCEPTION 'Expected rye-org organization metadata and never-infer defaults to be synced';
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM nodes p
+        WHERE p.archived_at IS NULL
+          AND p.external_source = 'rye_plugin'
+          AND p.external_id = 'rye-declared-knowledge'
+          AND p.properties->'contributes'->'node_types' ? 'declared_knowledge_series'
+          AND p.properties->'contributes'->'node_types' ? 'declared_statement'
+          AND p.properties->'contributes'->'edge_types' ? 'statement_proposes_candidate'
+          AND p.properties->'contributes'->'assertion_types' ? 'declared_statement_status'
+          AND p.properties->'contributes'->'event_types' ? 'declared_statement_promoted'
+    ) THEN
+        RAISE EXCEPTION 'Expected rye-declared-knowledge metadata to be synced';
     END IF;
 END
 $$;

@@ -1,0 +1,148 @@
+{
+  "id": "rye-declared-knowledge",
+  "version": "0.1.0",
+  "label": "Declared Knowledge",
+  "description": "Recurring accountable statements of organizational fact from interviews, sitreps, reviews, and other declared knowledge sources.",
+  "dependencies": ["rye-org", "rye-source-context", "rye-evidence-anchor"],
+  "supersedes": [],
+  "conflicts": [],
+  "contributes": {
+    "node_types": [
+      "declared_knowledge_series",
+      "declared_knowledge_instance",
+      "declared_statement",
+      "review_packet"
+    ],
+    "edge_types": [
+      "scope_uses_declared_series",
+      "declared_series_owned_by",
+      "series_has_instance",
+      "declared_by",
+      "declared_from_source_item",
+      "instance_has_statement",
+      "statement_about_node",
+      "statement_proposes_candidate",
+      "statement_created_node",
+      "statement_created_edge_source",
+      "statement_created_edge_target",
+      "review_packet_contains"
+    ],
+    "assertion_types": [
+      "declared_series_purpose",
+      "declared_series_profile",
+      "declared_series_cadence",
+      "declared_instance_status",
+      "declared_statement_status",
+      "declared_authority_scope",
+      "declared_source_of_truth",
+      "declared_review_policy"
+    ],
+    "event_types": [
+      "declared_knowledge_series_created",
+      "declared_knowledge_received",
+      "declared_statement_recorded",
+      "declared_node_created",
+      "declared_edge_created",
+      "declared_statement_promoted",
+      "declared_statement_rejected",
+      "declared_statement_disputed",
+      "declared_review_packet_created"
+    ],
+    "artifact_types": [
+      "declared_knowledge_transcript",
+      "sitrep_document",
+      "owner_interview_notes",
+      "status_report"
+    ]
+  },
+  "capabilities": [
+    {
+      "id": "capture-declared-knowledge",
+      "label": "Capture Declared Knowledge",
+      "kind": "plugin_contract",
+      "description": "Capture recurring declared statements from owner interviews, sitreps, Slack threads, forms, or documents before promoting them into graph facts.",
+      "read_only": false,
+      "requires": {
+        "plugins": ["rye-org", "rye-source-context", "rye-evidence-anchor"],
+        "db_functions": [
+          "create_declared_knowledge_series",
+          "record_declared_knowledge_instance",
+          "record_declared_statement",
+          "create_declared_node",
+          "create_declared_edge",
+          "promote_declared_statement_to_assertion",
+          "declared_knowledge_summary"
+        ]
+      },
+      "entrypoints": [
+        { "type": "db_function", "name": "create_declared_knowledge_series" },
+        { "type": "db_function", "name": "record_declared_knowledge_instance" },
+        { "type": "db_function", "name": "record_declared_statement" },
+        { "type": "db_function", "name": "promote_declared_statement_to_assertion" }
+      ]
+    }
+  ],
+  "onboarding": {
+    "scope_questions": [
+      "Who can intentionally declare facts for this scope?",
+      "Which recurring sitreps, owner interviews, reviews, or status reports should Rye expect?",
+      "Which declared facts can agents promote directly, and which require human review?"
+    ],
+    "source_questions": [
+      "Where can declared knowledge arrive from: direct agent conversation, Slack, Notion, email, form, or document?",
+      "Who is the accountable declarer for each series?",
+      "What cadence should Rye expect, and what counts as a missed or stale sitrep?"
+    ],
+    "retention_questions": [
+      "Should transcripts, notes, or source links be retained as evidence for promoted facts?",
+      "How long should unpromoted declared statements stay in review?"
+    ],
+    "evidence_questions": [
+      "Does each promoted fact need a transcript link, message permalink, page reference, or signed review packet?",
+      "Which declared source should win when it conflicts with operational source data?"
+    ],
+    "default_policies": [
+      {
+        "assertion_type": "declared_review_policy",
+        "claim": {
+          "default_action": "create_candidate",
+          "direct_promotion_requires": ["declarer", "scope", "subject", "assertion_type"]
+        }
+      }
+    ],
+    "never_infer_defaults": [
+      "Do not treat a communication channel as the declarer.",
+      "Do not treat a sitrep statement as independently verified unless another source verifies it.",
+      "Do not promote source-of-truth claims without preserving who declared them and when."
+    ],
+    "agent_autonomy_rules": [
+      {
+        "rule": "Agents may capture declared statements as candidates without review.",
+        "allowed": true
+      },
+      {
+        "rule": "Agents may promote declared statements only when scope policy allows the statement type and subject.",
+        "allowed": "policy_required"
+      }
+    ]
+  },
+  "validation": {
+    "candidate_validators": ["declared_statement_has_declarer_or_series"],
+    "promotion_validators": ["declared_statement_has_subject", "declared_statement_has_source_event"],
+    "conformance_tests": ["tests/conformance/17_declared_knowledge.sql"]
+  },
+  "admin": {
+    "detail_tabs": [
+      { "id": "declared-statements", "label": "Declared Statements", "node_types": ["declared_knowledge_series", "declared_knowledge_instance"] }
+    ],
+    "dashboard_cards": [
+      { "id": "declared-knowledge-review", "label": "Declared Knowledge Review", "source": "declared_knowledge_summary" }
+    ],
+    "candidate_groupings": [
+      { "id": "declared-series", "label": "Declared Series", "group_by": "declared_knowledge_series" }
+    ],
+    "policy_views": [
+      { "id": "declared-review-policy", "label": "Declared Review Policy", "assertion_type": "declared_review_policy" }
+    ]
+  }
+}

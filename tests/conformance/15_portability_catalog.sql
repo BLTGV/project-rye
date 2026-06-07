@@ -70,7 +70,7 @@ BEGIN
         RAISE EXCEPTION 'Expected current skill_capabilities assertions for all Rye skills';
     END IF;
 
-    IF (rye_plugin_catalog()->'totals'->>'plugins')::int < 8 THEN
+    IF (rye_plugin_catalog()->'totals'->>'plugins')::int < 9 THEN
         RAISE EXCEPTION 'Expected rye_plugin_catalog() to include installed plugins';
     END IF;
 
@@ -78,7 +78,7 @@ BEGIN
         RAISE EXCEPTION 'Expected rye_skill_catalog() to include installed skills';
     END IF;
 
-    IF (rye_capability_catalog()->'totals'->>'capabilities')::int < 17 THEN
+    IF (rye_capability_catalog()->'totals'->>'capabilities')::int < 18 THEN
         RAISE EXCEPTION 'Expected rye_capability_catalog() to include plugin and skill capabilities';
     END IF;
 
@@ -103,6 +103,17 @@ BEGIN
           AND capability->'entrypoints' @> '[{"type": "db_function", "name": "rye_source_inventory"}]'::jsonb
     ) THEN
         RAISE EXCEPTION 'Expected rye-source-context DB entrypoint capability metadata';
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM jsonb_array_elements(rye_capability_catalog()->'capabilities') AS c(capability)
+        WHERE capability->>'source_kind' = 'plugin'
+          AND capability->>'source_id' = 'rye-declared-knowledge'
+          AND capability->>'id' = 'capture-declared-knowledge'
+          AND capability->'requires'->'db_functions' ? 'record_declared_statement'
+    ) THEN
+        RAISE EXCEPTION 'Expected rye-declared-knowledge capability metadata';
     END IF;
 
     IF rye_source_inventory() <> '[]'::jsonb THEN
