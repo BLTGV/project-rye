@@ -1,5 +1,36 @@
 # Rye Agent Operations Guide
 
+## Onboarding Operations
+
+Agent-assisted onboarding has two operational modes.
+
+Real onboarding configures Rye for an actual organization, project, function,
+or workflow. The agent should use installed Rye skills, plugin metadata, CLI
+context, and explicit user/admin answers to create a scoped organizational
+store. It should stop for input whenever purpose, source meaning, scope
+boundary, retention, evidence, inference, or review authority is missing.
+
+Development evaluation tests whether skills, bootstrap paths, CLI flows,
+subagents, and policy gates behave correctly. The agent should start from a
+clean consumer workspace, install the onboarding skill through the documented
+public path, bootstrap Rye through the documented onboarding script, and avoid
+prior sessions or demo artifacts unless they are explicitly supplied as fixture
+data.
+
+For development evaluation, report:
+
+- commands run
+- skill files installed or read
+- repo/database files created or changed
+- current Rye status, catalog counts, active scopes, and source inventory
+- what the agent inferred and what it refused to infer
+- exact user/admin questions needed before the next write
+
+Failure signals include inventing scope from connector metadata, treating a
+source or channel name as business truth, using prior session context without
+explicit fixture instructions, creating source-derived facts before scope
+policy exists, or promoting candidates without the required review gate.
+
 ## Schema Setup
 
 All Rye objects live in the `rye` schema. Set the search path at the start of each session or transaction:

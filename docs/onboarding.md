@@ -19,6 +19,52 @@ An `onboarding_scope` records:
 Onboarding decisions are stored as Rye assertions and events. Later changes
 supersede earlier assertions instead of overwriting them.
 
+## Agent-Assisted Onboarding Modes
+
+Agent-assisted onboarding has two supported modes. The same Rye concepts apply
+in both modes, but the goal, allowed context, and success criteria differ.
+
+### Real Onboarding
+
+Use real onboarding when the user wants to set up Rye for an actual
+organization, project, function, or workflow.
+
+The agent should optimize for an accurate organizational store. It should:
+
+- verify Rye is installed and plugin metadata is available
+- ask the admin for the first limited workflow or organizational purpose
+- create an `onboarding_scope` only after purpose, boundary, and owner are clear
+- ask what source material means before connecting or classifying it
+- define evidence, retention, inference, and review policies before promotion
+- stop for user/admin input when organizational meaning is missing
+
+Real onboarding succeeds when Rye contains a traceable scope and policy bundle
+that reflects the organization's actual intent. Source metadata remains
+provenance, not business truth, until the user/admin confirms its meaning.
+
+### Development Evaluation
+
+Use development evaluation when testing whether Rye skills, bootstrap paths,
+CLI commands, subagents, and policy gates behave correctly during development.
+
+The agent should optimize for behavioral evidence. It should:
+
+- start from a clean consumer workspace
+- install the Rye onboarding skill through the documented public path
+- bootstrap Rye through the documented onboarding script
+- inspect only installed skills, the cloned Rye repo, and the Rye datastore
+- stop at each point where organization-specific context is required
+- report what it installed, read, asked, inferred, refused to infer, and wrote
+
+Development evaluation succeeds when the agent asks for missing scope context
+instead of fabricating it, creates no source-derived facts before policy exists,
+and produces actionable feedback about skill, bootstrap, CLI, or subagent
+behavior.
+
+In both modes, agents must not use prior demo notes, previous sessions, or
+connector/source names as organizational truth unless those inputs are
+explicitly supplied as fixture data or confirmed by the user/admin.
+
 ## Source, Channel, and Context
 
 Do not collapse source identity, retrieval channel, and business context.

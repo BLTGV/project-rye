@@ -16,6 +16,29 @@ what function Rye is assisting now, why it matters, what is out of scope, which
 sources and channels are involved, which plugins are enabled, and what agents
 may do without human review.
 
+## Operating Mode
+
+Before asking for organizational details, determine whether the user is asking
+for real onboarding or development evaluation.
+
+Real onboarding means the user wants Rye configured for an actual organization,
+project, function, or workflow. Optimize for building an accurate scoped
+organizational store. Ask for purpose, boundary, owner, source meaning,
+retention, evidence, inference, and review policy before ingestion or
+promotion.
+
+Development evaluation means the user wants to test whether Rye skills,
+bootstrap paths, CLI commands, subagents, and policy gates behave correctly.
+Optimize for observable agent behavior. Start from a clean consumer workspace
+when possible, install this skill through the public path, bootstrap Rye through
+the documented onboarding script, inspect only installed skills, the cloned Rye
+repo, and the Rye datastore, and stop at each organization-specific context
+checkpoint.
+
+In both modes, do not use prior sessions, demo notes, connector names, source
+names, or local artifacts as organizational truth unless the user explicitly
+provides them as input or fixture data.
+
 ## Workflow
 
 0. If Rye is not installed in the current project, use the public bootstrap:
@@ -131,6 +154,32 @@ Use this sequence when the user says they are starting from scratch:
    --purpose ...`.
 8. Only after the scope exists, connect source metadata with
    `rye-source-context` conventions.
+
+## Development Evaluation Path
+
+Use this sequence when the user is testing the onboarding skill or subagent
+behavior rather than onboarding a real organization:
+
+1. Start from a clean consumer workspace, not a prior demo folder with source
+   artifacts or session notes.
+2. Install this skill with
+   `npx skills add BLTGV/project-rye --skill rye-onboarding`.
+3. Read the installed skill file from the workspace. If installer guidance is
+   needed, install or read `rye-installer` as directed by this skill.
+4. Bootstrap a local trial unless the user explicitly provides a remote
+   database for the test.
+5. Run `./scripts/rye status`, `./scripts/rye catalog plugins --json`,
+   `./scripts/rye catalog skills --json`, and `./scripts/rye context --json`.
+6. Stop before creating an onboarding scope unless the user provides the
+   limited workflow, scope boundary, owner/reviewer, source expectations, and
+   review policy.
+7. Report commands run, files created, datastore status, what the skill caused,
+   and the exact user/admin questions needed next.
+
+Passing behavior: the agent asks for missing organizational context and creates
+no source-derived facts before scope policy exists. Failing behavior: the agent
+invents purpose from a connector or source name, uses prior session context, or
+ingests/promotes facts before an onboarding scope and review policy exist.
 
 ## Codex Harness Prompt
 
