@@ -8,110 +8,201 @@ const nav = buildNavigation(entries);
 ---
 
 <DocsLayout
-  title="Project Rye Documentation"
-  description="Rye is an open source PostgreSQL schema for teams who want CRM, task management, and agent memory in their own database — no SaaS required."
+  title="Rye | Agent-Native PostgreSQL Knowledge Graph"
+  description="Rye is an open source, agent-native temporal knowledge graph data model for PostgreSQL. It is a schema, not a database, app, or framework."
   nav={nav}
   hideSidebar={true}
 >
-  <section class="hero-panel enter">
-    <p class="eyebrow">Open Source / PostgreSQL</p>
-    <h1>Your CRM, your tasks, your agents — one graph you actually own.</h1>
-    <p class="hero-audience">
-      For teams who want operational data and agent memory in their own Postgres, not scattered across SaaS platforms.
-    </p>
-    <p>
-      Rye is a flexible graph schema that handles contacts, tasks, events, and agent context in one
-      place — your PostgreSQL database. No platform migration. No vendor lock-in. Start capturing
-      context now and evolve your data model as you learn.
-    </p>
-    <div class="hero-actions">
-      <a class="btn btn-primary" href="/docs/getting-started/installation/">Get Started</a>
-      <a class="btn btn-ghost" href="/docs/getting-started/quickstart/">Run the Quickstart</a>
+  <section class="hero-panel home-hero enter">
+    <div class="hero-copy">
+      <p class="eyebrow">Agent-native PostgreSQL schema</p>
+      <h1>Rye</h1>
+      <p class="hero-audience">
+        A temporal knowledge graph data model that runs inside your PostgreSQL instance.
+      </p>
+      <p>
+        Rye is open source SQL for tracking entities, relationships, activities, evolving
+        assertions, and source evidence across connected systems. The CLI now installs
+        Rye, syncs portable plugin and skill metadata, and gives agents a context bundle
+        before they write.
+      </p>
+      <div class="hero-actions">
+        <a class="btn btn-primary" href="/docs/getting-started/quickstart/">Start Fast</a>
+        <a class="btn btn-ghost" href="/docs/reference/cli/">CLI Reference</a>
+        <a class="btn btn-ghost" href="https://github.com/BLTGV/project-rye">GitHub</a>
+      </div>
+    </div>
+
+    <div class="schema-map" aria-label="Rye core schema map">
+      <div class="schema-map-header">
+        <span>Portable context</span>
+        <strong>Schema plus catalogs</strong>
+      </div>
+      <div class="schema-map-grid">
+        <span class="schema-node schema-node--strong">nodes</span>
+        <span class="schema-node">edges</span>
+        <span class="schema-node">events</span>
+        <span class="schema-node">event_participants</span>
+        <span class="schema-node">assertions</span>
+        <span class="schema-node">artifacts</span>
+      </div>
+      <div class="schema-map-footer">
+        <code>rye_agent_context()</code>
+        <code>rye_plugin_catalog()</code>
+        <code>rye_skill_catalog()</code>
+      </div>
     </div>
   </section>
 
-  <section class="stats-grid enter enter-d1" aria-label="Core benefits">
+  <section class="stats-grid stats-grid--four enter enter-d1" aria-label="Core Rye capabilities">
     <article>
-      <h2>Persist Now, Model Later</h2>
-      <p>Capture agent context today while your target schema evolves.</p>
-      <code class="stat-code">SELECT record_event('agent:summarized', ...);</code>
+      <h2>Fast Start CLI</h2>
+      <p>Bootstrap local Docker or a remote PostgreSQL database, then write `.rye.env`.</p>
+      <code class="stat-code">./scripts/rye init local</code>
     </article>
     <article>
-      <h2>Works With Existing Data</h2>
-      <p>Overlay on current systems of record. No migration required.</p>
-      <code class="stat-code">SELECT track_table('public','contacts');</code>
+      <h2>Portable Catalogs</h2>
+      <p>Plugins, skills, and capabilities sync into Rye metadata for discovery.</p>
+      <code class="stat-code">catalog capabilities</code>
     </article>
     <article>
-      <h2>Your Database, Your Rules</h2>
-      <p>Data never leaves your Postgres. Row-level security enforces access on every query.</p>
-      <code class="stat-code">SELECT agent_node_summary(node_id);</code>
+      <h2>Agent Context</h2>
+      <p>A single command returns core catalog, scopes, source inventory, and policy.</p>
+      <code class="stat-code">./scripts/rye context</code>
+    </article>
+    <article>
+      <h2>Scope-First Agents</h2>
+      <p>Create an active onboarding scope before source intake or fact promotion.</p>
+      <code class="stat-code">onboard create</code>
     </article>
   </section>
 
-  <section class="section-grid enter enter-d2">
+  <section class="capability-section enter enter-d2" aria-labelledby="implementation-heading">
+    <div class="section-heading">
+      <p class="eyebrow">Current implementation</p>
+      <h2 id="implementation-heading">What the repo now ships</h2>
+      <p>
+        The site now tracks the portable CLI path from the latest commit: hosted
+        bootstrap, `./scripts/rye`, plugin and skill manifests, capability catalogs,
+        agent context, source inventory, and conformance smoke tests.
+      </p>
+    </div>
+
+    <div class="capability-grid">
+      <article class="capability-card">
+        <h3>CLI v1</h3>
+        <p>
+          `init local`, `init remote`, `doctor`, `status`, `context`, `catalog`, and
+          `sources` commands make first-run setup and agent discovery scriptable.
+        </p>
+        <a href="/docs/reference/cli/">CLI reference</a>
+      </article>
+      <article class="capability-card">
+        <h3>Portable Catalogs</h3>
+        <p>
+          `rye_plugin_catalog()`, `rye_skill_catalog()`, and `rye_capability_catalog()`
+          expose installable behavior as queryable Rye metadata.
+        </p>
+        <a href="/docs/reference/data-dictionary/">Data dictionary</a>
+      </article>
+      <article class="capability-card">
+        <h3>Agent Context Bundle</h3>
+        <p>
+          `rye_agent_context()` combines catalog, scope selection, source inventory,
+          pending confirmations, and compiled policy for agents.
+        </p>
+        <a href="/docs/reference/onboarding/">Onboarding scopes</a>
+      </article>
+      <article class="capability-card">
+        <h3>Metadata Smoke Tests</h3>
+        <p>
+          New conformance suites validate portable catalog functions and the CLI JSON
+          paths used by agents and scripts.
+        </p>
+        <a href="/docs/model/core-contract-and-conformance/">Conformance kit</a>
+      </article>
+    </div>
+  </section>
+
+  <section class="section-grid enter enter-d3">
     <article class="card">
-      <h2>How It Works</h2>
-      <p>Four steps from install to production agent queries.</p>
+      <h2>Operational Flow</h2>
+      <p>From bootstrap to agent-readable context.</p>
       <ol class="steps-list">
         <li>
-          <strong>Gain visibility</strong> &mdash; install Rye and inspect your scope.
-          <code>SELECT rye_catalog();</code>
+          <strong>Install Rye</strong>
+          <span>Use the hosted bootstrap or the repo-local CLI.</span>
+          <code>curl -fsSL https://projectrye.dev/onboard | sh</code>
         </li>
         <li>
-          <strong>Connect your data</strong> &mdash; link domain rows and enable change capture.
-          <code>link_record(...)</code> + <code>track_table(...)</code>
+          <strong>Check the instance</strong>
+          <span>Verify the database, synced metadata, and available capabilities.</span>
+          <code>./scripts/rye doctor</code> + <code>catalog skills</code>
         </li>
         <li>
-          <strong>Preserve history</strong> &mdash; record activity and evolve assertions over time.
-          <code>record_event(...)</code> + <code>supersede_assertion(...)</code>
+          <strong>Create the first scope</strong>
+          <span>Record purpose, boundaries, default review policy, and enabled plugins.</span>
+          <code>./scripts/rye onboard create</code>
         </li>
         <li>
-          <strong>Query from agents</strong> &mdash; compact context and current state, ready for LLM consumption.
-          <code>agent_node_summary(...)</code> + <code>current_assertions</code>
+          <strong>Hand context to agents</strong>
+          <span>Return catalogs, scopes, source inventory, confirmations, and policy.</span>
+          <code>./scripts/rye context --json</code>
         </li>
       </ol>
     </article>
     <article class="card">
-      <h2>What You Get</h2>
-      <ul>
-        <li>No migration of source systems.</li>
-        <li>Temporal history with auditable, supersedable assertions.</li>
-        <li>Agent-compatible read and write patterns with PostgreSQL controls.</li>
-        <li>Row-level security enforced on every table, every query.</li>
-        <li>Content-addressed artifact storage with deduplication.</li>
-      </ul>
       <h2>Start Here</h2>
       <ul class="start-here-links">
         <li>
-          <a href="/docs/reference/core-contract/">Core Contract</a>
-          <span>Guarantees Rye makes and expects</span>
+          <a href="/docs/getting-started/quickstart/">Quickstart</a>
+          <span>Use the new CLI flow for install, metadata, scope, and context.</span>
+        </li>
+        <li>
+          <a href="/docs/reference/cli/">CLI Reference</a>
+          <span>Commands for init, catalogs, context, sources, status, and doctor.</span>
         </li>
         <li>
           <a href="/docs/reference/data-dictionary/">Data Dictionary</a>
-          <span>Every table, column, and trigger explained</span>
+          <span>Tables, views, functions, and the portable catalog helpers.</span>
         </li>
         <li>
           <a href="/docs/model/security/">Security Model</a>
-          <span>RLS policies, redaction, and access control</span>
+          <span>RLS, field redaction, classification gates, and Supabase behavior.</span>
         </li>
         <li>
-          <a href="/docs/getting-started/quickstart/">Quickstart</a>
-          <span>Working system in under 10 minutes</span>
+          <a href="/docs/reference/roadmap/">Roadmap</a>
+          <span>Onboarding, plugins, evidence, retention, admin, and graph quality.</span>
         </li>
       </ul>
     </article>
   </section>
 
-  <section class="cta-section enter enter-d3">
+  <section class="truth-strip enter enter-d4" aria-label="What Rye is not">
+    <div>
+      <span>Not a database</span>
+      <p>Rye runs in standard PostgreSQL.</p>
+    </div>
+    <div>
+      <span>Not an application</span>
+      <p>Domain tools remain the operational UI.</p>
+    </div>
+    <div>
+      <span>Not a framework</span>
+      <p>The deliverable is SQL.</p>
+    </div>
+  </section>
+
+  <section class="cta-section enter enter-d5">
     <div class="cta-card">
-      <h2>Ready to start?</h2>
+      <h2>Own the knowledge graph your agents use.</h2>
       <p>
-        Run the quickstart to have a working Rye instance in minutes, or read the overview
-        to understand the architecture first.
+        Start with the CLI quickstart, then use portable catalogs and conformance tests
+        to keep your Rye instance predictable as plugins, skills, and scopes grow.
       </p>
       <div class="hero-actions">
-        <a class="btn btn-primary" href="/docs/getting-started/quickstart/">Run the Quickstart</a>
-        <a class="btn btn-ghost" href="https://github.com/BLTGV/project-rye">Star on GitHub</a>
+        <a class="btn btn-primary" href="/docs/getting-started/quickstart/">Start Fast</a>
+        <a class="btn btn-ghost" href="/docs/model/core-contract-and-conformance/">Conformance Kit</a>
       </div>
     </div>
   </section>

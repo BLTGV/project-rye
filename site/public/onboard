@@ -109,9 +109,9 @@ if [ "$RYE_MODE" = "remote" ]; then
   need psql
   say "Installing Rye into remote database"
   if [ "$RYE_SEED" -eq 1 ]; then
-    ./scripts/rye remote --db-url "$RYE_DB_URL" --seed
+    ./scripts/rye init remote --db-url "$RYE_DB_URL" --seed
   else
-    ./scripts/rye remote --db-url "$RYE_DB_URL"
+    ./scripts/rye init remote --db-url "$RYE_DB_URL"
   fi
 else
   need docker
@@ -120,7 +120,7 @@ else
   fi
 
   say "Installing Rye locally"
-  local_args="local"
+  local_args="init local"
   if [ "$RYE_FRESH" -eq 1 ]; then
     local_args="$local_args --fresh"
   fi
@@ -135,9 +135,16 @@ cat <<'EOF'
 
 Rye is ready.
 
-The schema and Rye plugin metadata are installed. Plugin metadata includes
-contributed node, edge, assertion, event, and artifact types. Example data is
-only installed when you pass --seed.
+The schema and portable Rye metadata are installed. Metadata includes plugins,
+skills, capabilities, and contributed node, edge, assertion, event, and artifact
+types. Example data is only installed when you pass --seed.
+
+Useful checks:
+
+  ./scripts/rye doctor
+  ./scripts/rye status
+  ./scripts/rye catalog capabilities
+  ./scripts/rye context --json
 
 For an agent-led setup, install the onboarding skill in the project where the
 agent will work:

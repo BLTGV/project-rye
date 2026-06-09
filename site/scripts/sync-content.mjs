@@ -21,8 +21,14 @@ const outcomeDescriptionsBySourcePath = {
     "Adopt consistent conventions so Rye stays extensible without schema migrations.",
   "docs/core-contract.md":
     "Understand the guarantees Rye enforces so behavior stays predictable in production.",
+  "docs/cli.md":
+    "Use the Rye CLI to install, inspect catalogs, create scopes, and return agent context.",
   "docs/data-dictionary.md":
     "Get a clear purpose for every table, view, and function to accelerate implementation.",
+  "docs/onboarding.md":
+    "Set up scope-first onboarding, source context, plugin policy, and context-gap review.",
+  "docs/roadmap.md":
+    "Review the capability roadmap for onboarding, plugins, evidence, retention, admin, and graph quality.",
   "design/model/core-contract-and-conformance.md":
     "Validate your deployment against Rye's core contract before production rollout.",
   "design/model/deployment.md":
@@ -62,8 +68,14 @@ const outcomeDescriptionsByTitle = {
     "Adopt consistent conventions so Rye stays extensible without schema migrations.",
   "Rye Core Contract (Implemented)":
     "Understand the guarantees Rye enforces so behavior stays predictable in production.",
+  "Rye CLI Reference":
+    "Use the Rye CLI to install, inspect catalogs, create scopes, and return agent context.",
   "Rye Data Dictionary":
     "Get a clear purpose for every table, view, and function to accelerate implementation.",
+  "Rye Onboarding Scopes and Plugin Metadata":
+    "Set up scope-first onboarding, source context, plugin policy, and context-gap review.",
+  "Rye Roadmap":
+    "Review the capability roadmap for onboarding, plugins, evidence, retention, admin, and graph quality.",
   "Rye — Core Contract and Conformance Kit":
     "Validate your deployment against Rye's core contract before production rollout.",
   "Deployment Architecture":

@@ -65,6 +65,26 @@ In both modes, agents must not use prior demo notes, previous sessions, or
 connector/source names as organizational truth unless those inputs are
 explicitly supplied as fixture data or confirmed by the user/admin.
 
+## CLI-First Flow
+
+Use the CLI to create the first scope after installation:
+
+```bash
+./scripts/rye onboard create \
+  --label "Lead Follow-Up" \
+  --purpose "Track follow-up for a limited lead workflow."
+```
+
+The command records default policy assertions, enables starter plugins, and
+activates the scope. Then use:
+
+```bash
+./scripts/rye context --json
+```
+
+This returns `rye_agent_context()`, a portable context bundle with catalog,
+plugin, skill, capability, source, scope, and policy data for agents.
+
 ## Source, Channel, and Context
 
 Do not collapse source identity, retrieval channel, and business context.
@@ -156,6 +176,18 @@ Migration `0010_onboarding_scope_plugins.sql` adds convention helpers:
 
 These helpers use existing Rye tables. They create nodes, edges, assertions,
 and events; they do not add new core tables.
+
+Migration `0011_portability_catalog.sql` adds discovery helpers:
+
+- `rye_plugin_catalog()`
+- `rye_skill_catalog()`
+- `rye_capability_catalog()`
+- `rye_source_inventory()`
+- `rye_pending_context_confirmations()`
+- `rye_agent_context(scope_id)`
+
+These helpers make installed plugins, skills, capabilities, sources, active
+scopes, and selected policy bundles portable across CLI users and agents.
 
 ## Minimal Flow
 

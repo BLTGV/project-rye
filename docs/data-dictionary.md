@@ -228,6 +228,80 @@ Returns a summary of everything in the Rye instance: node types and counts, edge
 
 **Why it exists:** An agent's first call when entering a new instance. Instead of running multiple `SELECT DISTINCT` queries, this function returns the full picture in one call.
 
+#### `rye_plugin_catalog()`
+
+```
+rye_plugin_catalog() → jsonb
+```
+
+Returns installed plugin manifests, contributions, onboarding metadata,
+validation metadata, admin metadata, capabilities, and totals.
+
+**Why it exists:** Plugins are portable metadata. Agents and CLI tools need to
+discover which vocabulary and behavior are available without reading files from
+the repository.
+
+#### `rye_skill_catalog()`
+
+```
+rye_skill_catalog() → jsonb
+```
+
+Returns synced Rye skill manifests, install commands, requirements,
+capabilities, and totals.
+
+**Why it exists:** Skills describe agent-facing workflows. Syncing them into
+Rye lets agents discover available guidance from the database itself.
+
+#### `rye_capability_catalog()`
+
+```
+rye_capability_catalog() → jsonb
+```
+
+Returns capabilities contributed by plugins and skills, including kind,
+read-only status, requirements, and entrypoints.
+
+**Why it exists:** Agents need to know what they can read, write, or invoke
+before acting. This function gives them a portable capability map.
+
+#### `rye_source_inventory()`
+
+```
+rye_source_inventory() → jsonb
+```
+
+Returns source accounts and source containers with confirmation status and item
+counts.
+
+**Why it exists:** Agents should inspect source context before routing material
+or promoting assertions.
+
+#### `rye_pending_context_confirmations()`
+
+```
+rye_pending_context_confirmations() → jsonb
+```
+
+Returns source accounts and containers whose context still needs confirmation.
+
+**Why it exists:** Unknown source context should be reviewed instead of treated
+as business truth.
+
+#### `rye_agent_context()`
+
+```
+rye_agent_context(p_scope_id uuid DEFAULT NULL) → jsonb
+```
+
+Returns the core catalog, plugin catalog, skill catalog, capability catalog,
+source inventory, pending source context confirmations, active scopes, selected
+scope status, and compiled scope policy when a scope is selected.
+
+**Why it exists:** Agents need one portable orientation call. If exactly one
+scope is active, Rye selects it automatically. If multiple scopes are active,
+the caller should pass a scope ID.
+
 #### `supersede_assertion()`
 
 ```

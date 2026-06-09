@@ -2,11 +2,11 @@
 
 Astro-based documentation site generated from this repository's Markdown sources.
 
-Rye is an opinionated pattern implemented in PostgreSQL for technical operators who need AI-agent-compatible persistence quickly. It works with existing data, persists context immediately, and supports evolving the target domain model over time.
+Rye is an open source, agent-native temporal knowledge graph data model for PostgreSQL. The site presents Rye as a SQL schema that overlays existing domain tables, preserves temporal assertions and provenance, and supports scope-first agent onboarding through plugin policy.
 
 ## What it does
 
-- Syncs docs from `../docs` and `../design/{model,layers,cookbooks}` into `src/content/docs`
+- Syncs docs from `../docs` and `../design/{getting-started,model,layers,cookbooks}` into `src/content/docs`
 - Builds navigable docs pages at `/docs/<section>/<slug>/`
 - Generates client-side search from a prebuilt JSON index
 - Uses DaisyUI components with Rye color-theme customization

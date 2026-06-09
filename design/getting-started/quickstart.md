@@ -1,30 +1,134 @@
 # Quickstart
 
-## Connect Your Data in 5 Minutes
+## Start Rye in a few commands
 
-Rye sits alongside your existing tables. It doesn't replace them — it connects them. Your domain tables stay exactly as they are. Rye adds a graph layer that lets you track relationships, record events, and assert facts across all of them.
+Rye is a PostgreSQL schema with a CLI for first-run setup and agent discovery.
+The quickstart path installs Rye, syncs portable metadata, creates an onboarding
+scope, and returns the context bundle agents should read before they act.
 
-**Prerequisite:** Complete the [Installation](/docs/getting-started/installation/) steps first — Rye should be installed, the search path set, and session variables configured.
+## 1. Install Rye
 
----
+Use the hosted bootstrap:
 
-## 1. Set Up Your Session
+```bash
+curl -fsSL https://projectrye.dev/onboard | sh
+```
+
+Or run the repo-local CLI:
+
+```bash
+./scripts/rye init local --fresh
+```
+
+For an existing PostgreSQL 15+ database:
+
+```bash
+./scripts/rye init remote --db-url "$DATABASE_URL"
+```
+
+These commands install the Rye schema, sync plugin manifests, sync skill
+manifests, sync capability metadata, and write `.rye.env`.
+
+## 2. Check the Instance
+
+```bash
+./scripts/rye doctor
+./scripts/rye status
+```
+
+Use JSON for scripts or agents:
+
+```bash
+./scripts/rye doctor --json
+./scripts/rye status --json
+```
+
+`status --json` returns `rye_agent_context()`.
+
+## 3. Inspect Portable Catalogs
+
+```bash
+./scripts/rye catalog plugins
+./scripts/rye catalog skills
+./scripts/rye catalog capabilities
+```
+
+These commands show which plugin contracts, skill manifests, and capabilities
+are available in the instance. Use `--json` to hand the result to an agent.
+
+```bash
+./scripts/rye catalog capabilities --json
+```
+
+## 4. Create the First Onboarding Scope
+
+Create one limited scope before source intake or assertion promotion:
+
+```bash
+./scripts/rye onboard create \
+  --label "Lead Follow-Up" \
+  --purpose "Track follow-up for a limited lead workflow."
+```
+
+The command creates and activates an `onboarding_scope` node. It records default
+policies for expected contexts, holding context, unexpected context handling,
+retention, evidence review, allowed types, and enabled plugins.
+
+Use a scope name that describes the organizational purpose. Avoid naming the
+scope after a source, channel, connector, or trial phase unless that is the real
+purpose.
+
+## 5. Get Agent Context
+
+```bash
+./scripts/rye context
+./scripts/rye context --json
+```
+
+The context bundle includes:
+
+- core `rye_catalog()` output
+- plugin, skill, and capability catalogs
+- source inventory
+- pending source context confirmations
+- active scopes
+- selected scope status
+- compiled scope policy when a scope is selected
+
+If multiple scopes are active, select one by key or UUID:
+
+```bash
+./scripts/rye context --scope lead-follow-up --json
+```
+
+## 6. Review Sources Before Promoting Facts
+
+Check registered source accounts and containers:
+
+```bash
+./scripts/rye sources inventory
+```
+
+Find sources that still need context confirmation:
+
+```bash
+./scripts/rye sources pending-context
+```
+
+New source metadata is provenance, not business truth. Confirm context before
+agents route source material or promote assertions.
+
+## 7. Connect Existing Domain Records
+
+When you are ready to connect operational data, use `link_record()` from SQL.
+Domain tables remain the system of record.
 
 ```sql
 SET search_path = rye, public, pg_catalog;
 SET LOCAL "app.current_user_id" = 'quickstart-user';
 SET LOCAL "app.current_teams" = 'default';
 SET LOCAL "app.current_role" = 'operator';
-```
 
----
-
-## 2. Link Your Existing Records
-
-Say you have a `customers` table and a `tickets` table that already work. Link them to the graph:
-
-```sql
--- Link a customer record to the graph
 SELECT link_record(
     p_source_schema := 'public',
     p_source_table  := 'customers',
@@ -33,161 +137,58 @@ SELECT link_record(
     p_label         := 'Acme Corp',
     p_properties    := '{"plan": "growth", "mrr": 299}'
 );
-
--- Link a support ticket
-SELECT link_record(
-    p_source_schema := 'public',
-    p_source_table  := 'tickets',
-    p_source_id     := '1087',
-    p_node_type     := 'ticket',
-    p_label         := 'Cannot export CSV reports',
-    p_properties    := '{"priority": "high", "channel": "chat"}'
-);
 ```
 
-`link_record()` creates a graph node and maps it back to the source table via `node_source_map`. Each distinct `source_id` creates a new node. Calling it again with the same `(schema, table, source_id)` updates the existing node's properties instead of creating a duplicate.
+`link_record()` creates a graph node and maps it back to the source table through
+`node_source_map`. Calling it again with the same source row updates the linked
+node properties instead of creating a duplicate.
 
----
+## 8. Track Source Table Changes
 
-## 3. Connect Them With Edges
-
-Now draw the relationship that neither table knows about:
-
-```sql
--- The ticket is about the customer
-INSERT INTO edges (edge_type, source_id, target_id, properties)
-SELECT 'regarding', ticket.id, customer.id, '{"context": "billing issue"}'
-FROM nodes ticket, nodes customer
-WHERE ticket.external_id = '1087' AND ticket.external_source = 'public.tickets'
-  AND customer.external_id = '42' AND customer.external_source = 'public.customers';
-```
-
----
-
-## 4. Assert a Fact
-
-Add a belief about the customer. This doesn't change the `customers` table — it lives in the graph:
-
-```sql
-INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence)
-SELECT 'churn_risk', 'default', id,
-    '{"level": "high", "signals": ["3 open tickets", "no login 14d"]}',
-    0.75
-FROM nodes
-WHERE external_id = '42' AND external_source = 'public.customers';
-```
-
----
-
-## 5. Record an Event
-
-```sql
-SELECT record_event(
-    p_event_type     := 'escalation',
-    p_summary        := 'Ticket #1087 escalated to engineering',
-    p_properties     := '{"reason": "requires code fix"}',
-    p_participant_ids := ARRAY[
-        (SELECT id FROM nodes WHERE external_id = '1087' AND external_source = 'public.tickets'),
-        (SELECT id FROM nodes WHERE external_id = '42' AND external_source = 'public.customers')
-    ]::uuid[],
-    p_participant_roles := ARRAY['subject', 'regarding']
-);
-```
-
----
-
-## 6. Track Changes Automatically
-
-Want the graph to know when a customer or ticket changes in the source table? Attach a CDC trigger:
+Attach CDC triggers when linked source rows should produce graph events:
 
 ```sql
 SELECT track_table('public', 'customers');
-SELECT track_table('public', 'tickets');
 ```
 
-Now any INSERT, UPDATE, or DELETE on those tables automatically records a `domain_change` event in the graph — with the full before/after diff — for every row that has a linked node.
+Only linked rows produce `domain_change` events. Unlinked rows are ignored.
 
----
+## 9. Query Rye
 
-## 7. Query Across Everything
+Use the CLI for broad instance context:
+
+```bash
+./scripts/rye context --json
+```
+
+Use SQL for graph-level details:
 
 ```sql
--- What do we know about Acme?
-SELECT * FROM node_context
+SELECT *
+FROM node_context
 WHERE label = 'Acme Corp';
-
--- What's the current churn risk?
-SELECT claim, confidence
-FROM current_assertions
-WHERE subject_node_id = (SELECT id FROM nodes WHERE external_id = '42' AND external_source = 'public.customers')
-  AND assertion_type = 'churn_risk';
-
--- What changed on the customers table in the last week?
-SELECT e.occurred_at, e.summary, e.properties->'changed_fields'
-FROM events e
-JOIN event_participants ep ON ep.event_id = e.id
-WHERE ep.node_id = (SELECT id FROM nodes WHERE external_id = '42' AND external_source = 'public.customers')
-  AND e.event_type = 'domain_change'
-ORDER BY e.occurred_at DESC;
-
--- Join back to the source table when you need the full record
-SELECT n.label, c.*
-FROM nodes n
-JOIN node_source_map nsm ON nsm.node_id = n.id
-    AND nsm.source_table = 'customers'
-JOIN customers c ON c.id = nsm.source_id::int
-WHERE n.node_type = 'org';
 ```
 
----
-
-## 8. See What's Connected
+For compact agent context on a specific node:
 
 ```sql
-SELECT rye_catalog();
-```
-
-Returns a summary of everything in the instance — node types, edge types, assertion types, event types, tracked tables, and totals.
-
----
-
-## 9. Supersede a Fact
-
-A month later, the churn risk drops:
-
-```sql
-SELECT supersede_assertion(
-    p_old_assertion_id := (
-        SELECT id FROM current_assertions
-        WHERE subject_node_id = (SELECT id FROM nodes WHERE external_id = '42' AND external_source = 'public.customers')
-          AND assertion_type = 'churn_risk'
-    ),
-    p_new_assertion_type := 'churn_risk',
-    p_new_subject_node_id := (SELECT id FROM nodes WHERE external_id = '42' AND external_source = 'public.customers'),
-    p_new_subject_edge_id := NULL,
-    p_new_claim := '{"level": "low", "signals": ["renewed contract", "active usage"]}',
-    p_new_confidence := 0.9
+SELECT agent_node_summary(
+  (SELECT id FROM nodes WHERE label = 'Acme Corp' LIMIT 1),
+  8
 );
 ```
 
-Both the old and new belief are preserved. `current_assertions` shows only the latest.
+## What You Did Not Have To Do
 
----
-
-## What You Didn't Have To Do
-
-- Change your `customers` or `tickets` tables
-- Add foreign keys from domain tables to the graph
-- Replace any existing system
-- Write an ETL pipeline
-
-Your domain tables are the system of record. Rye connects them. If you drop the Rye schema, your application keeps working.
-
----
+- Replace PostgreSQL
+- Add a runtime or ORM
+- Add foreign keys from domain tables to Rye
+- Seed example data
+- Promote source metadata as accepted business truth
 
 ## Next Steps
 
-- [Integration Guide](/docs/model/integration/) — deep dive on domain table overlay, CDC, and materialized views
-- [Core Contract](/docs/model/core-contract-and-conformance/) — what Rye guarantees
-- [Agent Operations](/docs/reference/agent-ops-guide/) — safe read/write patterns for LLM agents
-- [SaaS Customer Operations](/docs/cookbooks/saas-customer-operations/) — full worked example with Stripe, Intercom, and Linear
+- [CLI Reference](/docs/reference/cli/) for every `./scripts/rye` command
+- [Onboarding Scopes](/docs/reference/onboarding/) for scope and source policy
+- [Integration Guide](/docs/model/integration/) for domain table overlay and CDC
+- [Agent Operations](/docs/reference/agent-ops-guide/) for safe read/write patterns

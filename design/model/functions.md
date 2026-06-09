@@ -341,6 +341,31 @@ SELECT rye_catalog();
 
 An agent's first call to orient itself in a new instance.
 
+### Portable catalogs and agent context
+
+Migration `0011_portability_catalog.sql` adds query helpers for CLI and agent
+discovery:
+
+```sql
+CREATE FUNCTION rye_plugin_catalog() RETURNS jsonb;
+CREATE FUNCTION rye_skill_catalog() RETURNS jsonb;
+CREATE FUNCTION rye_capability_catalog() RETURNS jsonb;
+CREATE FUNCTION rye_source_inventory() RETURNS jsonb;
+CREATE FUNCTION rye_pending_context_confirmations() RETURNS jsonb;
+CREATE FUNCTION rye_agent_context(p_scope_id uuid DEFAULT NULL) RETURNS jsonb;
+```
+
+Usage:
+
+```sql
+SELECT rye_agent_context();
+SELECT rye_capability_catalog();
+```
+
+These functions expose synced plugin manifests, Rye skill manifests,
+capabilities, source inventory, pending context confirmations, active scopes,
+and selected scope policy as portable JSON.
+
 ---
 
 ## 10. Agent Query Logging

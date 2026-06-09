@@ -5,17 +5,23 @@ Source of truth: Markdown files in /docs and /design
 Repository: https://github.com/BLTGV/project-rye
 
 Positioning:
-- Rye is an opinionated PostgreSQL pattern for technical org operators.
-- Deploy AI-agent-compatible persistence quickly without replacing existing systems.
-- Persist context now while refining the long-term domain model.
+- Rye is an open source SQL schema, not a database, application, or framework.
+- Rye gives agents a temporal graph for entities, relationships, activities, assertions, and artifacts.
+- Domain tables remain the system of record; Rye overlays them through link_record() and track_table().
+- The recommended repo-local entrypoint is ./scripts/rye for init, doctor, catalog, context, sources, and onboarding.
+- Portable metadata includes plugin catalogs, skill catalogs, capability catalogs, and agent context bundles.
+- Scope-first onboarding and plugin policy bundles guide what agents may collect, classify, retain, and promote.
 
 Site sections:
 - /docs/getting-started/installation/
 - /docs/getting-started/quickstart/
 - /docs/reference/core-contract/
+- /docs/reference/cli/
 - /docs/reference/data-dictionary/
+- /docs/reference/onboarding/
 - /docs/reference/agent-ops-guide/
 - /docs/reference/conventions-catalog/
+- /docs/reference/roadmap/
 - /docs/model/overview/
 - /docs/model/schema/
 - /docs/model/functions/

@@ -27,7 +27,15 @@ export const SECTION_TITLES: Record<string, string> = {
 
 const DOCUMENT_ORDER: Record<string, string[]> = {
   "getting-started": ["installation", "quickstart"],
-  reference: ["core-contract", "data-dictionary", "agent-ops-guide", "conventions-catalog"],
+  reference: [
+    "core-contract",
+    "cli",
+    "data-dictionary",
+    "onboarding",
+    "agent-ops-guide",
+    "conventions-catalog",
+    "roadmap",
+  ],
   model: ["overview", "schema", "functions", "integration", "security", "core-contract-and-conformance"],
   layers: ["crm", "pm"],
   cookbooks: [

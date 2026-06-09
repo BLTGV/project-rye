@@ -1,56 +1,34 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 340 110" role="img" aria-label="Rye">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 212 56" role="img" aria-label="Rye">
   <defs>
-    <style>
-      .slice-fill { fill: #f3e5cd; }
-      .slice-outline { fill: none; stroke: #8d4f1d; stroke-width: 4; stroke-linejoin: round; }
-      .crust { stroke: #6f3d13; stroke-width: 5; stroke-linecap: round; }
-      .edge { stroke: #8d4f1d; stroke-width: 2.6; stroke-linecap: round; opacity: 0.7; }
-      .node-ring { fill: none; stroke: #b7792b; stroke-width: 1.5; opacity: 0.45; }
-      .node { fill: #b7792b; }
-      .wordmark {
-        font-family: "Space Grotesk", "Segoe UI", system-ui, sans-serif;
-        font-size: 58px;
-        font-weight: 700;
-        letter-spacing: -0.7px;
-        fill: #1f1b16;
-      }
-    </style>
+    <linearGradient id="rye-mark" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#ecd97a" />
+      <stop offset="1" stop-color="#b8901f" />
+    </linearGradient>
   </defs>
-
-  <g transform="translate(8, 10)">
-    <!-- Bread slice silhouette -->
-    <path
-      class="slice-fill"
-      d="M14 84c-5 0-9-4-9-9V49C5 21 23 8 45 8s40 13 40 41v26c0 5-4 9-9 9z"
-    />
-    <path
-      class="slice-outline"
-      d="M14 84c-5 0-9-4-9-9V49C5 21 23 8 45 8s40 13 40 41v26c0 5-4 9-9 9z"
-    />
-    <!-- Foundation crust line -->
-    <line class="crust" x1="13" y1="84" x2="77" y2="84" />
-
-    <!-- Graph network inside the bread -->
-    <line class="edge" x1="19" y1="64" x2="45" y2="49" />
-    <line class="edge" x1="45" y1="49" x2="71" y2="64" />
-    <line class="edge" x1="31" y1="34" x2="45" y2="49" />
-    <line class="edge" x1="59" y1="34" x2="45" y2="49" />
-    <line class="edge" x1="31" y1="34" x2="59" y2="34" opacity="0.45" />
-    <line class="edge" x1="19" y1="64" x2="31" y2="34" opacity="0.35" />
-    <line class="edge" x1="71" y1="64" x2="59" y2="34" opacity="0.35" />
-
-    <circle class="node-ring" cx="19" cy="64" r="8" />
-    <circle class="node-ring" cx="45" cy="49" r="9" />
-    <circle class="node-ring" cx="71" cy="64" r="8" />
-    <circle class="node-ring" cx="31" cy="34" r="7.5" />
-    <circle class="node-ring" cx="59" cy="34" r="7.5" />
-
-    <circle class="node" cx="19" cy="64" r="4.6" />
-    <circle class="node" cx="45" cy="49" r="5.2" />
-    <circle class="node" cx="71" cy="64" r="4.6" />
-    <circle class="node" cx="31" cy="34" r="4.2" />
-    <circle class="node" cx="59" cy="34" r="4.2" />
-  </g>
-
-  <text class="wordmark" x="108" y="76">rye</text>
+  <circle cx="28" cy="28" r="22" fill="url(#rye-mark)" />
+  <path
+    d="M28 12v32M19 20c6 0 9 3 9 8M37 20c-6 0-9 3-9 8M18 30c7 0 10 3 10 9M38 30c-7 0-10 3-10 9"
+    fill="none"
+    stroke="#0a0b0f"
+    stroke-linecap="round"
+    stroke-width="2.2"
+  />
+  <text
+    x="64"
+    y="37"
+    fill="#11131b"
+    font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif"
+    font-size="30"
+    font-weight="720"
+    letter-spacing="-0.02em"
+  >Rye</text>
+  <text
+    x="122"
+    y="36"
+    fill="#5d6376"
+    font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif"
+    font-size="12"
+    font-weight="650"
+    letter-spacing="0.16em"
+  >PROJECT</text>
 </svg>

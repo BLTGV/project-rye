@@ -1,78 +1,147 @@
 # Installation
 
-## Get Rye running on your PostgreSQL database
+## Get Rye running with the CLI
 
----
+The fastest path is the hosted onboarding script. It asks where Rye should live
+and then runs the same repo-local install flow described below.
 
-## Prerequisites
+```bash
+curl -fsSL https://projectrye.dev/onboard | sh
+```
 
-- **PostgreSQL 15+** — Rye uses features like `security_invoker` views and `pg_catalog` built-in `gen_random_uuid()`
-- **`psql` CLI** — used by the install and migration scripts
-- **`git`** — to clone the repository
-- **`bash`** — install scripts are Bash-based
+For a remote PostgreSQL 15+ database:
 
----
+```bash
+curl -fsSL https://projectrye.dev/onboard | sh -s -- --remote "$DATABASE_URL"
+```
 
-## Clone the Repo
+The bootstrap installs the Rye schema and syncs portable metadata for plugins,
+skills, capabilities, and contributed node, edge, assertion, event, and artifact
+types. It does not add example data unless you pass `--seed`.
+
+## Requirements
+
+- PostgreSQL 15+
+- Docker plus Docker Compose for local installs
+- `psql` for remote database installs
+- `bash`
+
+## Repo-Local Install
+
+Clone the repo if you want to run commands directly:
 
 ```bash
 git clone https://github.com/BLTGV/project-rye.git
 cd project-rye
 ```
 
----
-
-## Install Rye
-
-### Option A: Existing Database
-
-If you already have a PostgreSQL database running:
+Start a fresh local PostgreSQL container and install Rye:
 
 ```bash
-./scripts/install.sh --db-url postgresql://user:pass@host:5432/your_db
+./scripts/rye init local --fresh
 ```
 
-This runs all migrations and installs the `rye` schema alongside your existing tables. Nothing in your database is modified — Rye only creates objects in its own schema.
-
-### Option B: Docker
-
-If you want a self-contained environment:
+Install into an existing database:
 
 ```bash
-./scripts/docker-test.sh up
+./scripts/rye init remote --db-url "$DATABASE_URL"
 ```
 
-This spins up a PostgreSQL container and installs the Rye schema automatically.
-
----
+Both commands write connection state to `.rye.env` so later commands can find
+the same instance.
 
 ## Verify the Install
 
-Connect to your database and run:
+Check database reachability and synced metadata totals:
 
-```sql
-SELECT rye_catalog();
+```bash
+./scripts/rye doctor
 ```
 
-This returns a summary of everything in the Rye instance. On a fresh install it shows an empty catalog — that's expected.
+Inspect the current instance:
 
----
+```bash
+./scripts/rye status
+```
 
-## Set the Search Path
+List portable metadata:
 
-Rye objects live in the `rye` schema. To call Rye functions and query Rye tables without schema-qualifying every name, set the search path at the start of each session:
+```bash
+./scripts/rye catalog plugins
+./scripts/rye catalog skills
+./scripts/rye catalog capabilities
+```
+
+Use JSON when an agent or script needs machine-readable context:
+
+```bash
+./scripts/rye status --json
+./scripts/rye context --json
+```
+
+## Create the First Scope
+
+Before agents ingest sources or promote assertions, create an onboarding scope:
+
+```bash
+./scripts/rye onboard create \
+  --label "First Scope" \
+  --purpose "Describe the limited workflow Rye should assist first."
+```
+
+The command records purpose, boundaries, default review policies, allowed types,
+and enabled plugins. It then activates the scope.
+
+## Agent-Led Onboarding
+
+Install the Rye onboarding skill in the project folder where your agent will
+work:
+
+```bash
+npx skills add BLTGV/project-rye --skill rye-onboarding
+```
+
+Then ask your agent:
+
+```text
+Use the Rye onboarding skill. Check whether Rye is installed, run
+./scripts/rye status, then help me create the first onboarding scope.
+
+Start by asking what limited workflow or organizational purpose Rye should
+assist first. Do not ingest sources or promote facts until the scope, boundary,
+expected contexts, and review policy exist.
+```
+
+Name the scope after the organizational purpose or workflow, not the source or
+retrieval channel.
+
+## Lower-Level Install
+
+Use the install script directly when you need a smaller building block:
+
+```bash
+export DATABASE_URL='postgresql://user:pass@host:5432/dbname'
+./scripts/install.sh --profiles crm,pm
+```
+
+Seed example data only when you need quickstart records:
+
+```bash
+./scripts/install.sh --profiles crm,pm --seed
+```
+
+Portable plugin, skill, and capability metadata is installed automatically by
+the fast-start commands.
+
+## SQL Session Context
+
+Most direct SQL examples assume this search path:
 
 ```sql
 SET search_path = rye, public, pg_catalog;
 ```
 
-With this in place, `SELECT rye_catalog()` works instead of `SELECT rye.rye_catalog()`. The `public` schema stays in the path so your domain tables remain accessible.
-
----
-
-## Set Session Variables
-
-Rye enforces row-level security using three session variables. Set these at the start of each connection:
+Rye enforces row-level security through session variables:
 
 ```sql
 SET LOCAL "app.current_user_id" = 'your-user-id';
@@ -80,33 +149,12 @@ SET LOCAL "app.current_teams" = 'team-a,team-b';
 SET LOCAL "app.current_role" = 'operator';
 ```
 
-| Variable | Purpose |
-|----------|---------|
-| `app.current_user_id` | Identifies who is making the request. Used in event attribution and RLS policies. |
-| `app.current_teams` | Comma-separated team list. Controls which classified nodes and edges are visible. |
-| `app.current_role` | Role name (`operator`, `agent`, `admin`, etc.). Gates access to assertion types and classification levels. |
-
-Without these variables set, RLS policies will block most reads and writes. This is by design — Rye assumes no implicit trust.
-
----
-
-## Profiles
-
-Rye supports optional layer profiles that add domain conventions on top of the core schema:
-
-```bash
-./scripts/install.sh --db-url postgresql://... --profiles crm,pm
-```
-
-| Profile | What it adds |
-|---------|-------------|
-| `crm` | CRM conventions — contact, deal, and pipeline node types with standard edge patterns |
-| `pm` | PM conventions — task, project, and sprint node types with status tracking |
-
-Profiles are additive. You can install with no profiles (`--profiles ""`) and add them later by re-running the install.
-
----
+The CLI sets the admin context inside the statements it runs. Applications and
+custom SQL sessions must set their own context before reading or writing
+RLS-protected Rye objects.
 
 ## Next Steps
 
-You're ready to connect your data. Head to the [Quickstart](/docs/getting-started/quickstart/) to link your first domain records, draw edges, and query across everything in under 10 minutes.
+Continue with the [Quickstart](/docs/getting-started/quickstart/) to create a
+scope, inspect portable catalogs, return agent context, and then connect domain
+records when you are ready.

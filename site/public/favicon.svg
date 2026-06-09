@@ -1,10 +1,17 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Rye favicon">
   <defs>
-    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#C98A45"/>
-      <stop offset="100%" stop-color="#7F4517"/>
+    <linearGradient id="rye-mark" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#ecd97a" />
+      <stop offset="1" stop-color="#b8901f" />
     </linearGradient>
   </defs>
-  <rect x="4" y="4" width="56" height="56" rx="14" fill="#FDF6EA"/>
-  <path d="M18 46V18h16c8 0 13 4 13 11 0 5-3 9-8 10l8 7h-9l-7-6h-5v6h-8zm8-13h7c4 0 6-2 6-4s-2-4-6-4h-7v8z" fill="url(#g)"/>
+  <rect x="4" y="4" width="56" height="56" rx="14" fill="#0a0b0f" />
+  <circle cx="32" cy="32" r="22" fill="url(#rye-mark)" />
+  <path
+    d="M32 16v32M23 24c6 0 9 3 9 8M41 24c-6 0-9 3-9 8M22 34c7 0 10 3 10 9M42 34c-7 0-10 3-10 9"
+    fill="none"
+    stroke="#0a0b0f"
+    stroke-linecap="round"
+    stroke-width="2.3"
+  />
 </svg>
