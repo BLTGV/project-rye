@@ -65,6 +65,55 @@ In both modes, agents must not use prior demo notes, previous sessions, or
 connector/source names as organizational truth unless those inputs are
 explicitly supplied as fixture data or confirmed by the user/admin.
 
+## Source Landscape Discovery
+
+`Source Landscape Discovery` is a valid first onboarding scope when the user
+wants Rye to understand what source material exists before choosing a narrower
+business workflow.
+
+This scope is metadata-first. Its purpose is to inventory source accounts,
+containers, and limited source-item samples so Rye can recommend candidate
+onboarding scopes for human review. It is not permission to categorize the
+organization, ingest all content, or promote source-derived facts.
+
+Use this scope to answer questions like:
+
+- which Notion pages, databases, Slack channels, Outlook folders, or other
+  containers exist
+- which sources have recent activity, stale activity, or unknown activity
+- which sources appear sensitive, private, legal, financial, or noisy
+- which sources may deserve a later, narrower onboarding scope
+- what context-confirmation questions a Rye admin should answer next
+
+Allowed outputs:
+
+- source inventory records
+- provisional source categories such as source type, activity window,
+  sensitivity, evidence value, and ingestion readiness
+- candidate onboarding scopes
+- source/context confirmation tasks
+- retention and review-policy recommendations
+
+Not allowed without explicit follow-up approval:
+
+- accepted business facts
+- semantic person, organization, customer, vendor, ownership, membership, or
+  responsibility edges
+- full-message, full-email, direct-message, private-channel, or attachment
+  ingestion
+- business meaning inferred only from a folder, channel, mailbox, or connector
+  name
+
+Recommended default boundaries:
+
+- inventory public/shared source containers before private containers
+- use a recent activity window, such as the last 90 days, unless the user asks
+  for historical discovery
+- inspect metadata before body content
+- sample only enough source items to recommend candidate scopes
+- route uncertain or unexpected material to context confirmation rather than
+  accepting it as knowledge
+
 ## CLI-First Flow
 
 Use the CLI to create the first scope after installation:

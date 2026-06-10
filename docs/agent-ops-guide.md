@@ -31,6 +31,13 @@ source or channel name as business truth, using prior session context without
 explicit fixture instructions, creating source-derived facts before scope
 policy exists, or promoting candidates without the required review gate.
 
+For Source Landscape Discovery runs, report source accounts and containers,
+activity windows, sampled item counts, sensitivity flags, excluded source
+classes, and candidate onboarding scopes. Treat all categories as provisional
+until a Rye admin confirms their meaning. Do not read full private messages,
+email bodies, private-channel histories, or attachments unless the active scope
+policy explicitly allows it.
+
 ## Schema Setup
 
 All Rye objects live in the `rye` schema. Set the search path at the start of each session or transaction:
