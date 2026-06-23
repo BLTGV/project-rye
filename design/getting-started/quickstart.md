@@ -189,6 +189,6 @@ SELECT agent_node_summary(
 ## Next Steps
 
 - [CLI Reference](/docs/reference/cli/) for every `./scripts/rye` command
-- [Onboarding Scopes](/docs/reference/onboarding/) for scope and source policy
+- [Onboarding Scopes](/docs/getting-started/onboarding/) for scope and source policy
 - [Integration Guide](/docs/model/integration/) for domain table overlay and CDC
 - [Agent Operations](/docs/reference/agent-ops-guide/) for safe read/write patterns

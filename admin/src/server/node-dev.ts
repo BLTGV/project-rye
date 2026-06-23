@@ -93,6 +93,10 @@ const env: Env = {
 
 const port = Number(process.env.RYE_ADMIN_API_PORT ?? process.env.PORT ?? 8799);
 const hostname = process.env.HOST ?? "0.0.0.0";
+const advertisedHosts = (process.env.RYE_ADMIN_PUBLIC_HOSTS ?? "127.0.0.1")
+  .split(",")
+  .map((host) => host.trim())
+  .filter(Boolean);
 
 serve(
   {
@@ -102,8 +106,8 @@ serve(
   },
   (info) => {
     console.log(`Rye admin (node dev) listening on http://${info.address}:${info.port}`);
-    console.log(`  • http://127.0.0.1:${info.port}`);
-    console.log(`  • http://omarchy:${info.port}`);
-    console.log(`  • http://100.117.16.5:${info.port}  (tailnet)`);
+    for (const host of advertisedHosts) {
+      console.log(`  • http://${host}:${info.port}`);
+    }
   }
 );

@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Business Review</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div>
+          <div class="eyebrow">Business review</div>
+          <h1>Sales and project updates</h1>
+        </div>
+        <div class="top-actions">
+          <label>
+            Business view
+            <select id="instanceSelect"></select>
+          </label>
+          <button id="refreshButton" type="button">Refresh</button>
+        </div>
+      </header>
+
+      <section class="summary-grid" id="summaryGrid"></section>
+
+      <nav class="tabs" aria-label="Workspace sections">
+        <button class="tab active" type="button" data-view="review">Decisions</button>
+        <button class="tab" type="button" data-view="crm">Sales</button>
+        <button class="tab" type="button" data-view="pm">Projects</button>
+        <button class="tab" type="button" data-view="timeline">Upcoming</button>
+        <button class="tab" type="button" data-view="sources">Systems</button>
+      </nav>
+
+      <section class="workspace active" id="reviewView">
+        <div class="section-head">
+          <div>
+            <h2>Decisions</h2>
+            <p>Approve useful business changes, ask someone to prove them, or dismiss items that should not become official.</p>
+          </div>
+        </div>
+        <div class="review-layout">
+          <section class="panel queue-panel">
+            <div class="panel-head">
+              <h3>Decisions</h3>
+              <span id="reviewCount" class="muted"></span>
+            </div>
+            <div class="queue-filters" aria-label="Review filters">
+              <button class="queue-filter active" type="button" data-filter="all">All</button>
+              <button class="queue-filter" type="button" data-filter="ready">Ready to decide</button>
+              <button class="queue-filter" type="button" data-filter="future">Scheduled</button>
+              <button class="queue-filter" type="button" data-filter="needs-routing">Needs clarification</button>
+            </div>
+            <div class="review-queue" id="reviewQueue"></div>
+          </section>
+          <section class="panel decision-panel" id="decisionPanel"></section>
+        </div>
+      </section>
+
+      <section class="workspace" id="crmView">
+        <div class="section-head">
+          <div>
+            <h2>Sales</h2>
+            <p>See current sales work and upcoming changes that may affect customer follow-up.</p>
+          </div>
+        </div>
+        <div class="business-layout">
+          <div class="panel">
+            <div class="panel-head">
+              <h3>Current opportunities</h3>
+              <span id="crmUpdated" class="muted"></span>
+            </div>
+            <div class="list-shell" id="crmPipeline"></div>
+          </div>
+          <aside class="panel detail-panel">
+            <div id="crmDetail"></div>
+          </aside>
+        </div>
+      </section>
+
+      <section class="workspace" id="pmView">
+        <div class="section-head">
+          <div>
+            <h2>Projects</h2>
+            <p>See current project work, milestones, and upcoming changes that may affect delivery.</p>
+          </div>
+        </div>
+        <div class="business-layout">
+          <div class="panel">
+            <div class="panel-head">
+              <h3>Current project work</h3>
+              <span id="pmUpdated" class="muted"></span>
+            </div>
+            <div class="list-shell" id="pmBoard"></div>
+            <div class="milestone-strip" id="milestones"></div>
+          </div>
+          <aside class="panel detail-panel">
+            <div id="pmDetail"></div>
+          </aside>
+        </div>
+      </section>
+
+      <section class="workspace" id="timelineView">
+        <div class="section-head">
+          <div>
+            <h2>Upcoming</h2>
+            <p>See changes that are scheduled or waiting for approval, separated from what is true today.</p>
+          </div>
+        </div>
+        <section class="panel">
+          <div class="panel-head">
+            <h3>Upcoming changes</h3>
+            <span class="muted">approved and waiting</span>
+          </div>
+          <div class="timeline-list" id="timelineList"></div>
+        </section>
+      </section>
+
+      <section class="workspace" id="sourcesView">
+        <div class="section-head">
+          <div>
+            <h2>Systems</h2>
+            <p>Show where the business should look today for each kind of information, and which systems are scheduled to change later.</p>
+          </div>
+        </div>
+        <section class="panel">
+          <div class="panel-head">
+            <h3>Where information comes from</h3>
+            <span class="muted">by business area</span>
+          </div>
+          <div class="source-list" id="sourceList"></div>
+        </section>
+      </section>
+    </main>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="./app.js" type="module"></script>
+  </body>
+</html>

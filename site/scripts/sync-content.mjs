@@ -8,10 +8,20 @@ const outputRoot = path.join(siteRoot, "src", "content", "docs");
 
 const sources = [
   { section: "getting-started", sourceDir: path.join(repoRoot, "design", "getting-started") },
+  {
+    section: "getting-started",
+    sourceDir: path.join(repoRoot, "docs"),
+    files: [path.join(repoRoot, "docs", "onboarding.md")],
+  },
   { section: "reference", sourceDir: path.join(repoRoot, "docs") },
   { section: "model", sourceDir: path.join(repoRoot, "design", "model") },
   { section: "layers", sourceDir: path.join(repoRoot, "design", "layers") },
   { section: "cookbooks", sourceDir: path.join(repoRoot, "design", "cookbooks") },
+  {
+    section: "evaluations",
+    sourceDir: path.join(repoRoot, "eval", "business_replay_scenarios"),
+    files: [path.join(repoRoot, "eval", "business_replay_scenarios", "report.md")],
+  },
 ];
 
 const outcomeDescriptionsBySourcePath = {
@@ -59,6 +69,8 @@ const outcomeDescriptionsBySourcePath = {
     "Track candidate progress with full history so hiring decisions are consistent and explainable.",
   "design/cookbooks/saas-customer-operations.md":
     "Connect support, billing, and product signals to improve retention and customer operations.",
+  "eval/business_replay_scenarios/report.md":
+    "Review the business replay evaluation that tested source intake, SME review, future assertions, and CRM/PM surfaces.",
 };
 
 const outcomeDescriptionsByTitle = {
@@ -106,6 +118,8 @@ const outcomeDescriptionsByTitle = {
     "Track candidate progress with full history so hiring decisions are consistent and explainable.",
   "Cookbook: SaaS Customer Operations":
     "Connect support, billing, and product signals to improve retention and customer operations.",
+  "Rye Business Replay Evaluation Report":
+    "Review the business replay evaluation that tested source intake, SME review, future assertions, and CRM/PM surfaces.",
 };
 
 function toPosix(value) {
@@ -215,7 +229,7 @@ async function main() {
 
   let total = 0;
   for (const source of sources) {
-    const files = await walkMarkdownFiles(source.sourceDir);
+    const files = source.files ?? (await walkMarkdownFiles(source.sourceDir));
     for (const filePath of files) {
       await copyFileWithMetadata(filePath, source.section, source.sourceDir);
       total += 1;

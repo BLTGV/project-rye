@@ -15,7 +15,7 @@ export type NavSection = {
   items: NavItem[];
 };
 
-const SECTION_ORDER = ["getting-started", "reference", "model", "layers", "cookbooks"];
+const SECTION_ORDER = ["getting-started", "reference", "model", "layers", "cookbooks", "evaluations"];
 
 export const SECTION_TITLES: Record<string, string> = {
   "getting-started": "Getting Started",
@@ -23,10 +23,11 @@ export const SECTION_TITLES: Record<string, string> = {
   model: "Model",
   layers: "Layers",
   cookbooks: "Cookbooks",
+  evaluations: "Evaluations",
 };
 
 const DOCUMENT_ORDER: Record<string, string[]> = {
-  "getting-started": ["installation", "quickstart"],
+  "getting-started": ["installation", "quickstart", "onboarding"],
   reference: [
     "core-contract",
     "cli",
@@ -44,6 +45,7 @@ const DOCUMENT_ORDER: Record<string, string[]> = {
     "product-development",
     "mineral-rights",
   ],
+  evaluations: ["report"],
 };
 
 export function sectionFromSlug(slug: string): string {

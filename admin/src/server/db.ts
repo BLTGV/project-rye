@@ -30,7 +30,7 @@ export function loadInstances(env: Env): InstanceConfig[] {
 export function pickInstance(env: Env, requested: string | null): InstanceConfig {
   const all = loadInstances(env);
   if (all.length === 0) throw new Error("No Rye instances configured");
-  const id = requested ?? env.DEFAULT_INSTANCE;
+  const id = requested || env.DEFAULT_INSTANCE || all[0]?.id;
   const match = all.find((i) => i.id === id);
   if (!match) throw new Error(`Unknown Rye instance: ${id}`);
   return match;

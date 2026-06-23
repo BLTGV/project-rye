@@ -158,7 +158,7 @@ app.get("/api/dashboard", async (c) => {
       recent,
     });
   }
-  // Lectromec / quote-driven shape (instances that track quote_created events)
+  // Quote-driven shape (instances that track quote_created events)
   if (catalog.event_types?.["quote_created"]) {
     const [kpis, timeline, topClients, recent] = await Promise.all([
       fetchDashboardKpis(sql),
@@ -166,7 +166,7 @@ app.get("/api/dashboard", async (c) => {
       fetchTopClients(sql, 8),
       fetchRecentEvents(sql, 10),
     ]);
-    return c.json({ kind: "lectromec", catalog, kpis, timeline, topClients, recent });
+    return c.json({ kind: "quotes", catalog, kpis, timeline, topClients, recent });
   }
 
   // Generic knowledge-graph shape: people↔events, accumulated + superseded

@@ -157,4 +157,5 @@ RLS-protected Rye objects.
 
 Continue with the [Quickstart](/docs/getting-started/quickstart/) to create a
 scope, inspect portable catalogs, return agent context, and then connect domain
-records when you are ready.
+records when you are ready. Then review [Onboarding Scopes](/docs/getting-started/onboarding/)
+before source intake or fact promotion.

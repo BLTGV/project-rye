@@ -84,7 +84,8 @@ const nav = buildNavigation(entries);
       <p>
         The site now tracks the portable CLI path from the latest commit: hosted
         bootstrap, `./scripts/rye`, plugin and skill manifests, capability catalogs,
-        agent context, source inventory, and conformance smoke tests.
+        agent context, source inventory, onboarding policy, future-effective profile
+        helpers, and conformance smoke tests.
       </p>
     </div>
 
@@ -111,7 +112,15 @@ const nav = buildNavigation(entries);
           `rye_agent_context()` combines catalog, scope selection, source inventory,
           pending confirmations, and compiled policy for agents.
         </p>
-        <a href="/docs/reference/onboarding/">Onboarding scopes</a>
+        <a href="/docs/getting-started/onboarding/">Onboarding scopes</a>
+      </article>
+      <article class="capability-card">
+        <h3>Future-Effective Profiles</h3>
+        <p>
+          CRM and PM scheduling helpers keep planned changes visible without changing
+          what Rye says is true today.
+        </p>
+        <a href="/docs/getting-started/onboarding/#plans-versus-future-truth">Future truth model</a>
       </article>
       <article class="capability-card">
         <h3>Metadata Smoke Tests</h3>
@@ -120,6 +129,14 @@ const nav = buildNavigation(entries);
           paths used by agents and scripts.
         </p>
         <a href="/docs/model/core-contract-and-conformance/">Conformance kit</a>
+      </article>
+      <article class="capability-card">
+        <h3>Business Replay Evaluation</h3>
+        <p>
+          Fresh-agent replay tested source intake, SME review, scheduled facts, and
+          the CRM/PM surface against realistic business scenarios.
+        </p>
+        <a href="/docs/evaluations/report/">Evaluation report</a>
       </article>
     </div>
   </section>
@@ -159,6 +176,10 @@ const nav = buildNavigation(entries);
           <span>Use the new CLI flow for install, metadata, scope, and context.</span>
         </li>
         <li>
+          <a href="/docs/getting-started/onboarding/">Onboarding Scopes</a>
+          <span>Set purpose, source boundaries, review policy, and allowed plugins.</span>
+        </li>
+        <li>
           <a href="/docs/reference/cli/">CLI Reference</a>
           <span>Commands for init, catalogs, context, sources, status, and doctor.</span>
         </li>
@@ -173,6 +194,10 @@ const nav = buildNavigation(entries);
         <li>
           <a href="/docs/reference/roadmap/">Roadmap</a>
           <span>Onboarding, plugins, evidence, retention, admin, and graph quality.</span>
+        </li>
+        <li>
+          <a href="/docs/evaluations/report/">Business Replay Evaluation</a>
+          <span>See how current and future assertions behave in realistic workflows.</span>
         </li>
       </ul>
     </article>

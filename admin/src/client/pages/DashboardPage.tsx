@@ -61,11 +61,11 @@ export function DashboardPage() {
       />
     );
   }
-  const lect = dash.data as DashboardResponse;
-  const k = lect.kpis;
-  const t = lect.timeline;
-  const tops = lect.topClients;
-  const recent = lect.recent;
+  const quoteDashboard = dash.data as DashboardResponse;
+  const k = quoteDashboard.kpis;
+  const t = quoteDashboard.timeline;
+  const tops = quoteDashboard.topClients;
+  const recent = quoteDashboard.recent;
   const c = cat.data!;
 
   const nodeBreakdown = Object.entries(c.node_types)

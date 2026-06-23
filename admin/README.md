@@ -37,8 +37,8 @@ cd admin
 npm install
 # Local secrets for dev — never commit:
 cat > .dev.vars <<'EOF'
-DEFAULT_INSTANCE=lectromec
-RYE_INSTANCES='[{"id":"lectromec","label":"Lectromec","blurb":"Wire / cable test lab","databaseUrl":"postgresql://postgres:<pw>@db.duxabzirojomjdinjhkv.supabase.co:5432/postgres"}]'
+DEFAULT_INSTANCE=local
+RYE_INSTANCES='[{"id":"local","label":"Local Rye","blurb":"Local PostgreSQL instance","databaseUrl":"postgresql://user:<password>@host:5432/dbname"}]'
 EOF
 ```
 
@@ -78,6 +78,9 @@ npm run deploy
 The same Worker handles every configured instance — switch between them in the
 sidebar.
 
+If `DEFAULT_INSTANCE` is blank, the API uses the first configured instance unless
+the request supplies `?instance=<id>` or `X-Rye-Instance`.
+
 ## What's implemented
 
 | Route | Purpose |
@@ -106,15 +109,15 @@ Command palette: `⌘K` opens a fuzzy node finder anywhere in the app.
 ```jsonc
 [
   {
-    "id": "lectromec",
-    "label": "Lectromec",
-    "blurb": "Wire / cable test lab pricing graph",
-    "databaseUrl": "postgresql://postgres:****@db.duxabzirojomjdinjhkv.supabase.co:5432/postgres"
+    "id": "local",
+    "label": "Local Rye",
+    "blurb": "Local PostgreSQL instance",
+    "databaseUrl": "postgresql://user:****@host:5432/dbname"
   },
   {
-    "id": "blt-pm",
-    "label": "BLT PM",
-    "databaseUrl": "postgresql://postgres:****@db.lhgvxgnomexdusotakwr.supabase.co:5432/postgres"
+    "id": "staging",
+    "label": "Staging Rye",
+    "databaseUrl": "postgresql://user:****@db.<project-ref>.supabase.co:5432/postgres"
   }
 ]
 ```

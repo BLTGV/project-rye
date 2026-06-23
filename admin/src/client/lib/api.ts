@@ -209,7 +209,7 @@ export interface CatalogResponse {
 }
 
 export interface DashboardResponse {
-  kind: "lectromec";
+  kind: "quotes";
   catalog: CatalogResponse;
   kpis: {
     nodes_total: number;

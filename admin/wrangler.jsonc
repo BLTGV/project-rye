@@ -14,8 +14,8 @@
   },
   // Per-instance config is supplied via the RYE_INSTANCES secret as JSON:
   //   wrangler secret put RYE_INSTANCES
-  //   [{"id":"lectromec","label":"Lectromec","databaseUrl":"postgresql://..."}]
+  //   [{"id":"local","label":"Local Rye","databaseUrl":"postgresql://..."}]
   "vars": {
-    "DEFAULT_INSTANCE": "lectromec"
+    "DEFAULT_INSTANCE": ""
   }
 }

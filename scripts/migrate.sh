@@ -48,12 +48,12 @@ SQL
 for file in $(find schema/migrations -maxdepth 1 -type f -name '*.sql' | sort); do
   base="$(basename "$file")"
 
-  if [[ "$base" == *_profile_crm.sql ]] && ! profile_enabled "crm"; then
+  if [[ "$base" == *profile_crm*.sql ]] && ! profile_enabled "crm"; then
     echo "Skipping $base (crm profile disabled)"
     continue
   fi
 
-  if [[ "$base" == *_profile_pm.sql ]] && ! profile_enabled "pm"; then
+  if [[ "$base" == *profile_pm*.sql ]] && ! profile_enabled "pm"; then
     echo "Skipping $base (pm profile disabled)"
     continue
   fi
