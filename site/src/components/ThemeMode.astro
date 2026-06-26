@@ -61,6 +61,13 @@
     }
 
     function readMode() {
+      try {
+        const forced = new URLSearchParams(window.location.search).get("theme");
+        if (forced === "light" || forced === "dark") return forced;
+      } catch {
+        // Fall back to stored preference.
+      }
+
       let stored = null;
       try {
         stored = window.localStorage.getItem(storageKey);

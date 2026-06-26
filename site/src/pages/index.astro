@@ -8,162 +8,228 @@ const nav = buildNavigation(entries);
 ---
 
 <DocsLayout
-  title="Rye | Agent-Native PostgreSQL Knowledge Graph"
-  description="Rye is an open source, agent-native temporal knowledge graph data model for PostgreSQL. It is a schema, not a database, app, or framework."
+  title="Project Rye | Agent-Safe Business Memory for PostgreSQL"
+  description="Project Rye is an open source PostgreSQL schema for scoped agent context, candidate knowledge review, source-backed assertions, and temporal truth."
   nav={nav}
   hideSidebar={true}
 >
   <section class="hero-panel home-hero enter">
     <div class="hero-copy">
-      <p class="eyebrow">Agent-native PostgreSQL schema</p>
-      <h1>Rye</h1>
+      <h1>Business memory for agent-led work.</h1>
       <p class="hero-audience">
-        A temporal knowledge graph data model that runs inside your PostgreSQL instance.
+        An open source PostgreSQL schema for the context your agents and apps need.
       </p>
       <p>
-        Rye is open source SQL for tracking entities, relationships, activities, evolving
-        assertions, and source evidence across connected systems. The CLI now installs
-        Rye, syncs portable plugin and skill metadata, and gives agents a context bundle
-        before they write.
+        Project Rye tracks entities, relationships, events, evidence, decisions,
+        and changing assertions across existing business systems without replacing
+        the systems that already run the work.
       </p>
       <div class="hero-actions">
-        <a class="btn btn-primary" href="/docs/getting-started/quickstart/">Start Fast</a>
-        <a class="btn btn-ghost" href="/docs/reference/cli/">CLI Reference</a>
-        <a class="btn btn-ghost" href="https://github.com/BLTGV/project-rye">GitHub</a>
+        <a class="btn btn-primary" href="/docs/getting-started/quickstart/">Start Agent-Led Onboarding</a>
+        <a class="btn btn-ghost" href="/docs/getting-started/onboarding/">How Onboarding Works</a>
       </div>
+      <a class="hero-github-link" href="https://github.com/BLTGV/project-rye">GitHub repository</a>
     </div>
 
-    <div class="schema-map" aria-label="Rye core schema map">
-      <div class="schema-map-header">
-        <span>Portable context</span>
-        <strong>Schema plus catalogs</strong>
+    <div class="hero-value-panel" aria-label="Project Rye value summary">
+      <div class="hero-value-panel__header">
+        <span>What Rye Is</span>
+        <strong>A memory layer inside your Postgres</strong>
       </div>
-      <div class="schema-map-grid">
-        <span class="schema-node schema-node--strong">nodes</span>
-        <span class="schema-node">edges</span>
-        <span class="schema-node">events</span>
-        <span class="schema-node">event_participants</span>
-        <span class="schema-node">assertions</span>
-        <span class="schema-node">artifacts</span>
+      <ul class="hero-value-list">
+        <li>
+          <strong>Connects business context</strong>
+          <span>Customers, projects, deals, tasks, files, messages, and domain records.</span>
+        </li>
+        <li>
+          <strong>Tracks changing knowledge</strong>
+          <span>Relationships, events, evidence, assertions, disputes, and plans.</span>
+        </li>
+        <li>
+          <strong>Keeps systems in place</strong>
+          <span>Your apps stay operational. Rye adds the shared memory layer.</span>
+        </li>
+      </ul>
+      <div class="hero-value-footer">
+        <code>schema, not SaaS</code>
+        <code>your database</code>
       </div>
-      <div class="schema-map-footer">
-        <code>rye_agent_context()</code>
-        <code>rye_plugin_catalog()</code>
-        <code>rye_skill_catalog()</code>
-      </div>
+    </div>
+  </section>
+
+  <section class="truth-strip truth-strip--hero enter enter-d1" aria-label="What Project Rye is">
+    <div>
+      <span>Not a database</span>
+      <p>Project Rye installs into standard PostgreSQL.</p>
+    </div>
+    <div>
+      <span>Not an application</span>
+      <p>Your domain tools remain the operational UI.</p>
+    </div>
+    <div>
+      <span>Not a framework</span>
+      <p>The deliverable is SQL plus conventions.</p>
     </div>
   </section>
 
   <section class="stats-grid stats-grid--four enter enter-d1" aria-label="Core Rye capabilities">
     <article>
-      <h2>Fast Start CLI</h2>
-      <p>Bootstrap local Docker or a remote PostgreSQL database, then write `.rye.env`.</p>
-      <code class="stat-code">./scripts/rye init local</code>
+      <h2>Know What The Business Knows</h2>
+      <p>Ask for the customer, project, deal, task, or source context in one place.</p>
+      <code class="stat-code">entities + relationships</code>
     </article>
     <article>
-      <h2>Portable Catalogs</h2>
-      <p>Plugins, skills, and capabilities sync into Rye metadata for discovery.</p>
-      <code class="stat-code">catalog capabilities</code>
+      <h2>Let Agents Work With Context</h2>
+      <p>Give agents scoped memory before they summarize, draft, route, or recommend.</p>
+      <code class="stat-code">context before action</code>
     </article>
     <article>
-      <h2>Agent Context</h2>
-      <p>A single command returns core catalog, scopes, source inventory, and policy.</p>
-      <code class="stat-code">./scripts/rye context</code>
+      <h2>Keep Memory Honest</h2>
+      <p>Preserve evidence, competing claims, review state, and accepted assertions.</p>
+      <code class="stat-code">candidate != accepted</code>
     </article>
     <article>
-      <h2>Scope-First Agents</h2>
-      <p>Create an active onboarding scope before source intake or fact promotion.</p>
-      <code class="stat-code">onboard create</code>
+      <h2>Stay In Your Postgres</h2>
+      <p>Install Project Rye beside existing tables. Your apps remain the source of record.</p>
+      <code class="stat-code">schema, not SaaS</code>
     </article>
   </section>
 
   <section class="capability-section enter enter-d2" aria-labelledby="implementation-heading">
     <div class="section-heading">
-      <p class="eyebrow">Current implementation</p>
-      <h2 id="implementation-heading">What the repo now ships</h2>
+      <p class="eyebrow">What Project Rye gives agents</p>
+      <h2 id="implementation-heading">Boundaries before autonomy</h2>
       <p>
-        The site now tracks the portable CLI path from the latest commit: hosted
-        bootstrap, `./scripts/rye`, plugin and skill manifests, capability catalogs,
-        agent context, source inventory, onboarding policy, future-effective profile
-        helpers, and conformance smoke tests.
+        Project Rye treats source material as evidence, not instant truth. Agents
+        work inside scoped context packs, write observations and candidates, and
+        leave accepted business knowledge to explicit policy and review.
       </p>
     </div>
 
     <div class="capability-grid">
       <article class="capability-card">
-        <h3>CLI v1</h3>
+        <h3>Agent Domains</h3>
         <p>
-          `init local`, `init remote`, `doctor`, `status`, `context`, `catalog`, and
-          `sources` commands make first-run setup and agent discovery scriptable.
+          Define knowledge domains, channel subscriptions, source boundaries, and
+          capability grants before an agent reads or writes.
         </p>
-        <a href="/docs/reference/cli/">CLI reference</a>
+        <a href="/docs/model/security/">Security model</a>
       </article>
       <article class="capability-card">
-        <h3>Portable Catalogs</h3>
+        <h3>Review Gates</h3>
         <p>
-          `rye_plugin_catalog()`, `rye_skill_catalog()`, and `rye_capability_catalog()`
-          expose installable behavior as queryable Rye metadata.
+          Candidate knowledge can wait for human review, source confirmation, dispute
+          resolution, or stronger evidence before promotion.
         </p>
-        <a href="/docs/reference/data-dictionary/">Data dictionary</a>
+        <a href="/docs/reference/agent-ops-guide/">Agent operations</a>
       </article>
       <article class="capability-card">
-        <h3>Agent Context Bundle</h3>
+        <h3>Source Authority</h3>
         <p>
-          `rye_agent_context()` combines catalog, scope selection, source inventory,
-          pending confirmations, and compiled policy for agents.
+          Separate source identity, retrieval channel, and business context so agents
+          do not infer authority from a connector or channel name.
         </p>
         <a href="/docs/getting-started/onboarding/">Onboarding scopes</a>
       </article>
       <article class="capability-card">
-        <h3>Future-Effective Profiles</h3>
+        <h3>Plans Stay Plans</h3>
         <p>
-          CRM and PM scheduling helpers keep planned changes visible without changing
-          what Rye says is true today.
+          Store planned work as current-visible knowledge while future-effective
+          assertions wait for their effective window.
         </p>
         <a href="/docs/getting-started/onboarding/#plans-versus-future-truth">Future truth model</a>
       </article>
       <article class="capability-card">
-        <h3>Metadata Smoke Tests</h3>
+        <h3>Business Surfaces</h3>
         <p>
-          New conformance suites validate portable catalog functions and the CLI JSON
-          paths used by agents and scripts.
+          CRM and PM layers show how accepted Project Rye knowledge can become
+          business views with scheduled changes and suggested updates.
         </p>
-        <a href="/docs/model/core-contract-and-conformance/">Conformance kit</a>
+        <a href="/docs/layers/crm/">CRM conventions</a>
       </article>
       <article class="capability-card">
-        <h3>Business Replay Evaluation</h3>
+        <h3>Replay Harness</h3>
         <p>
-          Fresh-agent replay tested source intake, SME review, scheduled facts, and
-          the CRM/PM surface against realistic business scenarios.
+          Isolated-agent replay tests source packets, SME adjudication, authority
+          routing, candidate promotion, and temporal behavior.
         </p>
         <a href="/docs/evaluations/report/">Evaluation report</a>
       </article>
     </div>
   </section>
 
+  <section class="flow-section enter enter-d3" aria-labelledby="memory-flow-heading">
+    <div class="section-heading section-heading--split">
+      <div>
+        <p class="eyebrow">How the promise holds</p>
+        <h2 id="memory-flow-heading">Why agents can rely on what Rye remembers.</h2>
+      </div>
+      <p>
+        Agents can collect and propose knowledge, but Project Rye keeps proposed
+        claims separate from accepted memory until review, source authority, or
+        policy allows promotion.
+      </p>
+    </div>
+
+    <div class="memory-flow" aria-label="Evidence to accepted memory">
+      <div class="memory-flow-row">
+        <article class="memory-stage memory-stage--source">
+          <span>Sources</span>
+          <strong>Business evidence</strong>
+          <p>CRM rows, project records, documents, conversations, and artifacts.</p>
+        </article>
+        <article class="memory-stage memory-stage--candidate">
+          <span>Proposed</span>
+          <strong>Candidate knowledge</strong>
+          <p>Agent observations and extracted assertions with provenance.</p>
+        </article>
+        <article class="memory-stage memory-stage--review">
+          <span>Gate</span>
+          <strong>Review or policy</strong>
+          <p>Human adjudication, source authority, disputes, and scope rules.</p>
+        </article>
+        <article class="memory-stage memory-stage--accepted">
+          <span>Memory</span>
+          <strong>Accepted assertions</strong>
+          <p>Current, historical, disputed, and future-effective knowledge.</p>
+        </article>
+      </div>
+      <div class="memory-flow-notes">
+        <div>
+          <strong>Agents read scoped memory.</strong>
+          <p>Context packs limit the domain, source set, and capabilities.</p>
+        </div>
+        <div>
+          <strong>Existing systems stay authoritative.</strong>
+          <p>Rye overlays operational tables instead of replacing them.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <section class="section-grid enter enter-d3">
     <article class="card">
-      <h2>Operational Flow</h2>
-      <p>From bootstrap to agent-readable context.</p>
+      <h2>Agent-Led Start</h2>
+      <p>Let an agent guide the setup, but make the database connection explicit.</p>
       <ol class="steps-list">
         <li>
-          <strong>Install Rye</strong>
-          <span>Use the hosted bootstrap or the repo-local CLI.</span>
-          <code>curl -fsSL https://projectrye.dev/onboard | sh</code>
+          <strong>Install the onboarding skill</strong>
+          <span>Add the Rye onboarding skill in the project where your agent works.</span>
+          <code>npx skills add BLTGV/project-rye --skill rye-onboarding</code>
         </li>
         <li>
-          <strong>Check the instance</strong>
-          <span>Verify the database, synced metadata, and available capabilities.</span>
-          <code>./scripts/rye doctor</code> + <code>catalog skills</code>
+          <strong>Provide a PostgreSQL target</strong>
+          <span>Use local Docker or an existing PostgreSQL 15+ database connection string.</span>
+          <code>DATABASE_URL=postgresql://...</code>
         </li>
         <li>
           <strong>Create the first scope</strong>
-          <span>Record purpose, boundaries, default review policy, and enabled plugins.</span>
+          <span>Name the limited workflow, boundaries, source expectations, and review policy.</span>
           <code>./scripts/rye onboard create</code>
         </li>
         <li>
-          <strong>Hand context to agents</strong>
-          <span>Return catalogs, scopes, source inventory, confirmations, and policy.</span>
+          <strong>Hand context to the agent</strong>
+          <span>Return catalogs, scopes, source inventory, confirmations, and compiled policy.</span>
           <code>./scripts/rye context --json</code>
         </li>
       </ol>
@@ -173,7 +239,7 @@ const nav = buildNavigation(entries);
       <ul class="start-here-links">
         <li>
           <a href="/docs/getting-started/quickstart/">Quickstart</a>
-          <span>Use the new CLI flow for install, metadata, scope, and context.</span>
+          <span>Start with agent-led onboarding, then choose local Docker or a remote PostgreSQL database.</span>
         </li>
         <li>
           <a href="/docs/getting-started/onboarding/">Onboarding Scopes</a>
@@ -203,30 +269,30 @@ const nav = buildNavigation(entries);
     </article>
   </section>
 
-  <section class="truth-strip enter enter-d4" aria-label="What Rye is not">
+  <section class="truth-strip enter enter-d4" aria-label="How Project Rye fits">
     <div>
-      <span>Not a database</span>
-      <p>Rye runs in standard PostgreSQL.</p>
+      <span>PostgreSQL-native</span>
+      <p>Use SQL functions and views instead of introducing a runtime.</p>
     </div>
     <div>
-      <span>Not an application</span>
-      <p>Domain tools remain the operational UI.</p>
+      <span>Overlay-first</span>
+      <p>Connect existing records without adding graph foreign keys to them.</p>
     </div>
     <div>
-      <span>Not a framework</span>
-      <p>The deliverable is SQL.</p>
+      <span>Agent-readable</span>
+      <p>Return compact context packs before agents collect or write.</p>
     </div>
   </section>
 
   <section class="cta-section enter enter-d5">
     <div class="cta-card">
-      <h2>Own the knowledge graph your agents use.</h2>
+      <h2>Start with one scoped workflow.</h2>
       <p>
-        Start with the CLI quickstart, then use portable catalogs and conformance tests
-        to keep your Rye instance predictable as plugins, skills, and scopes grow.
+        Install the onboarding skill, connect Rye to PostgreSQL, and create a first
+        scope before agents ingest sources or promote knowledge.
       </p>
       <div class="hero-actions">
-        <a class="btn btn-primary" href="/docs/getting-started/quickstart/">Start Fast</a>
+        <a class="btn btn-primary" href="/docs/getting-started/quickstart/">Start Agent-Led Onboarding</a>
         <a class="btn btn-ghost" href="/docs/model/core-contract-and-conformance/">Conformance Kit</a>
       </div>
     </div>

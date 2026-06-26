@@ -14,7 +14,7 @@ interface Props {
 
 const {
   title,
-  description = "Project Rye documentation for an open source, agent-native temporal knowledge graph data model in PostgreSQL.",
+  description = "Project Rye documentation for an open source PostgreSQL schema for agent-safe business memory.",
   nav,
   currentSlug,
   hideSidebar = false,
@@ -38,8 +38,13 @@ const currentYear = new Date().getFullYear();
         let mode = "system";
 
         try {
+          const forced = new URLSearchParams(window.location.search).get("theme");
+          if (forced === "light" || forced === "dark") {
+            mode = forced;
+          }
+
           const stored = window.localStorage.getItem(storageKey);
-          if (stored === "light" || stored === "dark" || stored === "system") {
+          if (mode === "system" && (stored === "light" || stored === "dark" || stored === "system")) {
             mode = stored;
           }
         } catch {
@@ -56,22 +61,20 @@ const currentYear = new Date().getFullYear();
       })();
     </script>
   </head>
-  <body>
+  <body class={hideSidebar ? "home-shell" : undefined}>
     <div class="page-bg" aria-hidden="true"></div>
     <div class="grain" aria-hidden="true"></div>
     <header class="topbar">
       <div class="topbar-inner">
         <a class="brand" href="/">
           <img
-            src="/logo.svg"
-            data-brand-logo
-            data-logo-light="/logo.svg"
-            data-logo-dark="/logo-dark.svg"
-            alt="Rye"
-            width="159"
+            src="/favicon.svg"
+            alt=""
+            width="42"
             height="42"
           />
-          <span>Agent-native temporal knowledge graph for PostgreSQL.</span>
+          <strong>Project Rye</strong>
+          <span>Agent-safe business memory for PostgreSQL.</span>
         </a>
         <div class="topbar-tools">
           <SearchBox />

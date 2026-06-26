@@ -64,7 +64,7 @@ const outcomeDescriptionsBySourcePath = {
   "design/getting-started/installation.md":
     "Go from zero to a running Rye instance with PostgreSQL, session variables, and optional profiles.",
   "design/getting-started/quickstart.md":
-    "Get Rye connected to real domain tables in minutes and start querying cross-system context.",
+    "Start agent-led onboarding, choose a PostgreSQL target, and create the first scoped context.",
   "design/cookbooks/recruiting-pipeline.md":
     "Track candidate progress with full history so hiring decisions are consistent and explainable.",
   "design/cookbooks/saas-customer-operations.md":
@@ -113,7 +113,7 @@ const outcomeDescriptionsByTitle = {
   Installation:
     "Go from zero to a running Rye instance with PostgreSQL, session variables, and optional profiles.",
   Quickstart:
-    "Get Rye connected to real domain tables in minutes and start querying cross-system context.",
+    "Start agent-led onboarding, choose a PostgreSQL target, and create the first scoped context.",
   "Cookbook: Recruiting Pipeline":
     "Track candidate progress with full history so hiring decisions are consistent and explainable.",
   "Cookbook: SaaS Customer Operations":

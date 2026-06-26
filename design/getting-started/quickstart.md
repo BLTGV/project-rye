@@ -1,12 +1,55 @@
 # Quickstart
 
-## Start Rye in a few commands
+## Start Rye with an agent
 
-Rye is a PostgreSQL schema with a CLI for first-run setup and agent discovery.
-The quickstart path installs Rye, syncs portable metadata, creates an onboarding
-scope, and returns the context bundle agents should read before they act.
+Rye is a PostgreSQL schema with an agent-led onboarding path and a CLI for
+first-run setup. The quickstart path installs Rye, syncs portable metadata,
+creates an onboarding scope, and returns the context bundle agents should read
+before they act.
 
-## 1. Install Rye
+## Database Connection Required
+
+<div class="doc-callout">
+
+**You need a PostgreSQL target before Rye can be verified or installed.**
+
+Choose local Docker PostgreSQL for evaluation, or provide an existing
+PostgreSQL 15+ connection string in `DATABASE_URL`.
+
+</div>
+
+Rye must install into a PostgreSQL 15+ database. Before onboarding, choose one
+target:
+
+- **Local Docker PostgreSQL:** the quickest path for evaluation. Rye starts a
+  local container and writes the connection details into `.rye.env`.
+- **Existing PostgreSQL:** use a connection string in `DATABASE_URL`. Rye
+  installs its schema beside existing tables and does not replace the database.
+
+Agents still need this database target. They can guide setup, check status, and
+create scopes, but they cannot verify or install Rye without a reachable
+PostgreSQL connection.
+
+## 1. Install The Onboarding Skill
+
+Add the Rye onboarding skill in the project folder where your agent will work:
+
+```bash
+npx skills add BLTGV/project-rye --skill rye-onboarding
+```
+
+Then open your agent in that folder and start with:
+
+```text
+Use the Rye onboarding skill. Check whether Rye is installed, run
+./scripts/rye status, then help me create the first onboarding scope.
+
+Start by asking what limited workflow or organizational purpose Rye should
+assist first. Do not ingest sources or promote facts until the scope, boundary,
+expected contexts, and review policy exist.
+```
+
+## 2. Install Rye
 
 Use the hosted bootstrap:
 
@@ -29,7 +72,7 @@ For an existing PostgreSQL 15+ database:
 These commands install the Rye schema, sync plugin manifests, sync skill
 manifests, sync capability metadata, and write `.rye.env`.
 
-## 2. Check the Instance
+## 3. Check The Instance
 
 ```bash
 ./scripts/rye doctor
@@ -45,7 +88,7 @@ Use JSON for scripts or agents:
 
 `status --json` returns `rye_agent_context()`.
 
-## 3. Inspect Portable Catalogs
+## 4. Inspect Portable Catalogs
 
 ```bash
 ./scripts/rye catalog plugins
@@ -60,7 +103,7 @@ are available in the instance. Use `--json` to hand the result to an agent.
 ./scripts/rye catalog capabilities --json
 ```
 
-## 4. Create the First Onboarding Scope
+## 5. Create The First Onboarding Scope
 
 Create one limited scope before source intake or assertion promotion:
 
@@ -78,7 +121,7 @@ Use a scope name that describes the organizational purpose. Avoid naming the
 scope after a source, channel, connector, or trial phase unless that is the real
 purpose.
 
-## 5. Get Agent Context
+## 6. Get Agent Context
 
 ```bash
 ./scripts/rye context
@@ -101,7 +144,7 @@ If multiple scopes are active, select one by key or UUID:
 ./scripts/rye context --scope lead-follow-up --json
 ```
 
-## 6. Review Sources Before Promoting Facts
+## 7. Review Sources Before Promoting Facts
 
 Check registered source accounts and containers:
 
@@ -118,7 +161,7 @@ Find sources that still need context confirmation:
 New source metadata is provenance, not business truth. Confirm context before
 agents route source material or promote assertions.
 
-## 7. Connect Existing Domain Records
+## 8. Connect Existing Domain Records
 
 When you are ready to connect operational data, use `link_record()` from SQL.
 Domain tables remain the system of record.
@@ -143,7 +186,7 @@ SELECT link_record(
 `node_source_map`. Calling it again with the same source row updates the linked
 node properties instead of creating a duplicate.
 
-## 8. Track Source Table Changes
+## 9. Track Source Table Changes
 
 Attach CDC triggers when linked source rows should produce graph events:
 
@@ -153,7 +196,7 @@ SELECT track_table('public', 'customers');
 
 Only linked rows produce `domain_change` events. Unlinked rows are ignored.
 
-## 9. Query Rye
+## 10. Query Rye
 
 Use the CLI for broad instance context:
 
