@@ -1,0 +1,67 @@
+<!-- @dsCard group="Homepage" name="Memory flow" subtitle="Evidence → candidate → gate → accepted (from Codex value-prop branch)" -->
+<style>
+  .mf-wrap { font-family: "Source Sans 3", "Segoe UI", sans-serif; color: #15161a; background: #f5f6f0; padding: 24px; }
+  .memory-flow { border: 1px solid #d6d9cf; border-radius: 8px; background: #fffffb; padding: 22px; box-shadow: 0 1px 4px rgba(17,19,27,.05); }
+  .memory-flow-row { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 14px; }
+  @media (max-width: 860px) { .memory-flow-row { grid-template-columns: 1fr; } .memory-stage:not(:last-child)::after { display: none; } }
+  .memory-stage {
+    position: relative; min-width: 0; border: 1px solid #d6d9cf; border-top: 4px solid #b8901f; border-radius: 8px;
+    background:
+      linear-gradient(rgba(17,19,27,.028) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(17,19,27,.028) 1px, transparent 1px), #ffffff;
+    background-size: 24px 24px, 24px 24px, auto;
+    padding: 16px;
+  }
+  .memory-stage:not(:last-child)::after {
+    content: "→"; position: absolute; top: 50%; right: -13px; z-index: 2; width: 22px; height: 22px;
+    border: 1px solid #d6d9cf; border-radius: 50%; background: #fffffb; color: #84640e;
+    font: 800 14px/20px "IBM Plex Mono", ui-monospace, monospace; text-align: center; transform: translateY(-50%);
+  }
+  .memory-stage--candidate { border-top-color: #b7792b; }
+  .memory-stage--review { border-top-color: #236b72; }
+  .memory-stage--accepted { border-top-color: #2f7a48; }
+  .memory-stage span { display: block; color: #84640e; font: 800 11.5px "IBM Plex Mono", ui-monospace, monospace; letter-spacing: .08em; text-transform: uppercase; }
+  .memory-stage strong { display: block; margin-top: 8px; font-size: 19px; line-height: 1.15; }
+  .memory-stage p { margin: 8px 0 0; color: #555b67; font-size: 14.5px; line-height: 1.5; }
+  .memory-flow-notes { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 14px; margin-top: 15px; }
+  @media (max-width: 860px) { .memory-flow-notes { grid-template-columns: 1fr; } }
+  .memory-flow-notes div { border: 1px solid #d6d9cf; border-radius: 8px; background: #faf5e6; padding: 14px 16px; }
+  .memory-flow-notes strong { display: block; }
+  .memory-flow-notes p { margin: 4px 0 0; color: #555b67; font-size: 14.5px; }
+</style>
+<div class="mf-wrap">
+  <div class="memory-flow" aria-label="Evidence to accepted memory">
+    <div class="memory-flow-row">
+      <article class="memory-stage">
+        <span>Sources</span>
+        <strong>Business evidence</strong>
+        <p>CRM rows, project records, documents, conversations, and artifacts.</p>
+      </article>
+      <article class="memory-stage memory-stage--candidate">
+        <span>Proposed</span>
+        <strong>Candidate knowledge</strong>
+        <p>Agent observations and extracted assertions with provenance.</p>
+      </article>
+      <article class="memory-stage memory-stage--review">
+        <span>Gate</span>
+        <strong>Review or policy</strong>
+        <p>Human adjudication, source authority, disputes, and scope rules.</p>
+      </article>
+      <article class="memory-stage memory-stage--accepted">
+        <span>Memory</span>
+        <strong>Accepted assertions</strong>
+        <p>Current, historical, disputed, and future-effective knowledge.</p>
+      </article>
+    </div>
+    <div class="memory-flow-notes">
+      <div>
+        <strong>Agents read scoped memory.</strong>
+        <p>Context packs limit the domain, source set, and capabilities.</p>
+      </div>
+      <div>
+        <strong>Existing systems stay authoritative.</strong>
+        <p>Rye overlays operational tables instead of replacing them.</p>
+      </div>
+    </div>
+  </div>
+</div>

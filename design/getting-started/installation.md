@@ -94,8 +94,9 @@ and enabled plugins. It then activates the scope.
 
 ## Agent-Led Onboarding
 
-Install the Rye onboarding skill in the project folder where your agent will
-work:
+Install the Rye onboarding skill with the `skills` CLI — an npm tool that adds
+reusable instruction packs ("skills") to a project so coding agents can follow
+them. Run it via `npx` in the project folder where your agent will work:
 
 ```bash
 npx skills add BLTGV/project-rye --skill rye-onboarding

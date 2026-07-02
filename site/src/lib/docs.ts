@@ -32,7 +32,6 @@ const DOCUMENT_ORDER: Record<string, string[]> = {
     "core-contract",
     "cli",
     "data-dictionary",
-    "onboarding",
     "agent-ops-guide",
     "conventions-catalog",
     "roadmap",

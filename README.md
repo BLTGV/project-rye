@@ -8,7 +8,8 @@ Use the hosted onboarding script to choose where Rye should live.
 
 ### Try Rye Locally
 
-This starts PostgreSQL in Docker, installs Rye, writes `.rye.env`, and leaves
+This starts PostgreSQL in Docker, installs Rye, writes `.rye.env` (the local
+connection config — created for you, no need to write it by hand), and leaves
 the database running. It is the fastest way to try Rye before migrating to a
 remote database later.
 
@@ -31,8 +32,10 @@ curl -fsSL https://projectrye.dev/onboard | sh -s -- --remote "$DATABASE_URL"
 
 ### Agent-Led Onboarding
 
-Install the Rye onboarding skill with Vercel's skills CLI in the project folder
-where your agent will work:
+Install the Rye onboarding skill with the `skills` CLI — an npm tool that adds
+reusable instruction packs ("skills") to a project so coding agents like Codex
+or Claude Code can follow them. Run it via `npx` (no global install needed) in
+the project folder where your agent will work:
 
 ```bash
 npx skills add BLTGV/project-rye --skill rye-onboarding

@@ -1,0 +1,48 @@
+<!-- @dsCard group="Foundations" name="Rye color & type tokens" -->
+<style>
+  .ds-root { font-family: "Source Sans 3", "Segoe UI", sans-serif; color: #15161a; background: #f5f6f0; padding: 24px; }
+  .ds-root h2 { font-family: Fraunces, Georgia, serif; font-size: 15px; letter-spacing: .04em; text-transform: uppercase; color: #84640e; margin: 0 0 10px; }
+  .ds-row { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 22px; }
+  .sw { width: 132px; border: 1px solid #d6d9cf; border-radius: 8px; overflow: hidden; background: #fffffb; }
+  .sw i { display: block; height: 52px; }
+  .sw code { display: block; font: 11px/1.5 "IBM Plex Mono", ui-monospace, monospace; padding: 6px 8px; color: #555b67; }
+  .sw strong { display: block; font-size: 12px; padding: 6px 8px 0; }
+  .type-sample { border: 1px solid #d6d9cf; border-radius: 8px; background: #fffffb; padding: 16px 18px; margin-bottom: 10px; }
+  .type-sample small { color: #858b98; font: 11px "IBM Plex Mono", ui-monospace, monospace; display: block; margin-bottom: 4px; }
+</style>
+<div class="ds-root">
+  <h2>Brand & surfaces — light</h2>
+  <div class="ds-row">
+    <div class="sw"><i style="background:#b8901f"></i><strong>Brand</strong><code>--brand #b8901f</code></div>
+    <div class="sw"><i style="background:#84640e"></i><strong>Brand deep</strong><code>--brand-deep #84640e</code></div>
+    <div class="sw"><i style="background:#236b72"></i><strong>Accent</strong><code>--accent #236b72</code></div>
+    <div class="sw"><i style="background:#4d6349"></i><strong>Earth</strong><code>--earth #4d6349</code></div>
+    <div class="sw"><i style="background:#f5f6f0;border-bottom:1px solid #e2e5dc"></i><strong>Page bg</strong><code>--page-bg #f5f6f0</code></div>
+    <div class="sw"><i style="background:#fffffb;border-bottom:1px solid #e2e5dc"></i><strong>Surface</strong><code>--surface #fffffb</code></div>
+    <div class="sw"><i style="background:#15161a"></i><strong>Ink</strong><code>--ink #15161a</code></div>
+  </div>
+  <h2>Dark / hero palette</h2>
+  <div class="ds-row">
+    <div class="sw"><i style="background:#0a0b0f"></i><strong>Hero base</strong><code>#0a0b0f</code></div>
+    <div class="sw"><i style="background:#11131b"></i><strong>Hero panel</strong><code>#11131b</code></div>
+    <div class="sw"><i style="background:#d8b948"></i><strong>Brand (dark)</strong><code>#d8b948</code></div>
+    <div class="sw"><i style="background:#ecd97a"></i><strong>Gold text</strong><code>#ecd97a</code></div>
+    <div class="sw"><i style="background:#5ee0ff"></i><strong>Accent (dark)</strong><code>#5ee0ff</code></div>
+    <div class="sw"><i style="background:#4ade80"></i><strong>Success ✓</strong><code>#4ade80</code></div>
+    <div class="sw"><i style="background:#eef1f8"></i><strong>Ink (dark)</strong><code>#eef1f8</code></div>
+  </div>
+  <h2>Type</h2>
+  <div class="type-sample">
+    <small>Display — Fraunces (eyebrows, doc headings)</small>
+    <div style="font-family:Fraunces,Georgia,serif;font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:#84640e">Open source · Runs inside your PostgreSQL</div>
+  </div>
+  <div class="type-sample">
+    <small>Body/headline — Source Sans 3, 750 weight for headings</small>
+    <div style="font-weight:750;font-size:28px;line-height:1.1">Reviewable memory for your AI agents.</div>
+    <div style="color:#555b67;margin-top:6px">Rye is a temporal knowledge graph that installs into the Postgres you already run.</div>
+  </div>
+  <div class="type-sample">
+    <small>Mono — IBM Plex Mono (commands, terminal, kickers)</small>
+    <div style="font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:13px;color:#84640e;background:rgba(184,144,31,.13);border-radius:6px;padding:6px 8px;display:inline-block">curl -fsSL https://projectrye.dev/onboard | sh</div>
+  </div>
+</div>

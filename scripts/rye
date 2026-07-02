@@ -18,11 +18,13 @@ Usage:
   ./scripts/rye init local [--fresh] [--seed] [--profiles crm,pm]
   ./scripts/rye init remote --db-url <postgresql://...> [--seed] [--profiles crm,pm]
   ./scripts/rye onboard create --label <name> --purpose <text> [--key <slug>] [--owner <name>]
+                               [--in-scope <text>] [--out-of-scope <text>]
   ./scripts/rye status [--json]
   ./scripts/rye doctor [--json]
   ./scripts/rye catalog plugins|skills|capabilities [--json]
   ./scripts/rye context [--scope <uuid-or-key>] [--json]
   ./scripts/rye sources inventory|pending-context [--json]
+  ./scripts/rye agents create|grant|issue-token|revoke-token|list|audit [--json]
 
 Aliases:
   ./scripts/rye local [--fresh] [--seed] [--profiles crm,pm]
@@ -34,8 +36,14 @@ Global options:
   --db-url <postgresql://...>   Use this database instead of .rye.env
   --schema <schema>             Rye schema name. Default: rye
   --env-file <path>             Local Rye env file. Default: .rye.env
+                                (written automatically by init; no need to create it by hand)
   --json                        Return machine-readable JSON where supported
   --quiet                       Reduce non-error output
+
+Onboard defaults (when flags are omitted):
+  --in-scope       "initial limited workflow"
+  --out-of-scope   "full organization-wide rollout|automatic source ingestion|
+                    promotion of facts without review"
 EOF
 }
 
@@ -180,9 +188,13 @@ compose() {
 wait_for_db() {
   local attempts=60
 
+  info "Waiting for the database to be ready (up to ${attempts}s)..."
   for ((i=1; i<=attempts; i++)); do
     if compose exec -T rye-db pg_isready -U "${POSTGRES_USER:-rye}" -d "${POSTGRES_DB:-rye}" >/dev/null 2>&1; then
       return
+    fi
+    if (( i % 10 == 0 )); then
+      info "Still waiting for the database (${i}s)..."
     fi
     sleep 1
   done
@@ -856,6 +868,344 @@ EOF
   esac
 }
 
+cmd_agents() {
+  local command="${1:-}"
+  [[ $# -gt 0 ]] && shift
+
+  case "$command" in
+    create)
+      local key=""
+      local label=""
+      local runtime="codex-cli"
+      local scope_ref=""
+
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --key)
+            key="${2:-}"
+            shift 2
+            ;;
+          --label)
+            label="${2:-}"
+            shift 2
+            ;;
+          --runtime)
+            runtime="${2:-}"
+            shift 2
+            ;;
+          --scope-ref|--scope)
+            scope_ref="${2:-}"
+            shift 2
+            ;;
+          -h|--help)
+            cat <<'EOF'
+Usage:
+  ./scripts/rye agents create --key <agent-key> --label <name> [--runtime <runtime>] [--scope-ref <scope>]
+EOF
+            return
+            ;;
+          *)
+            die "Unknown agents create option: $1"
+            ;;
+        esac
+      done
+
+      [[ -n "$key" ]] || die "agents create requires --key."
+      [[ -n "$label" ]] || die "agents create requires --label."
+
+      if [[ "$OUTPUT_JSON" -eq 1 ]]; then
+        psql_json "SELECT jsonb_build_object(
+  'agent_id', rye.create_agent_identity($(sql_literal "$key"), $(sql_literal "$label"), $(sql_literal "$runtime"), nullif($(sql_literal "$scope_ref"), '')),
+  'agent_key', rye.rye_slugify_key($(sql_literal "$key")),
+  'label', $(sql_literal "$label"),
+  'runtime', $(sql_literal "$runtime")
+);"
+        return
+      fi
+
+      psql_exec "SELECT rye.create_agent_identity($(sql_literal "$key"), $(sql_literal "$label"), $(sql_literal "$runtime"), nullif($(sql_literal "$scope_ref"), '')) AS agent_id;"
+      ;;
+    grant)
+      local key=""
+      local capability=""
+      local domain_key=""
+      local scope_ref=""
+      local expires_at=""
+
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --key)
+            key="${2:-}"
+            shift 2
+            ;;
+          --capability)
+            capability="${2:-}"
+            shift 2
+            ;;
+          --domain|--domain-key)
+            domain_key="${2:-}"
+            shift 2
+            ;;
+          --scope-ref|--scope)
+            scope_ref="${2:-}"
+            shift 2
+            ;;
+          --expires-at)
+            expires_at="${2:-}"
+            shift 2
+            ;;
+          -h|--help)
+            cat <<'EOF'
+Usage:
+  ./scripts/rye agents grant --key <agent-key> --capability <capability> [--domain <domain-key>] [--scope-ref <scope>] [--expires-at <iso-time>]
+EOF
+            return
+            ;;
+          *)
+            die "Unknown agents grant option: $1"
+            ;;
+        esac
+      done
+
+      [[ -n "$key" ]] || die "agents grant requires --key."
+      [[ -n "$capability" ]] || die "agents grant requires --capability."
+
+      if [[ "$OUTPUT_JSON" -eq 1 ]]; then
+        psql_json "SELECT jsonb_build_object(
+  'grant_id', rye.grant_agent_capability($(sql_literal "$key"), $(sql_literal "$capability"), nullif($(sql_literal "$domain_key"), ''), nullif($(sql_literal "$scope_ref"), ''), nullif($(sql_literal "$expires_at"), '')::timestamptz),
+  'agent_key', rye.rye_slugify_key($(sql_literal "$key")),
+  'capability', $(sql_literal "$capability"),
+  'domain_key', rye.rye_slugify_key(nullif($(sql_literal "$domain_key"), '')),
+  'scope_ref', nullif($(sql_literal "$scope_ref"), '')
+);"
+        return
+      fi
+
+      psql_exec "SELECT rye.grant_agent_capability($(sql_literal "$key"), $(sql_literal "$capability"), nullif($(sql_literal "$domain_key"), ''), nullif($(sql_literal "$scope_ref"), ''), nullif($(sql_literal "$expires_at"), '')::timestamptz) AS grant_id;"
+      ;;
+    issue-token)
+      local key=""
+      local label=""
+      local expires_at=""
+
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --key)
+            key="${2:-}"
+            shift 2
+            ;;
+          --label)
+            label="${2:-}"
+            shift 2
+            ;;
+          --expires-at)
+            expires_at="${2:-}"
+            shift 2
+            ;;
+          -h|--help)
+            cat <<'EOF'
+Usage:
+  ./scripts/rye agents issue-token --key <agent-key> [--label <label>] [--expires-at <iso-time>]
+EOF
+            return
+            ;;
+          *)
+            die "Unknown agents issue-token option: $1"
+            ;;
+        esac
+      done
+
+      [[ -n "$key" ]] || die "agents issue-token requires --key."
+
+      if [[ "$OUTPUT_JSON" -eq 1 ]]; then
+        psql_json "SELECT rye.issue_agent_token_record($(sql_literal "$key"), nullif($(sql_literal "$label"), ''), nullif($(sql_literal "$expires_at"), '')::timestamptz);"
+        return
+      fi
+
+      psql_exec "SELECT
+  issued->>'token_id' AS token_id,
+  issued->>'token' AS one_time_token
+FROM rye.issue_agent_token_record($(sql_literal "$key"), nullif($(sql_literal "$label"), ''), nullif($(sql_literal "$expires_at"), '')::timestamptz) AS issued;"
+      echo "Token is shown once. Rye stores only its SHA-256 hash."
+      ;;
+    revoke-token)
+      local token_id=""
+
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --token-id)
+            token_id="${2:-}"
+            shift 2
+            ;;
+          -h|--help)
+            cat <<'EOF'
+Usage:
+  ./scripts/rye agents revoke-token --token-id <uuid>
+EOF
+            return
+            ;;
+          *)
+            die "Unknown agents revoke-token option: $1"
+            ;;
+        esac
+      done
+
+      [[ -n "$token_id" ]] || die "agents revoke-token requires --token-id."
+
+      if [[ "$OUTPUT_JSON" -eq 1 ]]; then
+        psql_json "SELECT jsonb_build_object('token_id', $(sql_literal "$token_id"), 'revoked', rye.revoke_agent_token($(sql_literal "$token_id")::uuid, 'scripts/rye agents revoke-token'));"
+        return
+      fi
+
+      psql_exec "SELECT rye.revoke_agent_token($(sql_literal "$token_id")::uuid, 'scripts/rye agents revoke-token') AS revoked;"
+      ;;
+    list)
+      if [[ "$OUTPUT_JSON" -eq 1 ]]; then
+        psql_json "WITH cfg AS (SELECT set_config('app.current_role','admin',false))
+SELECT jsonb_build_object(
+  'agents', COALESCE(jsonb_agg(jsonb_build_object(
+    'agent_id', ai.id,
+    'agent_key', ai.agent_key,
+    'label', ai.label,
+    'runtime', ai.runtime,
+    'default_scope_ref', ai.default_scope_ref,
+    'active', ai.active,
+    'active_token_count', (
+      SELECT COUNT(*)::int
+      FROM rye.agent_api_tokens tok
+      WHERE tok.agent_id = ai.id
+        AND tok.revoked_at IS NULL
+        AND (tok.expires_at IS NULL OR tok.expires_at > now())
+    ),
+    'grants', (
+      SELECT COALESCE(jsonb_agg(jsonb_build_object(
+        'grant_id', g.id,
+        'capability', g.capability,
+        'domain_key', kd.domain_key,
+        'scope_ref', g.scope_ref,
+        'active', g.active,
+        'expires_at', g.expires_at
+      ) ORDER BY g.capability, kd.domain_key NULLS FIRST), '[]'::jsonb)
+      FROM rye.agent_capability_grants g
+      LEFT JOIN rye.knowledge_domains kd ON kd.id = g.domain_id
+      WHERE g.agent_id = ai.id
+    )
+  ) ORDER BY ai.agent_key), '[]'::jsonb)
+)
+FROM rye.agent_identities ai, cfg;"
+        return
+      fi
+
+      psql_exec "WITH cfg AS (SELECT set_config('app.current_role','admin',false))
+SELECT
+  ai.agent_key,
+  ai.label,
+  ai.runtime,
+  ai.default_scope_ref,
+  ai.active,
+  (
+    SELECT COUNT(*)::int
+    FROM rye.agent_api_tokens tok
+    WHERE tok.agent_id = ai.id
+      AND tok.revoked_at IS NULL
+      AND (tok.expires_at IS NULL OR tok.expires_at > now())
+  ) AS active_token_count
+FROM rye.agent_identities ai, cfg
+ORDER BY ai.agent_key;
+
+SELECT
+  ai.agent_key,
+  g.capability,
+  kd.domain_key,
+  g.scope_ref,
+  g.active,
+  g.expires_at
+FROM rye.agent_capability_grants g
+JOIN rye.agent_identities ai ON ai.id = g.agent_id
+LEFT JOIN rye.knowledge_domains kd ON kd.id = g.domain_id
+ORDER BY ai.agent_key, g.capability, kd.domain_key NULLS FIRST;"
+      ;;
+    audit)
+      local limit=50
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --limit)
+            limit="${2:-}"
+            shift 2
+            ;;
+          -h|--help)
+            cat <<'EOF'
+Usage:
+  ./scripts/rye agents audit [--limit <n>] [--json]
+EOF
+            return
+            ;;
+          *)
+            die "Unknown agents audit option: $1"
+            ;;
+        esac
+      done
+      [[ "$limit" =~ ^[0-9]+$ ]] || die "agents audit --limit must be an integer."
+
+      if [[ "$OUTPUT_JSON" -eq 1 ]]; then
+        psql_json "SELECT jsonb_build_object(
+  'actions', COALESCE(jsonb_agg(jsonb_build_object(
+    'id', l.id,
+    'agent_key', ai.agent_key,
+    'action', l.action,
+    'capability', l.capability,
+    'domain_key', kd.domain_key,
+    'scope_ref', l.scope_ref,
+    'target_ref', l.target_ref,
+    'allowed', l.allowed,
+    'reason', l.reason,
+    'created_at', l.created_at
+  ) ORDER BY l.created_at DESC), '[]'::jsonb)
+)
+FROM (
+  SELECT *
+  FROM rye.agent_action_log
+  ORDER BY created_at DESC
+  LIMIT ${limit}
+) l
+LEFT JOIN rye.agent_identities ai ON ai.id = l.agent_id
+LEFT JOIN rye.knowledge_domains kd ON kd.id = l.domain_id;"
+        return
+      fi
+
+      psql_exec "SELECT
+  l.created_at,
+  ai.agent_key,
+  l.action,
+  l.capability,
+  kd.domain_key,
+  l.scope_ref,
+  l.target_ref,
+  l.allowed,
+  l.reason
+FROM rye.agent_action_log l
+LEFT JOIN rye.agent_identities ai ON ai.id = l.agent_id
+LEFT JOIN rye.knowledge_domains kd ON kd.id = l.domain_id
+ORDER BY l.created_at DESC
+LIMIT ${limit};"
+      ;;
+    -h|--help|help|"")
+      cat <<'EOF'
+Usage:
+  ./scripts/rye agents create --key <agent-key> --label <name> [--runtime <runtime>] [--scope-ref <scope>]
+  ./scripts/rye agents grant --key <agent-key> --capability <capability> [--domain <domain-key>] [--scope-ref <scope>] [--expires-at <iso-time>]
+  ./scripts/rye agents issue-token --key <agent-key> [--label <label>] [--expires-at <iso-time>]
+  ./scripts/rye agents revoke-token --token-id <uuid>
+  ./scripts/rye agents list [--json]
+  ./scripts/rye agents audit [--limit <n>] [--json]
+EOF
+      ;;
+    *)
+      die "Unknown agents command: $command"
+      ;;
+  esac
+}
+
 main() {
   parse_global_args "$@"
   set -- "${ARGS[@]}"
@@ -891,6 +1241,9 @@ main() {
       ;;
     sources)
       cmd_sources "$@"
+      ;;
+    agents)
+      cmd_agents "$@"
       ;;
     status)
       cmd_status "$@"

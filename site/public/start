@@ -1,0 +1,85 @@
+# Rye - Agent Setup Instructions
+
+You are an agent setting up Project Rye for a user. Rye is an open source,
+agent-native temporal knowledge graph schema that installs INTO a PostgreSQL
+database. It is a schema, not a separate database, application, or framework.
+
+Follow the steps in order. Ask the user only the questions listed here.
+
+## 1. Check prerequisites
+
+Rye needs ONE of:
+
+- Docker with Docker Compose (local trial - recommended first run), or
+- a PostgreSQL 15+ connection string (Rye installs alongside existing tables
+  in its own `rye` schema and never resets remote data).
+
+Verify Docker with `docker info` (the daemon must be running, not just
+installed). Otherwise ask the user for a connection string. If neither is
+available, stop and tell the user which one to provide.
+
+## 2. Install
+
+Local (Docker):
+
+    curl -fsSL https://projectrye.dev/onboard | sh
+
+Remote (existing database):
+
+    curl -fsSL https://projectrye.dev/onboard | sh -s -- --remote "$DATABASE_URL"
+
+This clones the repo into ./project-rye, installs the Rye schema, syncs
+plugin/skill/capability metadata, and writes .rye.env (local connection
+config - generated for the user, never hand-edited). It adds no example data
+unless you pass --seed.
+
+## 3. Verify
+
+    cd project-rye
+    ./scripts/rye doctor
+    ./scripts/rye status
+
+Success looks like: doctor reports the schema and metadata present; status
+returns node/scope counts without errors. On failure, read .rye/install.log
+before retrying.
+
+## 4. Create the first scope - required before any data intake
+
+Ask the user:
+
+    "What is the one limited workflow Rye should assist first?"
+
+Name the scope after that organizational purpose, never after a data source
+or retrieval channel ("Wholesale account follow-up", not "Slack ingest").
+
+    ./scripts/rye onboard create \
+      --label "<workflow name>" \
+      --purpose "<one sentence: what should be remembered, for whom>"
+
+## 5. Hand yourself context
+
+    ./scripts/rye context --json
+
+Returns the catalog, active scope, source inventory, pending confirmations,
+and compiled policy. Read it before writing anything to the graph.
+
+## Rules - non-negotiable
+
+- Scope first. Never ingest sources or promote facts before an active scope,
+  boundary, and review policy exist.
+- Connectors collect; Rye classifies. Register sources neutrally, mark them
+  needs_confirmation, and ask the user to confirm a source's purpose before
+  inferring business meaning from it.
+- Candidates before truth. New facts enter as candidates with provenance.
+  Promotion to accepted knowledge follows the review policy - usually a human
+  decision, never yours alone.
+- Stay in your schema. Rye lives in the `rye` schema. Do not modify the
+  user's other tables.
+
+## Going deeper
+
+- Agent skills (onboarding, source intake, agent ops):
+  npx skills add BLTGV/project-rye --skill rye-onboarding
+- CLI reference: https://projectrye.dev/docs/reference/cli/
+- Onboarding scopes: https://projectrye.dev/docs/getting-started/onboarding/
+- Machine-readable site map: https://projectrye.dev/llm.txt

@@ -1,0 +1,27 @@
+<!-- @dsCard group="Homepage" name="What you need strip" subtitle="Docker or a connection string — two cards" -->
+<style>
+  .ng-wrap { font-family: "Source Sans 3", "Segoe UI", sans-serif; color: #15161a; background: #f5f6f0; padding: 24px; }
+  .needs-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 14px; }
+  @media (max-width: 760px) { .needs-grid { grid-template-columns: 1fr; } }
+  .needs-grid article { border: 1px solid #d6d9cf; border-top: 3px solid #b8901f; border-radius: 8px; background: #fffffb; padding: 15px; }
+  .needs-grid article:nth-child(2) { border-top-color: #236b72; }
+  .needs-grid h2 { margin: 0; font-size: 19px; font-weight: 750; color: #84640e; }
+  .needs-grid article:nth-child(2) h2 { color: #236b72; }
+  .needs-grid p { margin: 4px 0 0; color: #555b67; line-height: 1.55; }
+  .needs-grid p code { font: .85em "IBM Plex Mono", ui-monospace, monospace; background: rgba(184,144,31,.13); border-radius: 6px; padding: 1px 4px; color: #84640e; }
+  .stat-code { display: block; margin-top: 10px; font: 12px "IBM Plex Mono", ui-monospace, monospace; color: #84640e; background: rgba(184,144,31,.13); border-radius: 6px; padding: 6px 8px; white-space: nowrap; overflow-x: auto; }
+</style>
+<div class="ng-wrap">
+  <div class="needs-grid">
+    <article>
+      <h2>Try it locally</h2>
+      <p>One requirement: <strong>Docker</strong>. Your agent starts Postgres in a container, installs Rye, and leaves it running. Nothing else touched.</p>
+      <code class="stat-code">curl -fsSL https://projectrye.dev/onboard | sh</code>
+    </article>
+    <article>
+      <h2>Install into your database</h2>
+      <p>One requirement: a <strong>PostgreSQL 15+ connection string</strong>. Rye installs beside your tables in its own <code>rye</code> schema and never resets remote data.</p>
+      <code class="stat-code">curl -fsSL https://projectrye.dev/onboard | sh -s -- --remote "$DATABASE_URL"</code>
+    </article>
+  </div>
+</div>

@@ -13,7 +13,13 @@ const sources = [
     sourceDir: path.join(repoRoot, "docs"),
     files: [path.join(repoRoot, "docs", "onboarding.md")],
   },
-  { section: "reference", sourceDir: path.join(repoRoot, "docs") },
+  {
+    section: "reference",
+    sourceDir: path.join(repoRoot, "docs"),
+    // onboarding.md is published under getting-started above; skip it here so
+    // the same page does not appear in two sections.
+    exclude: [path.join(repoRoot, "docs", "onboarding.md")],
+  },
   { section: "model", sourceDir: path.join(repoRoot, "design", "model") },
   { section: "layers", sourceDir: path.join(repoRoot, "design", "layers") },
   { section: "cookbooks", sourceDir: path.join(repoRoot, "design", "cookbooks") },
@@ -229,7 +235,10 @@ async function main() {
 
   let total = 0;
   for (const source of sources) {
-    const files = source.files ?? (await walkMarkdownFiles(source.sourceDir));
+    let files = source.files ?? (await walkMarkdownFiles(source.sourceDir));
+    if (source.exclude) {
+      files = files.filter((filePath) => !source.exclude.includes(filePath));
+    }
     for (const filePath of files) {
       await copyFileWithMetadata(filePath, source.section, source.sourceDir);
       total += 1;

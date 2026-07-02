@@ -1,0 +1,94 @@
+<!-- @dsCard group="Homepage" name="Animated agent terminal" subtitle="Looping you-and-agent setup conversation" -->
+<style>
+  .term-wrap { font-family: "Source Sans 3", "Segoe UI", sans-serif; padding: 24px; background: linear-gradient(135deg, #0a0b0f, #18232a); }
+  .agent-terminal { max-width: 560px; margin: 0 auto; border: 1px solid rgba(238,241,248,.16); border-radius: 8px; background: rgba(10,11,15,.62); box-shadow: 0 18px 60px rgba(0,0,0,.28); overflow: hidden; }
+  .terminal-header { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid rgba(238,241,248,.12); background: rgba(17,19,27,.72); }
+  .terminal-dots { display: flex; gap: 6px; }
+  .terminal-dots i { width: 9px; height: 9px; border-radius: 50%; background: rgba(238,241,248,.22); }
+  .terminal-title { margin-left: auto; font: 11.5px "IBM Plex Mono", ui-monospace, monospace; letter-spacing: .08em; text-transform: uppercase; color: #9aa0b3; }
+  .terminal-replay { font: 11.5px "IBM Plex Mono", ui-monospace, monospace; letter-spacing: .05em; text-transform: uppercase; color: #ecd97a; background: rgba(216,185,72,.12); border: 1px solid rgba(216,185,72,.35); border-radius: 999px; padding: 4px 10px; cursor: pointer; }
+  .terminal-replay:hover { background: rgba(216,185,72,.2); }
+  .terminal-body { padding: 16px 17px 18px; min-height: 300px; font: 13px/1.55 "IBM Plex Mono", ui-monospace, monospace; }
+  .t-line { margin: 0 0 9px; color: #cdd4e2; overflow-wrap: anywhere; opacity: 0; transform: translateY(4px); transition: opacity .28s ease, transform .28s ease; }
+  .t-line.is-visible { opacity: 1; transform: translateY(0); }
+  .t-tag { display: inline-block; min-width: 3.4em; margin-right: .55em; font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; color: #9aa0b3; }
+  .t-you { color: #ecd97a; } .t-you .t-tag { color: #d8b948; }
+  .t-ok { color: #4ade80; }
+  @keyframes t-blink { 0%,55% {opacity:1} 56%,100% {opacity:0} }
+  .t-ch--hidden { color: transparent; }
+  .t-ch--cursor { background: #ecd97a; border-radius: 1px; animation: t-blink .85s steps(1) infinite; }
+</style>
+<div class="term-wrap">
+  <div class="agent-terminal">
+    <div class="terminal-header">
+      <span class="terminal-dots"><i></i><i></i><i></i></span>
+      <span class="terminal-title">you ↔ your agent</span>
+      <button class="terminal-replay" id="treplay" type="button" hidden>↻ replay</button>
+    </div>
+    <div class="terminal-body" id="tbody">
+      <p class="t-line t-you"><span class="t-tag">you</span>Set up Rye for this project. Instructions: projectrye.dev/start</p>
+      <p class="t-line t-agent"><span class="t-tag">agent</span>Reading projectrye.dev/start…</p>
+      <p class="t-line t-agent"><span class="t-tag">agent</span>Docker found — starting local Postgres <span class="t-ok">✓</span></p>
+      <p class="t-line t-agent"><span class="t-tag">agent</span>Rye schema installed, plugins and skills synced <span class="t-ok">✓</span></p>
+      <p class="t-line t-agent"><span class="t-tag">agent</span>What's the one workflow Rye should assist first?</p>
+      <p class="t-line t-you"><span class="t-tag">you</span>Follow-up on our wholesale accounts</p>
+      <p class="t-line t-agent"><span class="t-tag">agent</span>Scope created: "Wholesale account follow-up" <span class="t-ok">✓</span></p>
+      <p class="t-line t-agent"><span class="t-tag">agent</span>Memory is live. New facts wait for your review before becoming truth.</p>
+    </div>
+  </div>
+</div>
+<script>
+(function () {
+  var body = document.getElementById("tbody");
+  var reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var lines = Array.prototype.map.call(body.querySelectorAll(".t-line"), function (el) {
+    return { el: el, isYou: el.classList.contains("t-you"), html: el.innerHTML, text: el.textContent || "" };
+  });
+  if (reduce) { lines.forEach(function (l) { l.el.classList.add("is-visible"); }); return; }
+  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  async function typeYou(line) {
+    // Pre-render the full message as per-character spans so wrapping is
+    // computed once; characters reveal in place with no reflow.
+    var tagEl = line.el.querySelector(".t-tag");
+    var msg = line.text.replace(/^you/, "").trim();
+    line.el.textContent = "";
+    if (tagEl) line.el.appendChild(tagEl);
+    var chars = [];
+    for (var j = 0; j < msg.length; j++) {
+      var s = document.createElement("span");
+      s.className = "t-ch t-ch--hidden";
+      s.textContent = msg[j];
+      line.el.appendChild(s);
+      chars.push(s);
+    }
+    line.el.classList.add("is-visible");
+    if (chars[0]) chars[0].classList.add("t-ch--cursor");
+    for (var i = 0; i < chars.length; i++) {
+      await sleep(26);
+      chars[i].classList.remove("t-ch--hidden");
+      chars[i].classList.remove("t-ch--cursor");
+      if (chars[i + 1]) chars[i + 1].classList.add("t-ch--cursor");
+    }
+    line.el.innerHTML = line.html;
+  }
+  var replayBtn = document.getElementById("treplay");
+  var playing = false;
+  async function play() {
+    if (playing) return;
+    playing = true;
+    if (replayBtn) replayBtn.hidden = true;
+    lines.forEach(function (l) { l.el.classList.remove("is-visible", "is-typing"); });
+    await sleep(600);
+    for (var i = 0; i < lines.length; i++) {
+      if (lines[i].isYou) { await typeYou(lines[i]); }
+      else { await sleep(520); lines[i].el.classList.add("is-visible"); }
+      await sleep(340);
+    }
+    playing = false;
+    if (replayBtn) replayBtn.hidden = false;
+  }
+  if (replayBtn) replayBtn.addEventListener("click", function () { play(); });
+  body.style.minHeight = body.offsetHeight + "px";
+  play();
+})();
+</script>

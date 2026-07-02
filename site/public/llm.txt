@@ -19,7 +19,6 @@ Site sections:
 - /docs/reference/core-contract/
 - /docs/reference/cli/
 - /docs/reference/data-dictionary/
-- /docs/reference/onboarding/
 - /docs/reference/agent-ops-guide/
 - /docs/reference/conventions-catalog/
 - /docs/reference/roadmap/
@@ -36,6 +35,10 @@ Site sections:
 - /docs/cookbooks/product-development/
 - /docs/cookbooks/mineral-rights/
 - /docs/evaluations/report/
+
+Agent setup:
+- /start (step-by-step instructions for an agent installing Rye)
+- /onboard (POSIX bootstrap script; curl -fsSL https://projectrye.dev/onboard | sh)
 
 Search:
 - /search-index.json (generated at build time)

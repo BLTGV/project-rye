@@ -1,0 +1,51 @@
+<!-- @dsCard group="Homepage" name="Hero with agent prompt" subtitle="One-sentence getting started + copy button" -->
+<style>
+  .hero-wrap { font-family: "Source Sans 3", "Segoe UI", sans-serif; padding: 20px; background: #f5f6f0; }
+  .hero-panel {
+    border: 1px solid #d6d9cf; border-radius: 8px; color: #eef1f8; padding: 34px;
+    background:
+      linear-gradient(rgba(255,255,255,.045) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,.045) 1px, transparent 1px),
+      linear-gradient(135deg, #0a0b0f 0%, #11131b 52%, #18232a 100%);
+    background-size: 32px 32px, 32px 32px, auto;
+  }
+  .eyebrow { margin: 0; font-family: Fraunces, Georgia, serif; font-size: 12.5px; letter-spacing: .08em; text-transform: uppercase; color: #d8b948; }
+  .hero-panel h1 { margin: 8px 0 0; max-width: 14ch; color: #fff; font-family: Fraunces, Georgia, serif; font-size: 56px; font-weight: 800; line-height: 1.02; }
+  .hero-audience { font-size: 22px; font-weight: 650; color: #eef1f8; margin: 12px 0 0; }
+  .hero-panel > .lede { margin: 12px 0 0; color: #c3cad8; max-width: 60ch; }
+  .agent-prompt { margin-top: 19px; border: 1px solid rgba(216,185,72,.38); border-radius: 8px; background: rgba(216,185,72,.08); padding: 14px 15px; max-width: 640px; }
+  .agent-prompt-label { display: block; font-family: Fraunces, Georgia, serif; font-size: 12.5px; letter-spacing: .07em; text-transform: uppercase; color: #ecd97a; }
+  .agent-prompt-row { margin-top: 9px; display: flex; gap: 9px; }
+  .agent-prompt-row code { flex: 1; font: 14.7px/1.6 "IBM Plex Mono", ui-monospace, monospace; color: #f5efd8; background: rgba(10,11,15,.72); border: 1px solid rgba(238,241,248,.14); border-radius: 6px; padding: 10px 13px; white-space: normal; overflow-wrap: anywhere; }
+  .agent-prompt-copy { font-weight: 700; font-size: 13.7px; color: #0a0b0f; background: #d8b948; border: 1px solid #d8b948; border-radius: 6px; padding: 0 15px; cursor: pointer; }
+  .agent-prompt-note { display: block; margin-top: 9px; font-size: 14px; color: #c3cad8; }
+  .hero-actions { margin-top: 18px; display: flex; gap: 11px; }
+  .btn { display: inline-flex; align-items: center; min-height: 42px; padding: 0 18px; border-radius: 6px; font-weight: 700; font-size: 14.5px; text-decoration: none; }
+  .btn-primary { background: #d8b948; border: 1px solid #d8b948; color: #0a0b0f; }
+  .btn-ghost { border: 1px solid rgba(238,241,248,.24); color: #eef1f8; }
+</style>
+<div class="hero-wrap">
+  <div class="hero-panel">
+    <p class="eyebrow">Open source · Runs inside your PostgreSQL</p>
+    <h1>Business memory for agent-led work.</h1>
+    <p class="hero-audience">An open source PostgreSQL schema for the context your agents and apps need.</p>
+    <p class="lede">
+      Project Rye tracks entities, relationships, events, evidence, and changing
+      assertions across your existing business systems — without replacing the systems
+      that already run the work.
+    </p>
+    <div class="agent-prompt">
+      <span class="agent-prompt-label">Getting started is one sentence. Tell your agent:</span>
+      <div class="agent-prompt-row">
+        <code>Set up Rye for this project. Instructions: https://projectrye.dev/start</code>
+        <button class="agent-prompt-copy" type="button">Copy</button>
+      </div>
+      <span class="agent-prompt-note">All it needs: Docker for a local trial — or a PostgreSQL connection string.</span>
+    </div>
+    <div class="hero-actions">
+      <a class="btn btn-primary" href="#">Start Agent-Led Onboarding</a>
+      <a class="btn btn-ghost" href="#">Read /start</a>
+      <a class="btn btn-ghost" href="#">GitHub</a>
+    </div>
+  </div>
+</div>

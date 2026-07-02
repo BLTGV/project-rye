@@ -1,0 +1,57 @@
+<!-- @dsCard group="Homepage" name="Realistic scenario cards" subtitle="Persona story + first-success callout" -->
+<style>
+  .sc-wrap { font-family: "Source Sans 3", "Segoe UI", sans-serif; color: #15161a; background: #f5f6f0; padding: 24px; }
+  .scenario-grid { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 14px; }
+  @media (max-width: 900px) { .scenario-grid { grid-template-columns: 1fr; } }
+  .scenario-card { display: flex; flex-direction: column; border: 1px solid #d6d9cf; border-radius: 8px; background: #fffffb; padding: 17px; }
+  .scenario-kicker { margin: 0; font: 11px "IBM Plex Mono", ui-monospace, monospace; letter-spacing: .09em; text-transform: uppercase; color: #236b72; }
+  .scenario-card h3 { margin: 6px 0 0; font-size: 17px; font-weight: 750; line-height: 1.25; }
+  .scenario-card .story { margin: 8px 0 0; color: #555b67; font-size: 15px; line-height: 1.55; }
+  .scenario-success { margin-top: auto; padding: 10px 12px; border-left: 3px solid #2f7a48; border-radius: 0 6px 6px 0; background: #eefbf2; color: #555b67; font-size: 14.5px; line-height: 1.5; }
+  .scenario-success strong { color: #2f7a48; }
+  .scenario-card .story + .scenario-success { margin-top: 14px; }
+</style>
+<div class="sc-wrap">
+  <div class="scenario-grid">
+    <article class="scenario-card">
+      <p class="scenario-kicker">In one chat window</p>
+      <h3>The ops lead who loses account history</h3>
+      <p class="story">
+        Priya runs wholesale operations. She tells her agent to set up Rye; it starts Postgres
+        in Docker, reads her Gmail and the #wholesale channel through her existing connectors,
+        and files what it finds as candidates for her to confirm — all in the same chat.
+      </p>
+      <p class="scenario-success">
+        <strong>First success:</strong> a fresh conversation a week later answers "what's the
+        state of Harbor Coffee?" with the order hold she approved — and the exact thread it came from.
+      </p>
+    </article>
+    <article class="scenario-card">
+      <p class="scenario-kicker">Next to production</p>
+      <h3>The developer whose support bot forgets</h3>
+      <p class="story">
+        Marcus hands his coding agent a staging connection string. Rye installs beside the
+        app's tables — its own schema, nothing else touched — and the agent issues the support
+        bot a read-only, scope-limited token.
+      </p>
+      <p class="scenario-success">
+        <strong>First success:</strong> the bot answers an escalation with the incident, the
+        release that caused it, and the renewal date in one reply — and the audit log shows
+        exactly what it read.
+      </p>
+    </article>
+    <article class="scenario-card">
+      <p class="scenario-kicker">Slack + a review screen</p>
+      <h3>The COO who can't trust AI "facts"</h3>
+      <p class="story">
+        Dana never opens a terminal. Her client's workspace agent reads Slack and call
+        transcripts; everything lands as candidate facts with provenance. On Friday she
+        approves eight and rejects three in the review UI.
+      </p>
+      <p class="scenario-success">
+        <strong>First success:</strong> Monday's ops brief cites only approved facts, each
+        linking back to the Slack thread or call minute it came from.
+      </p>
+    </article>
+  </div>
+</div>
