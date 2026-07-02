@@ -62,8 +62,9 @@ BEGIN
     RAISE EXCEPTION 'assertions.assertion_key missing';
   END IF;
 
-  IF to_regclass('rye.idx_assertions_active_unique') IS NULL THEN
-    RAISE EXCEPTION 'idx_assertions_active_unique index missing';
+  IF to_regclass('rye.idx_assertions_active_unique') IS NULL
+     AND to_regclass('rye.idx_assertions_active_window_unique') IS NULL THEN
+    RAISE EXCEPTION 'active assertion uniqueness index missing';
   END IF;
 
   IF to_regprocedure('rye.supersede_assertion(uuid,text,uuid,uuid,jsonb,text,timestamp with time zone,uuid,numeric)') IS NULL THEN
