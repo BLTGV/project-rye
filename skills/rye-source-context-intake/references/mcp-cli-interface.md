@@ -35,13 +35,27 @@ The MCP server should be the LLM-facing runtime wrapper over the same contract. 
 
 The MCP server should call the same validator/SQL builder used by the CLI. It should set Rye session context on every database call, because many MCP or pooled SQL surfaces are stateless.
 
-The current stdio implementation lives at `scripts/rye_mcp_server.mts`. Run it with:
+The trusted local/dev stdio implementation lives at `scripts/rye_mcp_server.mts`. It can accept a database target because it is meant for local operators and test harnesses. Run it with:
 
 ```bash
 cd skills/rye-source-context-intake
 npm install
 RYE_DATABASE_URL="postgresql://..." npm run mcp
 ```
+
+External agent runtimes should use the secure API-backed MCP server instead:
+
+```bash
+cd skills/rye-source-context-intake
+RYE_API_URL="https://rye-admin.example.com" \
+RYE_AGENT_TOKEN="rye_..." \
+npm run mcp:api
+```
+
+The secure server does not expose DB/Docker target fields and does not register
+promotion tools. Tool visibility comes from Rye API token capabilities, so a
+read-only token sees only read tools and a candidate token can submit
+observations/candidates without promotion rights.
 
 ## Recommended Order
 

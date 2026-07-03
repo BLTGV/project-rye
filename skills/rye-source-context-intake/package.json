@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "mcp": "node scripts/rye_mcp_server.mts",
-    "check": "node --check scripts/rye_mcp_server.mts && node --check scripts/source_context_commit_rye.mts"
+    "mcp:api": "node scripts/rye_api_mcp_server.mts",
+    "check": "node --check scripts/rye_mcp_server.mts && node --check scripts/rye_api_mcp_server.mts && node --check scripts/source_context_commit_rye.mts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0",

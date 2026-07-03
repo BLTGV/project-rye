@@ -136,6 +136,11 @@ Use `--validate-only` to check record shape without writing.
 
 Use `scripts/rye_mcp_server.mts` when an LLM client needs a Rye instance interface. It exposes read tools (`rye.catalog`, `rye.search_nodes`, `rye.node_summary`, `rye.source_inventory`, `rye.pending_context_confirmations`) and source-context write tools (`rye.validate_source_context_update`, `rye.commit_source_context_update`).
 
+For untrusted or external agent runtimes, use `scripts/rye_api_mcp_server.mts`
+instead. It reads `RYE_API_URL` and `RYE_AGENT_TOKEN`, never accepts `db_url` or
+Docker target inputs, and registers tools only from the token's granted
+capabilities. Keep `rye_mcp_server.mts` as trusted local/dev tooling.
+
 ## References
 
 - For record shapes and examples, read `references/source-context-contract.md`.
