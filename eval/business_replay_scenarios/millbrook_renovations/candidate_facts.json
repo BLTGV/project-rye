@@ -1,0 +1,1365 @@
+{
+  "source_file": "/home/casey/git/project-rye/eval/business_replay_scenarios/millbrook_renovations/source_material.md",
+  "generated_by": "clean-intake-agent",
+  "business": {
+    "name": "Millbrook Home Renovations",
+    "summary": "Millbrook is a home renovation company that currently tracks sales and work through Slack, email, and spreadsheets rather than a CRM or project management system. The source packet covers active or nurture opportunities for Harper, Vale, Olson, and Garza, plus current task ownership, deposit blockers, conditional milestones, and staff roles."
+  },
+  "candidates": [
+    {
+      "id": "policy_confirm_imported_records_before_official",
+      "type": "source_policy",
+      "statement": "Leo Tran or Dana Mills must confirm Rye-imported candidate records before they become official Millbrook records.",
+      "status": "candidate",
+      "confidence": 0.98,
+      "source_refs": [
+        {
+          "source": "Source 1 Slack export, #jobs",
+          "quote": "Leo or Dana must confirm imported records before they become official.",
+          "date": "2026-06-22"
+        }
+      ],
+      "target_payload": {
+        "policy_name": "Candidate record confirmation",
+        "applies_to": "Imported opportunities and work items",
+        "required_confirmers": [
+          "Leo Tran",
+          "Dana Mills"
+        ],
+        "official_record_rule": "A candidate record is not official until Leo or Dana confirms it."
+      },
+      "review_questions": [
+        "Should either Leo or Dana be allowed to confirm every imported record, or should confirmation depend on the opportunity owner?"
+      ]
+    },
+    {
+      "id": "policy_candidate_sources_for_rye_pilot",
+      "type": "source_policy",
+      "statement": "Rye should build candidate opportunities and work items from Slack, emails, the lead sheet, the job board, and the deposit sheet.",
+      "status": "candidate",
+      "confidence": 0.96,
+      "source_refs": [
+        {
+          "source": "Source 1 Slack export, #jobs",
+          "quote": "Build candidate opportunities and work items from Slack, emails, lead sheet, job board, and deposit sheet.",
+          "date": "2026-06-22"
+        }
+      ],
+      "target_payload": {
+        "policy_name": "Rye intake sources",
+        "authorized_candidate_sources": [
+          "Slack",
+          "Email threads",
+          "Lead sheet",
+          "Job board",
+          "Deposit sheet"
+        ],
+        "business_scope": [
+          "Opportunities",
+          "Work items"
+        ]
+      },
+      "review_questions": [
+        "Should staff role roster entries also be imported as candidate people records?"
+      ]
+    },
+    {
+      "id": "future_rye_primary_status_system_start_2026_07_08",
+      "type": "future_change",
+      "statement": "Starting July 8, 2026, if the pilot works, Rye should become the first place Millbrook checks for opportunity status, next customer action, task status, and milestone status.",
+      "status": "candidate",
+      "confidence": 0.94,
+      "source_refs": [
+        {
+          "source": "Source 1 Slack export, #jobs",
+          "quote": "Starting July 8, Rye should be the first place for status if the pilot works.",
+          "date": "2026-06-22"
+        }
+      ],
+      "target_payload": {
+        "effective_date": "2026-07-08",
+        "condition": "Pilot works",
+        "new_primary_system": "Rye",
+        "primary_for": [
+          "Opportunity status",
+          "Next customer action",
+          "Task status",
+          "Milestone status"
+        ],
+        "sheets_role_after_change": "Import staging and backup evidence"
+      },
+      "review_questions": [
+        "What business test determines whether the Rye pilot worked by July 8, 2026?"
+      ]
+    },
+    {
+      "id": "person_dana_mills_owner_sales_lead",
+      "type": "person",
+      "statement": "Dana Mills is Millbrook's owner and sales lead for complex feasibility jobs, and she currently owns the Vale ADU qualification until the City gives a feasibility answer.",
+      "status": "candidate",
+      "confidence": 0.98,
+      "source_refs": [
+        {
+          "source": "Source 7 Millbrook role roster",
+          "quote": "Owner and sales lead for complex feasibility jobs.",
+          "date": "2026-06-22"
+        },
+        {
+          "source": "Source 1 Slack export, #jobs",
+          "quote": "I own it until City gives us a clear feasibility answer.",
+          "date": "2026-06-19"
+        }
+      ],
+      "target_payload": {
+        "person_name": "Dana Mills",
+        "role": "Owner and sales lead for complex feasibility jobs",
+        "current_work_ownership": [
+          "Vale ADU feasibility qualification",
+          "Rye pilot source policy"
+        ]
+      },
+      "review_questions": []
+    },
+    {
+      "id": "person_leo_tran_estimator_residential_sales",
+      "type": "person",
+      "statement": "Leo Tran is an estimator and residential sales lead who owns the Harper kitchen sales conversation and the Garza follow-up.",
+      "status": "candidate",
+      "confidence": 0.96,
+      "source_refs": [
+        {
+          "source": "Source 7 Millbrook role roster",
+          "quote": "Estimator and residential sales lead.",
+          "date": "2026-06-22"
+        },
+        {
+          "source": "Source 5 Leads & Job Board spreadsheet export",
+          "quote": "Harper and Garza rows list Leo Tran as owner.",
+          "date": "2026-06-22"
+        }
+      ],
+      "target_payload": {
+        "person_name": "Leo Tran",
+        "role": "Estimator and residential sales lead",
+        "current_work_ownership": [
+          "Harper Lane kitchen remodel",
+          "Garza deck replacement follow-up"
+        ]
+      },
+      "review_questions": []
+    },
+    {
+      "id": "person_clara_holt_designer_zoning_packets",
+      "type": "person",
+      "statement": "Clara Holt is Millbrook's designer and permit or zoning packet preparer, currently owning the Harper cabinet allowance revision and Vale zoning feasibility packet.",
+      "status": "candidate",
+      "confidence": 0.97,
+      "source_refs": [
+        {
+          "source": "Source 7 Millbrook role roster",
+          "quote": "Designer and permit/zoning packet preparer.",
+          "date": "2026-06-22"
+        },
+        {
+          "source": "Source 5 Leads & Job Board spreadsheet export",
+          "quote": "Clara owns Harper cabinet allowance revision and Vale zoning feasibility packet.",
+          "date": "2026-06-22"
+        }
+      ],
+      "target_payload": {
+        "person_name": "Clara Holt",
+        "role": "Designer and permit/zoning packet preparer",
+        "current_work_ownership": [
+          "Harper cabinet allowance revision",
+          "Vale zoning feasibility packet"
+        ]
+      },
+      "review_questions": []
+    },
+    {
+      "id": "person_mateo_ruiz_operations_site_estimator",
+      "type": "person",
+      "statement": "Mateo Ruiz is Millbrook's operations lead and site estimator, currently owning the Olson insurance-ready estimate and a conditional Harper demolition phasing plan.",
+      "status": "candidate",
+      "confidence": 0.97,
+      "source_refs": [
+        {
+          "source": "Source 7 Millbrook role roster",
+          "quote": "Operations lead and site estimator.",
+          "date": "2026-06-22"
+        },
+        {
+          "source": "Source 5 Leads & Job Board spreadsheet export",
+          "quote": "Mateo owns Olson estimate and Harper demolition phasing plan.",
+          "date": "2026-06-22"
+        }
+      ],
+      "target_payload": {
+        "person_name": "Mateo Ruiz",
+        "role": "Operations lead and site estimator",
+        "current_work_ownership": [
+          "Olson insurance-ready estimate",
+          "Harper demolition phasing plan"
+        ]
+      },
+      "review_questions": []
+    },
+    {
+      "id": "person_beth_chen_finance_deposits",
+      "type": "person",
+      "statement": "Beth Chen handles finance and deposits, and she controls whether Olson can move from tentative crew hold to schedule-locked work after deposit confirmation.",
+      "status": "candidate",
+      "confidence": 0.97,
+      "source_refs": [
+        {
+          "source": "Source 7 Millbrook role roster",
+          "quote": "Finance and deposits.",
+          "date": "2026-06-22"
+        },
+        {
+          "source": "Source 1 Slack export, #jobs",
+          "quote": "Only after Megan approves the estimate and deposit lands.",
+          "date": "2026-06-20"
+        }
+      ],
+      "target_payload": {
+        "person_name": "Beth Chen",
+        "role": "Finance and deposits",
+        "current_work_ownership": [
+          "Deposit confirmation",
+          "Olson July 8 crew hold"
+        ]
+      },
+      "review_questions": []
+    },
+    {
+      "id": "person_ian_brooks_lead_carpenter",
+      "type": "person",
+      "statement": "Ian Brooks is Millbrook's lead carpenter.",
+      "status": "candidate",
+      "confidence": 0.94,
+      "source_refs": [
+        {
+          "source": "Source 7 Millbrook role roster",
+          "quote": "Lead carpenter.",
+          "date": "2026-06-22"
+        }
+      ],
+      "target_payload": {
+        "person_name": "Ian Brooks",
+        "role": "Lead carpenter",
+        "current_work_ownership": []
+      },
+      "review_questions": [
+        "Should Ian Brooks be assigned to any of the current crew holds or upcoming jobs?"
+      ]
+    },
+    {
+      "id": "org_harper_lane_household_customer",
+      "type": "org",
+      "statement": "Harper Lane household is a kitchen remodel prospect represented by Sarah Nguyen.",
+      "status": "candidate",
+      "confidence": 0.94,
+      "source_refs": [
+        {
+          "source": "Source 5 Leads & Job Board spreadsheet export",
+          "quote": "Harper Lane household, Sarah Nguyen, Kitchen remodel.",
+          "date": "2026-06-22"
+        },
+        {
+          "source": "Source 2 Harper Lane kitchen remodel email thread",
+          "quote": "Sarah asked for revised Northstar maple allowance.",
+          "date": "2026-06-16"
+        }
+      ],
+      "target_payload": {
+        "organization_name": "Harper Lane household",
+        "primary_contact": "Sarah Nguyen",
+        "relationship": "Prospective renovation customer",
+        "related_opportunity": "Kitchen remodel"
+      },
+      "review_questions": [
+        "Is the customer account name exactly Harper Lane household or should it use Sarah Nguyen's household name?"
+      ]
+    },
+    {
+      "id": "org_vale_household_customer",
+      "type": "org",
+      "statement": "Vale household is a backyard ADU prospect represented by Chris Vale.",
+      "status": "candidate",
+      "confidence": 0.94,
+      "source_refs": [
+        {
+          "source": "Source 5 Leads & Job Board spreadsheet export",
+          "quote": "Vale household, Chris Vale, Backyard ADU.",
+          "date": "2026-06-22"
+        },
+        {
+          "source": "Source 3 Vale ADU feasibility email thread",
+          "quote": "Chris asked about a smaller detached ADU under 650 sqft.",
+          "date": "2026-06-18"
+        }
+      ],
+      "target_payload": {
+        "organization_name": "Vale household",
+        "primary_contact": "Chris Vale",
+        "relationship": "Prospective renovation customer",
+        "related_opportunity": "Backyard ADU"
+      },
+      "review_questions": []
+    },
+    {
+      "id": "org_olson_household_customer",
+      "type": "org",
+      "statement": "Olson household is a bathroom leak repair prospect represented by Megan Olson.",
+      "status": "candidate",
+      "confidence": 0.94,
+      "source_refs": [
+        {
+          "source": "Source 5 Leads & Job Board spreadsheet export",
+          "quote": "Olson household, Megan Olson, Bathroom leak repair.",
+          "date": "2026-06-22"
+        },
+        {
+          "source": "Source 4 Olson bathroom leak email thread",
+          "quote": "Megan requested an insurance-ready estimate by June 23.",
+          "date": "2026-06-20"
+        }
+      ],
+      "target_payload": {
+        "organization_name": "Olson household",
+        "primary_contact": "Megan Olson",
+        "relationship": "Prospective repair customer",
+        "related_opportunity": "Bathroom leak repair"
+      },
+      "review_questions": []
+    },
+    {
+      "id": "org_garza_household_customer",
+      "type": "org",
+      "statement": "Garza household is a deck replacement prospect represented by Tom Garza and should currently be nurtured rather than treated as closed lost.",
+      "status": "candidate",
+      "confidence": 0.91,
+      "source_refs": [
+        {
+          "source": "Source 1 Slack export, #jobs",
+          "quote": "Garza deck is not closed lost; treat as paused/nurture.",
+          "date": "2026-06-21"
+        },
+        {
+          "source": "Source 5 Leads & Job Board spreadsheet export",
+          "quote": "Garza household, Tom Garza, Deck replacement.",
+          "date": "2026-06-22"
+        }
+      ],
+      "target_payload": {
+        "organization_name": "Garza household",
+        "primary_contact": "Tom Garza",
+        "relationship": "Prospective renovation customer",
+        "related_opportunity": "Deck replacement",
+        "current_relationship_status": "Paused/nurture"
+      },
+      "review_questions": [
+        "Should Garza remain in active pipeline with a nurture stage, or should it be tracked separately from active sales?"
+      ]
+    },
+    {
+      "id": "org_northstar_cabinet_vendor",
+      "type": "org",
+      "statement": "Northstar is the cabinet vendor whose written maple cabinet quote is needed before Harper's revised allowance can be finalized.",
+      "status": "candidate",
+      "confidence": 0.9,
+      "source_refs": [
+        {
+          "source": "Source 1 Slack export, #jobs",
+          "quote": "Northstar gave a verbal range; written quote needed before final.",
+          "date": "2026-06-17"
+        },
+        {
+          "source": "Source 2 Harper Lane kitchen remodel email thread",
+          "quote": "Revised Northstar maple allowance depends on written quote.",
+          "date": "2026-06-17"
+        }
+      ],
+      "target_payload": {
+        "organization_name": "Northstar",
+        "relationship": "Cabinet vendor or supplier",
+        "related_opportunity": "Harper Lane kitchen remodel",
+        "needed_item": "Written quote for Northstar maple cabinet allowance"
+      },
+      "review_questions": [
+        "What is Northstar's full vendor name and contact person?"
+      ]
+    },
+    {
+      "id": "org_city_of_millbrook_zoning_authority",
+      "type": "org",
+      "statement": "City of Millbrook is the zoning authority whose feasibility answer controls whether Vale's detached ADU can move from qualification to proposal.",
+      "status": "candidate",
+      "confidence": 0.91,
+      "source_refs": [
+        {
+          "source": "Source 3 Vale ADU feasibility email thread",
+          "quote": "Keeping this as feasibility until we hear from the City of Millbrook.",
+          "date": "2026-06-19"
+        },
+        {
+          "source": "Source 1 Slack export, #jobs",
+          "quote": "City answer is the blocker before we quote.",
+          "date": "2026-06-19"
+        }
+      ],
+      "target_payload": {
+        "organization_name": "City of Millbrook",
+        "relationship": "Municipal zoning authority",
+        "related_opportunity": "Vale backyard ADU",
+        "needed_item": "Feasibility answer for detached ADU under 650 sqft"
+      },
+      "review_questions": [
+        "Who at the City of Millbrook should be recorded as the zoning contact?"
+      ]
+    },
+    {
+      "id": "opportunity_harper_kitchen_remodel_proposal_sent",
+      "type": "opportunity",
+      "statement": "Harper Lane kitchen remodel is at proposal sent, owned by Leo Tran, with a working value of $44,800 and 65% probability pending Sarah Nguyen's approval of the revised Northstar maple cabinet allowance.",
+      "status": "candidate",
+      "confidence": 0.92,
+      "source_refs": [
+        {
+          "source": "Source 1 Slack export, #jobs",
+          "quote": "Use $44,800 as the working value; probability 65%.",
+          "date": "2026-06-17"
+        },
+        {
+          "source": "Source 2 Harper Lane kitchen remodel email thread",
+          "quote": "Approval is pending the revised cabinet number.",
+          "date": "2026-06-17"
+        },
+        {
+          "source": "Source 6 Deposit Tracker spreadsheet export",
+          "quote": "Deposit depends on Sarah approving revised cabinet allowance.",
+          "date": "2026-06-22"
+        }
+      ],
+      "target_payload": {
+        "opportunity_name": "Harper Lane kitchen remodel",
+        "customer": "Harper Lane household",
+        "primary_contact": "Sarah Nguyen",
+        "owner": "Leo Tran",
+        "stage": "Proposal sent",
+        "working_value_usd": 44800,
+        "probability_percent": 65,
+        "next_customer_action": "Sarah reviews revised cabinet allowance and takes proposal to spouse.",
+        "current_blocker": "Written Northstar quote and revised allowance approval",
+        "deposit_expected_usd": 13440,
+        "deposit_received": false
+      },
+      "review_questions": [
+        "Confirm that $44,800 and 65% should replace the older $42,000 and 55% lead sheet values.",
+        "Should spouse approval be tracked as a separate stakeholder or just as Sarah's next action?"
+      ]
+    },
+    {
+      "id": "opportunity_vale_backyard_adu_qualification",
+      "type": "opportunity",
+      "statement": "Vale backyard ADU is in qualification, owned by Dana Mills, with a listed value of $96,000 and 35% probability until the City confirms whether a detached unit under 650 sqft avoids the longer variance process.",
+      "status": "candidate",
+      "confidence": 0.89,
+      "source_refs": [
+        {
+          "source": "Source 1 Slack export, #jobs",
+          "quote": "Treat this as qualification, not proposal.",
+          "date": "2026-06-19"
+        },
+        {
+          "source": "Source 3 Vale ADU feasibility email thread",
+          "quote": "Only proceed if the smaller detached option avoids a long variance fight.",
+          "date": "2026-06-18"
+        },
+        {
+          "source": "Source 5 Leads & Job Board spreadsheet export",
+          "quote": "Vale Backyard ADU, Qualification, value 96000, probability 35%.",
+          "date": "2026-06-22"
+        }
+      ],
+      "target_payload": {
+        "opportunity_name": "Vale backyard ADU",
+        "customer": "Vale household",
+        "primary_contact": "Chris Vale",
+        "owner": "Dana Mills",
+        "stage": "Qualification",
+        "working_value_usd": 96000,
+        "probability_percent": 35,
+        "current_blocker": "City feasibility answer for detached ADU under 650 sqft",
+        "deposit_expected_usd": null,
+        "deposit_received": false
+      },
+      "review_questions": [
+        "Should the $96,000 value remain active while feasibility is unresolved?",
+        "What probability should be used if the City gives a positive feasibility answer?"
+      ]
+    },
+    {
+      "id": "opportunity_olson_bathroom_leak_site_survey_completed",
+      "type": "opportunity",
+      "statement": "Olson bathroom leak repair has completed site survey, is owned by Mateo Ruiz, is likely around $8,400, and needs an insurance-ready estimate before Megan Olson can approve and send the deposit.",
+      "status": "candidate",
+      "confidence": 0.91,
+      "source_refs": [
+        {
+          "source": "Source 1 Slack export, #jobs",
+          "quote": "Site survey completed. Small repair, likely $8.4k.",
+          "date": "2026-06-20"
+        },
+        {
+          "source": "Source 4 Olson bathroom leak email thread",
+          "quote": "If around $8,400 and adjuster agrees, I can approve and send deposit.",
+          "date": "2026-06-20"
+        },
+        {
+          "source": "Source 5 Leads & Job Board spreadsheet export",
+          "quote": "Olson Bathroom leak repair, Site survey completed, 8400, 75%.",
+          "date": "2026-06-22"
+        }
+      ],
+      "target_payload": {
+        "opportunity_name": "Olson bathroom leak repair",
+        "customer": "Olson household",
+        "primary_contact": "Megan Olson",
+        "owner": "Mateo Ruiz",
+        "stage": "Site survey completed",
+        "working_value_usd": 8400,
+        "probability_percent": 75,
+        "next_customer_action": "Megan and adjuster review insurance-ready estimate.",
+        "deposit_expected_usd": 2520,
+        "deposit_received": false
+      },
+      "review_questions": [
+        "Should Olson move to booked automatically after approval and deposit, or require manual confirmation by Beth?"
+      ]
+    },
+    {
+      "id": "opportunity_garza_deck_paused_nurture",
+      "type": "opportunity",
+      "statement": "Garza deck replacement should be treated as paused or nurture rather than closed lost, because Tom Garza said August may work but he is not ready now.",
+      "status": "candidate",
+      "confidence": 0.9,
+      "source_refs": [
+        {
+          "source": "Source 1 Slack export, #jobs",
+          "quote": "Not closed lost; August may work; treat as paused/nurture.",
+          "date": "2026-06-21"
+        },
+        {
+          "source": "Source 5 Leads & Job Board spreadsheet export",
+          "quote": "Lead sheet still lists Closed lost, value 18000, probability 0%.",
+          "date": "2026-06-22"
+        }
+      ],
+      "target_payload": {
+        "opportunity_name": "Garza deck replacement",
+        "customer": "Garza household",
+        "primary_contact": "Tom Garza",
+        "owner": "Leo Tran",
+        "stage": "Paused/nurture",
+        "listed_value_usd": 18000,
+        "probability_percent": null,
+        "next_customer_action": "Respond to July 15 follow-up about whether August timing is real.",
+        "do_not_use_closed_lost_status": true
+      },
+      "review_questions": [
+        "What probability should Garza use while paused or in nurture?",
+        "Should the $18,000 listed value remain attached to the paused opportunity?"
+      ]
+    },
+    {
+      "id": "task_harper_cabinet_allowance_revision",
+      "type": "task",
+      "statement": "Clara Holt needs to revise the Harper Northstar maple cabinet allowance by June 24, 2026, after receiving Northstar's written quote.",
+      "status": "candidate",
+      "confidence": 0.97,
+      "source_refs": [
+        {
+          "source": "Source 1 Slack export, #jobs",
+          "quote": "I can revise Harper cabinet allowance by Tue 6/24.",
+          "date": "2026-06-17"
+        },
+        {
+          "source": "Source 5 Leads & Job Board spreadsheet export",
+          "quote": "Harper cabinet allowance revision, Clara Holt, In progress, due 2026-06-24.",
+          "date": "2026-06-22"
+        }
+      ],
+      "target_payload": {
+        "task_name": "Harper cabinet allowance revision",
+        "customer": "Harper Lane household",
+        "owner": "Clara Holt",
+        "status": "In progress",
+        "due_date": "2026-06-24",
+        "dependency": "Northstar written quote",
+        "related_opportunity": "Harper Lane kitchen remodel"
+      },
+      "review_questions": [
+        "Should this task remain in progress until Northstar's written quote is received or until the revised proposal page is sent?"
+      ]
+    },
+    {
+      "id": "task_harper_clean_proposal_page",
+      "type": "task",
+      "statement": "Leo Tran needs to send Sarah Nguyen a clean Harper proposal page after Clara gets the written Northstar quote.",
+      "status": "candidate",
+      "confidence": 0.87,
+      "source_refs": [
+        {
+          "source": "Source 2 Harper Lane kitchen remodel email thread",
+          "quote": "After Clara gets the written quote, I will send a clean proposal page.",
+          "date": "2026-06-17"
+        }
+      ],
+      "target_payload": {
+        "task_name": "Send Harper clean proposal page",
+        "customer": "Harper Lane household",
+        "owner": "Leo Tran",
+        "status": "To do",
+        "due_date": "2026-06-24",
+        "dependency": "Clara receives Northstar written quote and revises allowance",
+        "related_opportunity": "Harper Lane kitchen remodel"
+      },
+      "review_questions": [
+        "Should this be a separate Leo task or part of Clara's cabinet allowance revision work item?"
+      ]
+    },
+    {
+      "id": "task_harper_demolition_phasing_plan",
+      "type": "task",
+      "statement": "Mateo Ruiz needs to draft a Harper demolition phasing plan by June 26, 2026, but only if the revised proposal is approved.",
+      "status": "candidate",
+      "confidence": 0.92,
+      "source_refs": [
+        {
+          "source": "Source 1 Slack export, #jobs",
+          "quote": "If they approve this week, I can draft the phasing plan by Fri 6/26.",
+          "date": "2026-06-18"
+        },
+        {
+          "source": "Source 5 Leads & Job Board spreadsheet export",
+          "quote": "Only needed if revised proposal is approved.",
+          "date": "2026-06-22"
+        }
+      ],
+      "target_payload": {
+        "task_name": "Harper demolition phasing plan",
+        "customer": "Harper Lane household",
+        "owner": "Mateo Ruiz",
+        "status": "To do",
+        "due_date": "2026-06-26",
+        "condition": "Revised proposal is approved",
+        "related_opportunity": "Harper Lane kitchen remodel"
+      },
+      "review_questions": [
+        "Should the task be hidden until approval or visible now with a conditional status?"
+      ]
+    },
+    {
+      "id": "task_vale_zoning_feasibility_packet",
+      "type": "task",
+      "statement": "Clara Holt needs to prepare the Vale zoning feasibility packet by June 26, 2026, so Millbrook can get the City answer before quoting.",
+      "status": "candidate",
+      "confidence": 0.96,
+      "source_refs": [
+        {
+          "source": "Source 1 Slack export, #jobs",
+          "quote": "I can prep the zoning feasibility packet for Vale by 6/26.",
+          "date": "2026-06-19"
+        },
+        {
+          "source": "Source 5 Leads & Job Board spreadsheet export",
+          "quote": "Vale zoning feasibility packet, Clara Holt, To do, due 2026-06-26.",
+          "date": "2026-06-22"
+        }
+      ],
+      "target_payload": {
+        "task_name": "Vale zoning feasibility packet",
+        "customer": "Vale household",
+        "owner": "Clara Holt",
+        "status": "To do",
+        "due_date": "2026-06-26",
+        "dependency": "City answer needed before proposal",
+        "related_opportunity": "Vale backyard ADU"
+      },
+      "review_questions": []
+    },
+    {
+      "id": "task_vale_city_feasibility_answer",
+      "type": "task",
+      "statement": "Dana Mills needs a clear City feasibility answer for Vale before Millbrook quotes the ADU.",
+      "status": "candidate",
+      "confidence": 0.9,
+      "source_refs": [
+        {
+          "source": "Source 1 Slack export, #jobs",
+          "quote": "I own it until City gives us a clear feasibility answer.",
+          "date": "2026-06-19"
+        },
+        {
+          "source": "Source 3 Vale ADU feasibility email thread",
+          "quote": "Keeping this as feasibility/qualification until we hear from the City.",
+          "date": "2026-06-19"
+        }
+      ],
+      "target_payload": {
+        "task_name": "Get Vale City feasibility answer",
+        "customer": "Vale household",
+        "owner": "Dana Mills",
+        "status": "Waiting on external answer",
+        "due_date": null,
+        "external_party": "City of Millbrook",
+        "related_opportunity": "Vale backyard ADU"
+      },
+      "review_questions": [
+        "Who is responsible for submitting the packet to the City after Clara prepares it?",
+        "Is there a target date for the City response?"
+      ]
+    },
+    {
+      "id": "task_olson_insurance_ready_estimate",
+      "type": "task",
+      "statement": "Mateo Ruiz needs to send Megan Olson an insurance-ready estimate by June 23, 2026.",
+      "status": "candidate",
+      "confidence": 0.98,
+      "source_refs": [
+        {
+          "source": "Source 1 Slack export, #jobs",
+          "quote": "Megan wants an insurance-ready estimate by Tue 6/23.",
+          "date": "2026-06-20"
+        },
+        {
+          "source": "Source 4 Olson bathroom leak email thread",
+          "quote": "I will send the insurance-ready estimate by June 23.",
+          "date": "2026-06-20"
+        },
+        {
+          "source": "Source 5 Leads & Job Board spreadsheet export",
+          "quote": "Olson insurance-ready estimate, Mateo Ruiz, To do, due 2026-06-23.",
+          "date": "2026-06-22"
+        }
+      ],
+      "target_payload": {
+        "task_name": "Olson insurance-ready estimate",
+        "customer": "Olson household",
+        "owner": "Mateo Ruiz",
+        "status": "To do",
+        "due_date": "2026-06-23",
+        "needed_for": "Megan Olson and insurance adjuster review",
+        "related_opportunity": "Olson bathroom leak repair"
+      },
+      "review_questions": []
+    },
+    {
+      "id": "task_olson_deposit_confirmation",
+      "type": "task",
+      "statement": "Beth Chen needs to confirm Olson's deposit before the job can be converted to booked or the July 8 crew window can be schedule locked.",
+      "status": "candidate",
+      "confidence": 0.88,
+      "source_refs": [
+        {
+          "source": "Source 4 Olson bathroom leak email thread",
+          "quote": "If you approve it and Beth confirms the deposit, we can convert the job to booked on June 25.",
+          "date": "2026-06-20"
+        },
+        {
+          "source": "Source 6 Deposit Tracker spreadsheet export",
+          "quote": "Olson amount expected 2520, deposit received No.",
+          "date": "2026-06-22"
+        }
+      ],
+      "target_payload": {
+        "task_name": "Confirm Olson deposit",
+        "customer": "Olson household",
+        "owner": "Beth Chen",
+        "status": "Blocked until customer approval and payment",
+        "due_date": "2026-06-25",
+        "deposit_expected_usd": 2520,
+        "related_opportunity": "Olson bathroom leak repair"
+      },
+      "review_questions": [
+        "Is June 25, 2026 the due date for deposit confirmation or only the target booked date?"
+      ]
+    },
+    {
+      "id": "task_olson_july_8_crew_hold",
+      "type": "task",
+      "statement": "Beth Chen can tentatively hold the July 8 Olson crew window, but the schedule should not be locked until Megan approves the estimate and the deposit lands.",
+      "status": "candidate",
+      "confidence": 0.93,
+      "source_refs": [
+        {
+          "source": "Source 1 Slack export, #jobs",
+          "quote": "Tentatively hold the July 8 crew window, but only after Megan approves and deposit lands.",
+          "date": "2026-06-20"
+        },
+        {
+          "source": "Source 5 Leads & Job Board spreadsheet export",
+          "quote": "Olson July 8 crew hold, Beth Chen, Tentative, due 2026-06-25.",
+          "date": "2026-06-22"
+        }
+      ],
+      "target_payload": {
+        "task_name": "Olson July 8 crew hold",
+        "customer": "Olson household",
+        "owner": "Beth Chen",
+        "status": "Tentative",
+        "due_date": "2026-06-25",
+        "crew_window_date": "2026-07-08",
+        "lock_conditions": [
+          "Megan Olson approves the estimate",
+          "Deposit is received"
+        ],
+        "related_opportunity": "Olson bathroom leak repair"
+      },
+      "review_questions": [
+        "Does the crew hold exist now as tentative, or should it only be created after approval and deposit?"
+      ]
+    },
+    {
+      "id": "task_garza_july_15_follow_up",
+      "type": "task",
+      "statement": "Leo Tran should follow up with Tom Garza on July 15, 2026, to ask whether August timing for the deck replacement is real.",
+      "status": "candidate",
+      "confidence": 0.97,
+      "source_refs": [
+        {
+          "source": "Source 1 Slack export, #jobs",
+          "quote": "Treat as paused/nurture and ping him July 15.",
+          "date": "2026-06-21"
+        },
+        {
+          "source": "Source 5 Leads & Job Board spreadsheet export",
+          "quote": "Garza July follow-up, Leo Tran, To do, due 2026-07-15.",
+          "date": "2026-06-22"
+        }
+      ],
+      "target_payload": {
+        "task_name": "Garza July follow-up",
+        "customer": "Garza household",
+        "owner": "Leo Tran",
+        "status": "To do",
+        "due_date": "2026-07-15",
+        "follow_up_topic": "Whether August deck replacement timing is real",
+        "related_opportunity": "Garza deck replacement"
+      },
+      "review_questions": []
+    },
+    {
+      "id": "milestone_harper_contract_review_2026_06_27",
+      "type": "milestone",
+      "statement": "Harper can move into contract review on June 27, 2026, if Sarah approves the revised cabinet allowance.",
+      "status": "candidate",
+      "confidence": 0.91,
+      "source_refs": [
+        {
+          "source": "Source 2 Harper Lane kitchen remodel email thread",
+          "quote": "If you approve that revision, we can move into contract review on Friday, June 27.",
+          "date": "2026-06-17"
+        }
+      ],
+      "target_payload": {
+        "milestone_name": "Harper contract review",
+        "customer": "Harper Lane household",
+        "target_date": "2026-06-27",
+        "condition": "Sarah approves revised cabinet allowance",
+        "related_opportunity": "Harper Lane kitchen remodel"
+      },
+      "review_questions": [
+        "Who owns the Harper contract review milestone once it is triggered?"
+      ]
+    },
+    {
+      "id": "milestone_vale_proposal_target_2026_07_05",
+      "type": "milestone",
+      "statement": "Vale can target proposal delivery on July 5, 2026, if the City confirms the detached ADU is feasible.",
+      "status": "candidate",
+      "confidence": 0.89,
+      "source_refs": [
+        {
+          "source": "Source 3 Vale ADU feasibility email thread",
+          "quote": "If the City confirms feasible, aim to send a proposal on July 5.",
+          "date": "2026-06-19"
+        }
+      ],
+      "target_payload": {
+        "milestone_name": "Vale proposal target",
+        "customer": "Vale household",
+        "target_date": "2026-07-05",
+        "condition": "City confirms detached ADU feasibility",
+        "related_opportunity": "Vale backyard ADU"
+      },
+      "review_questions": [
+        "Should July 5 be treated as a customer commitment or an internal target?"
+      ]
+    },
+    {
+      "id": "milestone_olson_booked_target_2026_06_25",
+      "type": "milestone",
+      "statement": "Olson can convert to booked on June 25, 2026, if Megan approves the insurance-ready estimate and Beth confirms the deposit.",
+      "status": "candidate",
+      "confidence": 0.91,
+      "source_refs": [
+        {
+          "source": "Source 4 Olson bathroom leak email thread",
+          "quote": "If you approve it and Beth confirms the deposit, we can convert the job to booked on June 25.",
+          "date": "2026-06-20"
+        }
+      ],
+      "target_payload": {
+        "milestone_name": "Olson booked conversion",
+        "customer": "Olson household",
+        "target_date": "2026-06-25",
+        "conditions": [
+          "Megan approves estimate",
+          "Beth confirms deposit"
+        ],
+        "related_opportunity": "Olson bathroom leak repair"
+      },
+      "review_questions": []
+    },
+    {
+      "id": "milestone_olson_crew_window_2026_07_08",
+      "type": "milestone",
+      "statement": "Olson has a tentative July 8, 2026 crew window that should only become locked after estimate approval and deposit receipt.",
+      "status": "candidate",
+      "confidence": 0.9,
+      "source_refs": [
+        {
+          "source": "Source 4 Olson bathroom leak email thread",
+          "quote": "We can convert the job to booked on June 25 and hold July 8 for the crew.",
+          "date": "2026-06-20"
+        },
+        {
+          "source": "Source 1 Slack export, #jobs",
+          "quote": "Olson should not be schedule locked yet.",
+          "date": "2026-06-20"
+        }
+      ],
+      "target_payload": {
+        "milestone_name": "Olson crew window",
+        "customer": "Olson household",
+        "target_date": "2026-07-08",
+        "status": "Tentative",
+        "lock_conditions": [
+          "Estimate approved",
+          "Deposit received"
+        ],
+        "related_opportunity": "Olson bathroom leak repair"
+      },
+      "review_questions": [
+        "Should tentative crew windows appear on the same schedule as locked jobs?"
+      ]
+    },
+    {
+      "id": "decision_harper_use_44800_and_65_probability",
+      "type": "decision",
+      "statement": "For Harper, Millbrook should use $44,800 as the working value and 65% as the probability, not the older 55% row.",
+      "status": "candidate",
+      "confidence": 0.97,
+      "source_refs": [
+        {
+          "source": "Source 1 Slack export, #jobs",
+          "quote": "Use $44,800 as working value; probability 65%; do not use old 55% row.",
+          "date": "2026-06-17"
+        }
+      ],
+      "target_payload": {
+        "decision_name": "Harper working value and probability",
+        "customer": "Harper Lane household",
+        "working_value_usd": 44800,
+        "probability_percent": 65,
+        "superseded_values": {
+          "working_value_usd": 42000,
+          "probability_percent": 55
+        },
+        "reason": "Northstar maple cabinet allowance pushed the number above the old sheet row."
+      },
+      "review_questions": [
+        "Should the lead sheet be updated immediately after confirmation?"
+      ]
+    },
+    {
+      "id": "decision_vale_remains_qualification_until_city_answer",
+      "type": "decision",
+      "statement": "Vale ADU must remain in feasibility or qualification and should not be treated as a proposal until the City gives a clear answer.",
+      "status": "candidate",
+      "confidence": 0.97,
+      "source_refs": [
+        {
+          "source": "Source 1 Slack export, #jobs",
+          "quote": "Treat this as qualification, not proposal.",
+          "date": "2026-06-19"
+        },
+        {
+          "source": "Source 3 Vale ADU feasibility email thread",
+          "quote": "Keeping this as feasibility/qualification until we hear from the City.",
+          "date": "2026-06-19"
+        }
+      ],
+      "target_payload": {
+        "decision_name": "Vale qualification gate",
+        "customer": "Vale household",
+        "current_stage": "Qualification",
+        "proposal_allowed": false,
+        "gate_to_proposal": "City confirms detached ADU feasibility"
+      },
+      "review_questions": []
+    },
+    {
+      "id": "decision_olson_do_not_schedule_lock_without_deposit",
+      "type": "decision",
+      "statement": "Olson should not be schedule locked until Megan approves the estimate and the deposit lands.",
+      "status": "candidate",
+      "confidence": 0.97,
+      "source_refs": [
+        {
+          "source": "Source 1 Slack export, #jobs",
+          "quote": "Olson should not be schedule locked yet.",
+          "date": "2026-06-20"
+        },
+        {
+          "source": "Source 6 Deposit Tracker spreadsheet export",
+          "quote": "Deposit received No; Beth says July 8 is tentative only.",
+          "date": "2026-06-22"
+        }
+      ],
+      "target_payload": {
+        "decision_name": "Olson schedule lock gate",
+        "customer": "Olson household",
+        "schedule_locked": false,
+        "lock_conditions": [
+          "Megan approves estimate",
+          "Deposit lands"
+        ]
+      },
+      "review_questions": []
+    },
+    {
+      "id": "decision_garza_paused_not_closed_lost",
+      "type": "decision",
+      "statement": "Garza deck replacement should be paused or nurtured instead of marked closed lost.",
+      "status": "candidate",
+      "confidence": 0.96,
+      "source_refs": [
+        {
+          "source": "Source 1 Slack export, #jobs",
+          "quote": "Garza deck is not closed lost.",
+          "date": "2026-06-21"
+        },
+        {
+          "source": "Source 5 Leads & Job Board spreadsheet export",
+          "quote": "Lead sheet says Closed lost, probability 0%.",
+          "date": "2026-06-22"
+        }
+      ],
+      "target_payload": {
+        "decision_name": "Garza active nurture status",
+        "customer": "Garza household",
+        "current_stage": "Paused/nurture",
+        "closed_lost": false,
+        "next_follow_up_date": "2026-07-15"
+      },
+      "review_questions": [
+        "What exact stage name should replace Closed lost for Garza?"
+      ]
+    },
+    {
+      "id": "risk_harper_cabinet_allowance_approval_blocker",
+      "type": "risk",
+      "statement": "Harper approval is at risk until Northstar provides a written quote and Sarah is comfortable with the revised cabinet allowance.",
+      "status": "candidate",
+      "confidence": 0.93,
+      "source_refs": [
+        {
+          "source": "Source 1 Slack export, #jobs",
+          "quote": "Need the written quote before final; probability 65% if Sarah is comfortable.",
+          "date": "2026-06-17"
+        },
+        {
+          "source": "Source 2 Harper Lane kitchen remodel email thread",
+          "quote": "Cabinet allowance is my only open concern.",
+          "date": "2026-06-16"
+        }
+      ],
+      "target_payload": {
+        "risk_name": "Harper cabinet allowance approval risk",
+        "customer": "Harper Lane household",
+        "risk_driver": "Cabinet allowance may exceed Sarah's comfort level",
+        "mitigation": "Get Northstar written quote and send clean revised proposal page"
+      },
+      "review_questions": [
+        "Is there a maximum total price Sarah expects Millbrook to stay near?"
+      ]
+    },
+    {
+      "id": "risk_harper_demo_phasing_needed_before_signing",
+      "type": "risk",
+      "statement": "Harper needs a demolition phasing plan before Millbrook signs anything.",
+      "status": "candidate",
+      "confidence": 0.88,
+      "source_refs": [
+        {
+          "source": "Source 1 Slack export, #jobs",
+          "quote": "Harper demo phasing needs a plan before we sign anything.",
+          "date": "2026-06-18"
+        }
+      ],
+      "target_payload": {
+        "risk_name": "Harper demo phasing signing blocker",
+        "customer": "Harper Lane household",
+        "risk_driver": "No demolition phasing plan yet",
+        "mitigation": "Mateo drafts phasing plan by June 26 if revised proposal is approved"
+      },
+      "review_questions": [
+        "Should contract review be blocked until the phasing plan is ready?"
+      ]
+    },
+    {
+      "id": "risk_vale_city_variance_feasibility",
+      "type": "risk",
+      "statement": "Vale may not proceed if the smaller detached ADU option does not avoid a long variance process.",
+      "status": "candidate",
+      "confidence": 0.94,
+      "source_refs": [
+        {
+          "source": "Source 3 Vale ADU feasibility email thread",
+          "quote": "Only want to proceed if the smaller detached option avoids a long variance fight.",
+          "date": "2026-06-18"
+        },
+        {
+          "source": "Source 1 Slack export, #jobs",
+          "quote": "City answer is the blocker before we quote.",
+          "date": "2026-06-19"
+        }
+      ],
+      "target_payload": {
+        "risk_name": "Vale variance process risk",
+        "customer": "Vale household",
+        "risk_driver": "Detached ADU under 650 sqft may still require a longer variance process",
+        "mitigation": "Prepare zoning questions and wait for City feasibility answer before quoting"
+      },
+      "review_questions": []
+    },
+    {
+      "id": "risk_olson_adjuster_deposit_schedule_gate",
+      "type": "risk",
+      "statement": "Olson booking and crew scheduling are at risk until the insurance adjuster agrees, Megan approves, and the deposit is received.",
+      "status": "candidate",
+      "confidence": 0.92,
+      "source_refs": [
+        {
+          "source": "Source 4 Olson bathroom leak email thread",
+          "quote": "If the adjuster agrees, I can approve and send the deposit quickly.",
+          "date": "2026-06-20"
+        },
+        {
+          "source": "Source 1 Slack export, #jobs",
+          "quote": "Only after Megan approves the estimate and deposit lands.",
+          "date": "2026-06-20"
+        }
+      ],
+      "target_payload": {
+        "risk_name": "Olson adjuster and deposit gate",
+        "customer": "Olson household",
+        "risk_driver": "Insurance adjuster approval and deposit are not complete",
+        "mitigation": "Send insurance-ready estimate by June 23 and confirm deposit before booking"
+      },
+      "review_questions": [
+        "Should the adjuster be added as a stakeholder if Megan provides the name?"
+      ]
+    },
+    {
+      "id": "conflict_harper_sheet_stale_value_probability",
+      "type": "conflict",
+      "statement": "The Harper lead sheet still shows $42,000 and 55%, but Dana Mills instructed staff to use $44,800 and 65% after the cabinet change.",
+      "status": "candidate",
+      "confidence": 0.97,
+      "source_refs": [
+        {
+          "source": "Source 5 Leads & Job Board spreadsheet export",
+          "quote": "Harper row shows value 42000 and probability 55%.",
+          "date": "2026-06-22"
+        },
+        {
+          "source": "Source 1 Slack export, #jobs",
+          "quote": "Use $44,800; probability 65%; do not use old 55% row.",
+          "date": "2026-06-17"
+        }
+      ],
+      "target_payload": {
+        "conflict_name": "Harper stale lead sheet value and probability",
+        "older_record": {
+          "source": "Lead sheet",
+          "value_usd": 42000,
+          "probability_percent": 55
+        },
+        "newer_instruction": {
+          "source": "Dana Slack message",
+          "value_usd": 44800,
+          "probability_percent": 65
+        },
+        "recommended_candidate_value": {
+          "value_usd": 44800,
+          "probability_percent": 65
+        }
+      },
+      "review_questions": [
+        "Confirm that Dana's Slack instruction supersedes the sheet row for Harper."
+      ]
+    },
+    {
+      "id": "conflict_garza_closed_lost_vs_paused_nurture",
+      "type": "conflict",
+      "statement": "The Garza lead sheet says closed lost with 0% probability, but Leo Tran said Garza is not closed lost and should be paused or nurtured.",
+      "status": "candidate",
+      "confidence": 0.96,
+      "source_refs": [
+        {
+          "source": "Source 5 Leads & Job Board spreadsheet export",
+          "quote": "Garza row says Closed lost and probability 0%.",
+          "date": "2026-06-22"
+        },
+        {
+          "source": "Source 1 Slack export, #jobs",
+          "quote": "Garza deck is not closed lost; treat as paused/nurture.",
+          "date": "2026-06-21"
+        }
+      ],
+      "target_payload": {
+        "conflict_name": "Garza closed lost versus paused nurture",
+        "sheet_status": "Closed lost",
+        "sheet_probability_percent": 0,
+        "newer_status_instruction": "Paused/nurture",
+        "recommended_candidate_status": "Paused/nurture"
+      },
+      "review_questions": [
+        "Confirm that Garza should be reopened or reclassified from Closed lost."
+      ]
+    },
+    {
+      "id": "conflict_olson_crew_hold_checked_vs_tentative",
+      "type": "conflict",
+      "statement": "The Olson deposit tracker marks crew hold as 'Checked?' while Slack and email say the July 8 crew window is tentative and should not be schedule locked until approval and deposit receipt.",
+      "status": "candidate",
+      "confidence": 0.82,
+      "source_refs": [
+        {
+          "source": "Source 6 Deposit Tracker spreadsheet export",
+          "quote": "Olson crew hold: Checked?",
+          "date": "2026-06-22"
+        },
+        {
+          "source": "Source 1 Slack export, #jobs",
+          "quote": "Olson should not be schedule locked yet.",
+          "date": "2026-06-20"
+        },
+        {
+          "source": "Source 5 Leads & Job Board spreadsheet export",
+          "quote": "Olson July 8 crew hold, Tentative.",
+          "date": "2026-06-22"
+        }
+      ],
+      "target_payload": {
+        "conflict_name": "Olson crew hold ambiguity",
+        "deposit_tracker_crew_hold": "Checked?",
+        "workboard_status": "Tentative",
+        "schedule_lock_instruction": "Do not schedule lock until Megan approves and deposit lands",
+        "recommended_candidate_status": "Tentative"
+      },
+      "review_questions": [
+        "What does 'Checked?' mean in the deposit tracker for Olson?",
+        "Should the crew hold be considered tentatively placed or only requested?"
+      ]
+    }
+  ],
+  "observed_conflicts": [
+    {
+      "id": "conflict_harper_sheet_stale_value_probability",
+      "summary": "Harper lead sheet has stale value and probability.",
+      "source_a": {
+        "source": "Source 5 Leads & Job Board spreadsheet export",
+        "date": "2026-06-22",
+        "claim": "Harper value is $42,000 and probability is 55%."
+      },
+      "source_b": {
+        "source": "Source 1 Slack export, #jobs",
+        "date": "2026-06-17",
+        "claim": "Dana says use $44,800 and 65%, and do not use the old 55% row."
+      },
+      "recommended_handling": "Import $44,800 and 65% as candidate values, but ask Leo or Dana to confirm before making official."
+    },
+    {
+      "id": "conflict_garza_closed_lost_vs_paused_nurture",
+      "summary": "Garza lead sheet says closed lost, while newer Slack says paused/nurture.",
+      "source_a": {
+        "source": "Source 5 Leads & Job Board spreadsheet export",
+        "date": "2026-06-22",
+        "claim": "Garza stage is Closed lost with 0% probability."
+      },
+      "source_b": {
+        "source": "Source 1 Slack export, #jobs",
+        "date": "2026-06-21",
+        "claim": "Leo says Garza is not closed lost and should be paused/nurture."
+      },
+      "recommended_handling": "Import paused/nurture as a candidate status and ask Leo or Dana to confirm the official stage and probability."
+    },
+    {
+      "id": "conflict_olson_crew_hold_checked_vs_tentative",
+      "summary": "Olson crew hold status is ambiguous between the deposit tracker and work communications.",
+      "source_a": {
+        "source": "Source 6 Deposit Tracker spreadsheet export",
+        "date": "2026-06-22",
+        "claim": "Crew hold is marked 'Checked?'."
+      },
+      "source_b": {
+        "source": "Source 1 Slack export, #jobs and Source 5 Workboard",
+        "date": "2026-06-20",
+        "claim": "Beth says Olson should not be schedule locked, and the workboard lists the July 8 crew hold as Tentative."
+      },
+      "recommended_handling": "Use Tentative as the candidate crew hold status and ask what 'Checked?' means."
+    }
+  ],
+  "future_assertions": [
+    {
+      "id": "future_rye_primary_status_system_start_2026_07_08",
+      "statement": "Starting July 8, 2026, if the pilot works, Rye should be the first place to check opportunity status, next customer action, task status, and milestone status."
+    },
+    {
+      "id": "future_harper_contract_review_2026_06_27_if_approved",
+      "statement": "Harper can move into contract review on June 27, 2026 if Sarah approves the revised cabinet allowance."
+    },
+    {
+      "id": "future_vale_proposal_2026_07_05_if_city_confirms",
+      "statement": "Vale can target proposal delivery on July 5, 2026 if the City confirms the detached ADU is feasible."
+    },
+    {
+      "id": "future_olson_booked_2026_06_25_if_approved_deposit",
+      "statement": "Olson can convert to booked on June 25, 2026 if Megan approves the estimate and Beth confirms the deposit."
+    },
+    {
+      "id": "future_olson_crew_window_2026_07_08_if_locked",
+      "statement": "Olson can hold the July 8, 2026 crew window only after estimate approval and deposit receipt."
+    },
+    {
+      "id": "future_garza_follow_up_2026_07_15",
+      "statement": "Leo should follow up with Tom Garza on July 15, 2026 about whether August timing is real."
+    }
+  ],
+  "open_questions_for_sme": [
+    "Should Dana's Harper Slack instruction officially supersede the lead sheet value and probability after review?",
+    "What exact stage and probability should Garza use while paused or in nurture?",
+    "What does 'Checked?' mean for Olson's crew hold in the deposit tracker?",
+    "Should conditional work such as Harper demolition phasing be visible before the approval condition is met?",
+    "Who submits Vale's zoning packet to the City after Clara prepares it, and what target response date should be tracked?",
+    "What full vendor name and contact should be stored for Northstar?",
+    "Should spouse approval for Harper and adjuster agreement for Olson be tracked as separate stakeholders or only as notes?",
+    "What business criteria decide whether the Rye pilot has worked by July 8, 2026?"
+  ]
+}

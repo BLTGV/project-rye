@@ -1,0 +1,510 @@
+{
+  "scenario": "bluebird_bakes",
+  "reviewer": "SME simulation",
+  "decisions": [
+    {
+      "candidate_id": "crumbcrm-sales-truth",
+      "decision": "confirm",
+      "business_answer": "Yes. CrumbCRM is the current source of truth for sales stages and next sales actions.",
+      "corrected_statement": "",
+      "promotion_instruction": {
+        "promote": true,
+        "type": "source_policy",
+        "fields": {
+          "system": "CrumbCRM",
+          "owns": [
+            "sales_stage",
+            "next_sales_action"
+          ],
+          "scope": "current sales answers",
+          "effective_start": "2026-06-22"
+        }
+      },
+      "reason": "Both the Slack and email source rules on 2026-06-22 identify CrumbCRM as the owner for sales stages and next sales actions."
+    },
+    {
+      "candidate_id": "kitchenboard-launch-truth",
+      "decision": "confirm",
+      "business_answer": "Yes. KitchenBoard owns launch task and milestone status until the July 20, 2026 transition.",
+      "corrected_statement": "",
+      "promotion_instruction": {
+        "promote": true,
+        "type": "source_policy",
+        "fields": {
+          "system": "KitchenBoard",
+          "owns": [
+            "launch_task_status",
+            "launch_milestone_status"
+          ],
+          "scope": "retailer launch tasks and milestones",
+          "effective_end": "2026-07-20"
+        }
+      },
+      "reason": "The 2026-06-22 launch source rules say KitchenBoard owns launch task and milestone status until LaunchPad takes over on 2026-07-20."
+    },
+    {
+      "candidate_id": "launchpad-status-future-truth",
+      "decision": "confirm",
+      "business_answer": "Yes, but this is future truth. LaunchPad becomes official for project task and milestone status on 2026-07-20.",
+      "corrected_statement": "",
+      "promotion_instruction": {
+        "promote": true,
+        "type": "source_policy",
+        "fields": {
+          "system": "LaunchPad",
+          "owns": [
+            "project_task_status",
+            "project_milestone_status"
+          ],
+          "scope": "project tasks and milestones",
+          "effective_start": "2026-07-20"
+        }
+      },
+      "reason": "The source rules explicitly name 2026-07-20 as the LaunchPad effective date."
+    },
+    {
+      "candidate_id": "launchpad-not-sales-source",
+      "decision": "confirm",
+      "business_answer": "Yes. LaunchPad is not a sales source.",
+      "corrected_statement": "",
+      "promotion_instruction": {
+        "promote": true,
+        "type": "source_policy",
+        "fields": {
+          "system": "LaunchPad",
+          "does_not_own": [
+            "sales_stage",
+            "next_sales_action"
+          ],
+          "scope": "sales data"
+        }
+      },
+      "reason": "Elena Rossi stated on 2026-06-22 that LaunchPad is not a sales source."
+    },
+    {
+      "candidate_id": "checklist-v2-new-launches-only",
+      "decision": "confirm",
+      "business_answer": "Yes. Checklist v2 starts on 2026-08-05 for new retailer launches only, and GreenMart should not be converted unless Elena approves.",
+      "corrected_statement": "",
+      "promotion_instruction": {
+        "promote": true,
+        "type": "source_policy",
+        "fields": {
+          "policy": "retailer_onboarding_checklist_v2",
+          "effective_start": "2026-08-05",
+          "scope": "new retailer launches only",
+          "excluded_project": "GreenMart frozen pastry pilot",
+          "exception_approver": "Elena Rossi"
+        }
+      },
+      "reason": "The 2026-06-22 Slack and email source rules both state the future start date and new-launch-only scope, and the email explicitly excludes GreenMart unless Elena approves."
+    },
+    {
+      "candidate_id": "qa-label-before-shipment",
+      "decision": "confirm",
+      "business_answer": "Yes. Retailer launches need a QA label approval task before first shipment.",
+      "corrected_statement": "",
+      "promotion_instruction": {
+        "promote": true,
+        "type": "assertion",
+        "fields": {
+          "process": "retailer_launch",
+          "requirement": "QA label approval task before first shipment",
+          "effective_start": "2026-04-09"
+        }
+      },
+      "reason": "Elena Rossi stated the requirement in Slack and in the 2026-04-09 label postmortem email."
+    },
+    {
+      "candidate_id": "retail-launch-checklist-items",
+      "decision": "confirm",
+      "business_answer": "Yes. The current retail launch checklist has QA label approval, case pack test, and first shipment booking as required work items.",
+      "corrected_statement": "",
+      "promotion_instruction": {
+        "promote": true,
+        "type": "assertion",
+        "fields": {
+          "checklist": "retail_launch",
+          "required_work_items": [
+            "QA label approval",
+            "case pack test",
+            "first shipment booking"
+          ],
+          "status_source": "KitchenBoard"
+        }
+      },
+      "reason": "Jules Kim listed those three required items on 2026-05-02, and the later checklist v2 rule is future-dated and limited to new launches."
+    },
+    {
+      "candidate_id": "almond-label-status-risk",
+      "decision": "confirm",
+      "business_answer": "Yes. The accepted reason for the process change is the almond label mistake caused by launch status being scattered across email and Slack.",
+      "corrected_statement": "",
+      "promotion_instruction": {
+        "promote": true,
+        "type": "assertion",
+        "fields": {
+          "risk": "launch status scattered across informal channels can cause label mistakes",
+          "incident": "outdated almond proof shipped",
+          "mitigation": "explicit QA label approval before first shipment"
+        }
+      },
+      "reason": "The 2026-04-09 postmortem email explains that the outdated almond proof shipped because launch status was scattered between email and Slack."
+    },
+    {
+      "candidate_id": "greenmart-opportunity-stage",
+      "decision": "needs_more_evidence",
+      "business_answer": "The packet reports GreenMart as proposal sent, but it does not show the CrumbCRM record. I cannot confirm the current official sales stage from this evidence alone.",
+      "corrected_statement": "",
+      "promotion_instruction": {
+        "promote": false,
+        "type": "opportunity",
+        "fields": {
+          "needed_evidence": "CrumbCRM current stage for GreenMart frozen pastry pilot"
+        }
+      },
+      "reason": "CrumbCRM is the source of truth for sales stages, and the provided evidence is a Slack note rather than a CrumbCRM record."
+    },
+    {
+      "candidate_id": "greenmart-forecast",
+      "decision": "needs_more_evidence",
+      "business_answer": "The packet reports GreenMart at $128,000 annualized with 70% probability, but it does not show the approved sales-system forecast record.",
+      "corrected_statement": "",
+      "promotion_instruction": {
+        "promote": false,
+        "type": "opportunity",
+        "fields": {
+          "needed_evidence": "Approved sales-system forecast for GreenMart frozen pastry pilot"
+        }
+      },
+      "reason": "The value appears in a Slack forecast note, but the question asks whether it is still in the approved sales system."
+    },
+    {
+      "candidate_id": "greenmart-allergen-label-task",
+      "decision": "needs_more_evidence",
+      "business_answer": "Priya reported the allergen label approval as in review, owned by her, and due 2026-07-09, but the packet does not include the KitchenBoard record.",
+      "corrected_statement": "",
+      "promotion_instruction": {
+        "promote": false,
+        "type": "task",
+        "fields": {
+          "needed_evidence": "KitchenBoard task record for GreenMart allergen label approval"
+        }
+      },
+      "reason": "KitchenBoard is the official source for launch task status, and Slack is explicitly described as notes."
+    },
+    {
+      "candidate_id": "greenmart-label-omar-dependency",
+      "decision": "confirm",
+      "business_answer": "Yes. Omar Blake's signoff is required before the GreenMart allergen label approval can be completed.",
+      "corrected_statement": "",
+      "promotion_instruction": {
+        "promote": true,
+        "type": "edge",
+        "fields": {
+          "from": "GreenMart allergen label approval",
+          "to": "Omar Blake signoff on revised allergen language",
+          "relationship": "blocked_by"
+        }
+      },
+      "reason": "Priya said the label approval cannot be approved until Omar signs off, and Omar's email confirms legal is still reviewing revised language."
+    },
+    {
+      "candidate_id": "greenmart-omar-approval-plan",
+      "decision": "confirm",
+      "business_answer": "Yes. Track 2026-07-10 as the conditional date when Omar can approve the revised allergen language if the wording is acceptable.",
+      "corrected_statement": "",
+      "promotion_instruction": {
+        "promote": true,
+        "type": "task_status_plan",
+        "fields": {
+          "task": "Omar Blake signoff on GreenMart revised allergen language",
+          "planned_status": "approved",
+          "planned_date": "2026-07-10",
+          "condition": "updated wording is acceptable"
+        }
+      },
+      "reason": "Omar stated he can approve the updated wording on July 10 if it is acceptable."
+    },
+    {
+      "candidate_id": "greenmart-contract-review-plan",
+      "decision": "confirm",
+      "business_answer": "Yes. GreenMart should move to contract review on 2026-07-11 only if Omar accepts the revised allergen language.",
+      "corrected_statement": "",
+      "promotion_instruction": {
+        "promote": true,
+        "type": "stage_plan",
+        "fields": {
+          "opportunity": "GreenMart frozen pastry pilot",
+          "to_stage": "contract review",
+          "planned_date": "2026-07-11",
+          "condition": "Omar Blake accepts revised allergen language",
+          "source_of_truth_to_update": "CrumbCRM"
+        }
+      },
+      "reason": "Tina and Omar both describe the July 11 contract-review move as conditional on Omar accepting or approving the revised allergen language."
+    },
+    {
+      "candidate_id": "greenmart-case-pack-task",
+      "decision": "needs_more_evidence",
+      "business_answer": "Marcus reported the case pack test as in progress, owned by him, and due 2026-07-12, but the packet does not include the KitchenBoard record.",
+      "corrected_statement": "",
+      "promotion_instruction": {
+        "promote": false,
+        "type": "task",
+        "fields": {
+          "needed_evidence": "KitchenBoard task record for GreenMart case pack test"
+        }
+      },
+      "reason": "KitchenBoard is the official source for launch task status, and the evidence provided is a Slack note."
+    },
+    {
+      "candidate_id": "greenmart-case-pack-12",
+      "decision": "confirm",
+      "business_answer": "Yes. GreenMart is testing 12 packs per case because freezer shelf height is tight.",
+      "corrected_statement": "",
+      "promotion_instruction": {
+        "promote": true,
+        "type": "assertion",
+        "fields": {
+          "project": "GreenMart frozen pastry pilot",
+          "case_pack_under_test": 12,
+          "reason": "freezer shelf height is tight"
+        }
+      },
+      "reason": "Marcus Reed stated both the 12-pack configuration and the freezer shelf-height reason on 2026-06-19."
+    },
+    {
+      "candidate_id": "greenmart-first-shipment-task",
+      "decision": "needs_more_evidence",
+      "business_answer": "Caleb reported the ColdLink first shipment booking as todo, owned by him, and due 2026-07-15, but the packet does not include the KitchenBoard record.",
+      "corrected_statement": "",
+      "promotion_instruction": {
+        "promote": false,
+        "type": "task",
+        "fields": {
+          "needed_evidence": "KitchenBoard task record for ColdLink first shipment booking"
+        }
+      },
+      "reason": "KitchenBoard is the official source for launch task status, and the evidence provided is a Slack note."
+    },
+    {
+      "candidate_id": "greenmart-dock-appointment-dependency",
+      "decision": "confirm",
+      "business_answer": "Yes. ColdLink needs the final case pack by 2026-07-15 to hold the GreenMart frozen dock appointment for the week of 2026-07-22, and the booking depends on Wyatt confirming the appointment.",
+      "corrected_statement": "",
+      "promotion_instruction": {
+        "promote": true,
+        "type": "edge",
+        "fields": {
+          "from": "ColdLink first shipment booking",
+          "to": "final GreenMart case pack",
+          "relationship": "depends_on",
+          "dependency_due_date": "2026-07-15",
+          "dock_appointment_window": "week of 2026-07-22",
+          "external_contact": "Wyatt Ford"
+        }
+      },
+      "reason": "Caleb's Slack note names Wyatt's dock appointment confirmation, and Wyatt's email gives the final case-pack date and appointment window."
+    },
+    {
+      "candidate_id": "greenmart-ship-milestone",
+      "decision": "needs_more_evidence",
+      "business_answer": "Jules reported the pilot ship date milestone as waiting on customer approval with a 2026-07-24 target, but the packet does not include the KitchenBoard milestone record.",
+      "corrected_statement": "",
+      "promotion_instruction": {
+        "promote": false,
+        "type": "milestone",
+        "fields": {
+          "needed_evidence": "KitchenBoard milestone record for GreenMart pilot ship date"
+        }
+      },
+      "reason": "KitchenBoard is the official source for launch milestone status, and the evidence provided is a Slack note."
+    },
+    {
+      "candidate_id": "greenmart-ship-approval-plan",
+      "decision": "edit",
+      "business_answer": "Yes, the approval plan is conditional: mark the GreenMart pilot ship date approved on 2026-07-22 only if label approval and case pack both pass. Because that planned status change is after 2026-07-20, the status source should be LaunchPad, not KitchenBoard.",
+      "corrected_statement": "GreenMart pilot ship date should be marked approved on 2026-07-22 if label approval and case pack both pass, using LaunchPad as the status source after the 2026-07-20 transition.",
+      "promotion_instruction": {
+        "promote": true,
+        "type": "milestone_status_plan",
+        "fields": {
+          "milestone": "GreenMart pilot ship date",
+          "planned_status": "approved",
+          "planned_date": "2026-07-22",
+          "conditions": [
+            "label approval passes",
+            "case pack passes"
+          ],
+          "source_of_truth_to_update": "LaunchPad"
+        }
+      },
+      "reason": "The conditional approval date is explicit, but the source-policy transition means LaunchPad owns task and milestone status by 2026-07-22."
+    },
+    {
+      "candidate_id": "greenmart-launch-risk",
+      "decision": "confirm",
+      "business_answer": "Yes. Those are active dependencies that could affect the GreenMart pilot ship date.",
+      "corrected_statement": "",
+      "promotion_instruction": {
+        "promote": true,
+        "type": "assertion",
+        "fields": {
+          "project": "GreenMart frozen pastry pilot",
+          "risk": "pilot shipment schedule depends on multiple open launch approvals",
+          "dependencies": [
+            "allergen label approval",
+            "case pack test",
+            "final case pack by 2026-07-15",
+            "frozen dock appointment confirmation",
+            "customer approval"
+          ]
+        }
+      },
+      "reason": "The listed dependencies are supported across the Priya, Marcus, Caleb, Jules, and Wyatt messages."
+    },
+    {
+      "candidate_id": "lakeside-opportunity-stage",
+      "decision": "needs_more_evidence",
+      "business_answer": "The packet reports Lakeside Coffee as qualification, but it does not show the CrumbCRM record. I cannot confirm the current official sales stage from this evidence alone.",
+      "corrected_statement": "",
+      "promotion_instruction": {
+        "promote": false,
+        "type": "opportunity",
+        "fields": {
+          "needed_evidence": "CrumbCRM current stage for Lakeside Coffee seasonal croissant program"
+        }
+      },
+      "reason": "CrumbCRM is the source of truth for sales stages, and the provided evidence is a Slack note rather than a CrumbCRM record."
+    },
+    {
+      "candidate_id": "lakeside-forecast",
+      "decision": "needs_more_evidence",
+      "business_answer": "The packet reports Lakeside Coffee at $52,000 with 35% probability, but it does not show the approved sales-system forecast record.",
+      "corrected_statement": "",
+      "promotion_instruction": {
+        "promote": false,
+        "type": "opportunity",
+        "fields": {
+          "needed_evidence": "Approved sales-system forecast for Lakeside Coffee seasonal croissant program"
+        }
+      },
+      "reason": "The value appears in a Slack forecast note, but the question asks whether it is still in the approved sales system."
+    },
+    {
+      "candidate_id": "lakeside-final-pricing-task",
+      "decision": "needs_more_evidence",
+      "business_answer": "The packet shows Dana is expected to send final pricing before Lakeside reviews a proposal, preferably before 2026-07-18, but it does not confirm the current CrumbCRM next action or task owner.",
+      "corrected_statement": "",
+      "promotion_instruction": {
+        "promote": false,
+        "type": "task",
+        "fields": {
+          "needed_evidence": "CrumbCRM next sales action or task record for Lakeside final pricing"
+        }
+      },
+      "reason": "CrumbCRM owns next sales actions, while the packet only includes Slack and email context."
+    },
+    {
+      "candidate_id": "lakeside-proposal-plan",
+      "decision": "confirm",
+      "business_answer": "Yes. Lakeside Coffee should move to proposal sent on 2026-07-18 only if Dana sends final pricing.",
+      "corrected_statement": "",
+      "promotion_instruction": {
+        "promote": true,
+        "type": "stage_plan",
+        "fields": {
+          "opportunity": "Lakeside Coffee seasonal croissant program",
+          "to_stage": "proposal sent",
+          "planned_date": "2026-07-18",
+          "condition": "Dana Wu sends final pricing",
+          "source_of_truth_to_update": "CrumbCRM"
+        }
+      },
+      "reason": "Tina's Slack note and Sophie's email both make proposal review or movement conditional on final pricing before the July 18 buying meeting."
+    }
+  ],
+  "sme_questions_answered": [
+    {
+      "question": "Should the QA label approval requirement be treated as an active launch procedure for all current retailer launches?",
+      "answer": "Yes. It was effective immediately on 2026-04-09 and no later source narrows it for current launches."
+    },
+    {
+      "question": "Does the current retail launch checklist still require QA label approval, case pack test, and first shipment booking?",
+      "answer": "Yes. Those are the three required work items in the current checklist; checklist v2 is future-dated for new launches only."
+    },
+    {
+      "question": "Is the almond label incident the accepted reason for the QA label approval process change?",
+      "answer": "Yes. The postmortem says the outdated almond proof shipped because launch status was scattered between email and Slack."
+    },
+    {
+      "question": "Does CrumbCRM currently show GreenMart frozen pastry pilot in proposal sent stage?",
+      "answer": "The packet does not include a CrumbCRM record. It only reports in Slack that GreenMart is proposal sent."
+    },
+    {
+      "question": "Is the GreenMart forecast still $128,000 annualized at 70% probability in the approved sales system?",
+      "answer": "The packet does not include the approved sales-system record. It only reports that forecast value in Slack."
+    },
+    {
+      "question": "Does KitchenBoard confirm that Priya Shah owns GreenMart allergen label approval, that it is in review, and that it is due on 2026-07-09?",
+      "answer": "The packet does not include a KitchenBoard record. It only includes Priya's Slack report with that owner, status, and due date."
+    },
+    {
+      "question": "Is Omar Blake's signoff still required before GreenMart allergen label approval can be completed?",
+      "answer": "Yes. The packet says the approval cannot happen until Omar signs off on the revised allergen language."
+    },
+    {
+      "question": "Should 2026-07-10 be tracked as the planned Omar Blake approval date for GreenMart allergen language if the wording is acceptable?",
+      "answer": "Yes, as a conditional plan. Omar said he can approve it on July 10 if the updated wording is acceptable."
+    },
+    {
+      "question": "Should CrumbCRM move GreenMart to contract review on 2026-07-11 only if Omar Blake accepts the revised allergen language?",
+      "answer": "Yes. The stage move is conditional on Omar accepting or approving the revised allergen language."
+    },
+    {
+      "question": "Does KitchenBoard confirm that Marcus Reed owns the GreenMart case pack test, that it is in progress, and that it is due on 2026-07-12?",
+      "answer": "The packet does not include a KitchenBoard record. It only includes Marcus's Slack report with that owner, status, and due date."
+    },
+    {
+      "question": "Is 12 packs per case still the case-pack configuration being tested for GreenMart?",
+      "answer": "Yes based on the packet. Marcus reported 12 packs per case because freezer shelf height is tight, and there is no later conflicting evidence."
+    },
+    {
+      "question": "Does KitchenBoard confirm that Caleb Moore owns the ColdLink first shipment booking, that it is todo, and that it is due on 2026-07-15?",
+      "answer": "The packet does not include a KitchenBoard record. It only includes Caleb's Slack report with that owner, status, and due date."
+    },
+    {
+      "question": "Is the final case pack by 2026-07-15 still required for ColdLink to hold the GreenMart frozen dock appointment for the week of 2026-07-22?",
+      "answer": "Yes. Wyatt said ColdLink needs the final case pack by July 15 to hold the dock appointment for the week of July 22."
+    },
+    {
+      "question": "Does KitchenBoard confirm that the GreenMart pilot ship date milestone is waiting on customer approval and targeted for 2026-07-24?",
+      "answer": "The packet does not include a KitchenBoard record. It only includes Jules's Slack report with that milestone status and target date."
+    },
+    {
+      "question": "Should the GreenMart pilot ship date milestone be marked approved on 2026-07-22 only if label approval and case pack both pass?",
+      "answer": "Yes, but the status source on July 22 should be LaunchPad because LaunchPad becomes official on July 20."
+    },
+    {
+      "question": "Are these the active dependencies that could affect the GreenMart pilot ship date?",
+      "answer": "Yes. The packet supports allergen label approval, case pack test, final case pack by July 15, frozen dock appointment confirmation, and customer approval as active dependencies."
+    },
+    {
+      "question": "Does CrumbCRM currently show Lakeside Coffee seasonal croissant program in qualification stage?",
+      "answer": "The packet does not include a CrumbCRM record. It only reports in Slack that Lakeside Coffee is still qualification."
+    },
+    {
+      "question": "Is the Lakeside Coffee forecast still $52,000 at 35% probability in the approved sales system?",
+      "answer": "The packet does not include the approved sales-system record. It only reports that forecast value in Slack."
+    },
+    {
+      "question": "Is Dana Wu the owner for sending final pricing to Lakeside Coffee before the 2026-07-18 buying meeting?",
+      "answer": "The packet shows Dana is expected to send pricing, but it does not confirm the current CrumbCRM next action or task owner."
+    },
+    {
+      "question": "Should CrumbCRM move Lakeside Coffee to proposal sent on 2026-07-18 only if Dana Wu sends final pricing?",
+      "answer": "Yes. The move to proposal sent is conditional on Dana sending final pricing."
+    }
+  ]
+}

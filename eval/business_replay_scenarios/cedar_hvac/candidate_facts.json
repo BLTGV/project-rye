@@ -1,0 +1,492 @@
+{
+  "scenario": "cedar_hvac",
+  "source_window": {
+    "start": "2026-03-18",
+    "end": "2026-06-22"
+  },
+  "business_summary": "Cedar Ridge HVAC & Controls is managing summer HVAC sales and installation work with explicit source-of-truth rules. Current sales stage and next action belong in HearthCRM, while project task and milestone status belong in JobBoardPM. Slack and email provide evidence about Fulton Dental and Riverbend Brewery work, but operational statuses from those messages need confirmation in the stated systems of record. Future system changes are planned for BuildBoard crew scheduling on 2026-07-15 and PipelinePro sales stages and next actions on 2026-08-01.",
+  "candidates": [
+    {
+      "id": "status-source-jobboardpm",
+      "kind": "source_policy",
+      "statement": "As of 2026-06-22, JobBoardPM owns official project task status and milestone status, while Slack is only evidence and coordination.",
+      "subject": "Project task and milestone status",
+      "target_shape": "source_policy",
+      "confidence": 0.98,
+      "source_refs": [
+        "Email 2026-06-22 Lena Morales 'Source rules for summer jobs'",
+        "Slack #install-coordination 2026-06-22 Lena Morales",
+        "Slack #install-coordination 2026-05-10 Lena Morales"
+      ],
+      "needs_sme_confirmation": false,
+      "questions": [],
+      "suggested_promotion": {
+        "type": "source_policy",
+        "fields": {
+          "domain": "project task status and milestone status",
+          "current_system": "JobBoardPM",
+          "effective_start": "2026-06-22",
+          "evidence_sources": [
+            "Slack",
+            "email"
+          ],
+          "evidence_rule": "Slack and email can support intake but are not official status sources."
+        }
+      }
+    },
+    {
+      "id": "sales-source-hearthcrm-current",
+      "kind": "source_policy",
+      "statement": "As of 2026-06-22, HearthCRM owns current deal stage and next sales action until PipelinePro replaces it.",
+      "subject": "Sales stage and next sales action",
+      "target_shape": "source_policy",
+      "confidence": 0.98,
+      "source_refs": [
+        "Email 2026-06-22 Lena Morales 'Source rules for summer jobs'",
+        "Slack #sales 2026-06-18 Alex Chen",
+        "Slack #sales 2026-06-22 Maya Patel"
+      ],
+      "needs_sme_confirmation": false,
+      "questions": [],
+      "suggested_promotion": {
+        "type": "source_policy",
+        "fields": {
+          "domain": "deal stage and next sales action",
+          "current_system": "HearthCRM",
+          "effective_start": "2026-06-22",
+          "planned_successor_system": "PipelinePro",
+          "planned_successor_start": "2026-08-01"
+        }
+      }
+    },
+    {
+      "id": "future-buildboard-scheduling",
+      "kind": "future_plan",
+      "statement": "BuildBoard becomes authoritative for crew scheduling on 2026-07-15, but it will not own task status at that time.",
+      "subject": "Crew scheduling source of truth",
+      "target_shape": "source_policy",
+      "confidence": 0.97,
+      "source_refs": [
+        "Email 2026-06-22 Lena Morales 'Source rules for summer jobs'",
+        "Slack #install-coordination 2026-06-22 Lena Morales"
+      ],
+      "needs_sme_confirmation": false,
+      "questions": [],
+      "suggested_promotion": {
+        "type": "source_policy",
+        "fields": {
+          "domain": "crew scheduling",
+          "future_system": "BuildBoard",
+          "effective_start": "2026-07-15",
+          "exclusions": [
+            "project task status",
+            "milestone status"
+          ]
+        }
+      }
+    },
+    {
+      "id": "future-pipelinepro-sales",
+      "kind": "future_plan",
+      "statement": "PipelinePro becomes official for sales stages and next actions on 2026-08-01, replacing HearthCRM for those answers.",
+      "subject": "Sales stage and next sales action source of truth",
+      "target_shape": "source_policy",
+      "confidence": 0.97,
+      "source_refs": [
+        "Email 2026-06-22 Lena Morales 'Source rules for summer jobs'",
+        "Slack #sales 2026-06-22 Maya Patel",
+        "Slack #sales 2026-06-18 Alex Chen"
+      ],
+      "needs_sme_confirmation": false,
+      "questions": [],
+      "suggested_promotion": {
+        "type": "source_policy",
+        "fields": {
+          "domain": "deal stage and next sales action",
+          "current_system_until_cutover": "HearthCRM",
+          "future_system": "PipelinePro",
+          "effective_start": "2026-08-01",
+          "current_state": "shadow-tested only"
+        }
+      }
+    },
+    {
+      "id": "permit-milestone-required",
+      "kind": "procedure",
+      "statement": "Permit-sensitive clinic, brewery, and restaurant rooftop work should have an explicit permit milestone before any install window is promised or treated as firm.",
+      "subject": "Permit-sensitive work",
+      "target_shape": "source_policy",
+      "confidence": 0.9,
+      "source_refs": [
+        "Email 2026-03-18 Maya Patel 'Southside dental lesson learned'",
+        "Slack #install-coordination 2026-04-22 Maya Patel"
+      ],
+      "needs_sme_confirmation": true,
+      "questions": [
+        "Should this permit milestone rule be promoted as official policy for permit-sensitive clinic, brewery, and restaurant rooftop work?"
+      ],
+      "suggested_promotion": {
+        "type": "source_policy",
+        "fields": {
+          "policy_name": "Permit milestone before firm install window",
+          "applies_to": [
+            "clinic work",
+            "brewery work",
+            "restaurant rooftop work"
+          ],
+          "requirement": "Create an explicit permit milestone before sales promises or confirms an install window.",
+          "reason": "Southside dental quote was lost after permit risk was discovered too late."
+        }
+      }
+    },
+    {
+      "id": "southside-permit-loss",
+      "kind": "risk",
+      "statement": "Southside dental emergency chiller quote was lost after the permit issue was found too late and the install date was guessed.",
+      "subject": "Southside dental emergency chiller quote",
+      "target_shape": "assertion",
+      "confidence": 0.84,
+      "source_refs": [
+        "Email 2026-03-18 Maya Patel 'Southside dental lesson learned'"
+      ],
+      "needs_sme_confirmation": true,
+      "questions": [
+        "Should the Southside dental loss be retained as the rationale for the permit milestone policy?"
+      ],
+      "suggested_promotion": {
+        "type": "assertion",
+        "fields": {
+          "assertion_type": "lesson_learned",
+          "account": "Southside dental",
+          "lost_work": "emergency chiller quote",
+          "risk_driver": "permit issue discovered too late and install date guessed"
+        }
+      }
+    },
+    {
+      "id": "fulton-stage-evidence",
+      "kind": "fact",
+      "statement": "Evidence says Fulton Dental rooftop unit replacement is at proposal sent and waiting for the Dominion rebate letter before contract review.",
+      "subject": "Fulton Dental rooftop unit replacement",
+      "target_shape": "opportunity",
+      "confidence": 0.74,
+      "source_refs": [
+        "Slack #install-coordination 2026-06-20 Alex Chen",
+        "Email 2026-06-20 Nora Ellis to Alex Chen 'Fulton rooftop proposal'"
+      ],
+      "needs_sme_confirmation": true,
+      "questions": [
+        "Does HearthCRM currently show Fulton Dental rooftop unit replacement at proposal sent with the Dominion rebate letter as the next action?"
+      ],
+      "suggested_promotion": {
+        "type": "opportunity",
+        "fields": {
+          "name": "Fulton Dental rooftop unit replacement",
+          "account": "Fulton Dental",
+          "evidence_stage": "proposal sent",
+          "next_action": "obtain Dominion rebate letter",
+          "official_stage_source": "HearthCRM",
+          "evidence_only": true
+        }
+      }
+    },
+    {
+      "id": "fulton-contract-review-plan",
+      "kind": "future_plan",
+      "statement": "If the Dominion rebate letter arrives before 2026-07-03, Nora can put Fulton Dental in front of Valerie for contract review on 2026-07-03.",
+      "subject": "Fulton Dental rooftop unit replacement",
+      "target_shape": "plan",
+      "confidence": 0.78,
+      "source_refs": [
+        "Slack #install-coordination 2026-06-20 Alex Chen",
+        "Email 2026-06-20 Nora Ellis to Alex Chen 'Fulton rooftop proposal'"
+      ],
+      "needs_sme_confirmation": true,
+      "questions": [
+        "If the Dominion rebate letter arrives, should HearthCRM be updated to contract review on 2026-07-03?"
+      ],
+      "suggested_promotion": {
+        "type": "stage_plan",
+        "fields": {
+          "opportunity": "Fulton Dental rooftop unit replacement",
+          "condition": "Dominion rebate letter received before 2026-07-03",
+          "planned_stage": "contract review",
+          "planned_date": "2026-07-03",
+          "handoff_to": "Valerie",
+          "official_stage_source": "HearthCRM"
+        }
+      }
+    },
+    {
+      "id": "fulton-forecast-value",
+      "kind": "fact",
+      "statement": "Evidence says Fulton Dental should be forecast at $84,000 with 65% probability in the June forecast workbook.",
+      "subject": "Fulton Dental rooftop unit replacement",
+      "target_shape": "assertion",
+      "confidence": 0.7,
+      "source_refs": [
+        "Slack #sales 2026-06-20 Ben Ortiz"
+      ],
+      "needs_sme_confirmation": true,
+      "questions": [
+        "Should Fulton Dental be promoted with $84,000 value and 65% probability from the June forecast workbook?"
+      ],
+      "suggested_promotion": {
+        "type": "assertion",
+        "fields": {
+          "opportunity": "Fulton Dental rooftop unit replacement",
+          "amount": 84000,
+          "probability": 0.65,
+          "evidence_source": "June forecast workbook mentioned in Slack",
+          "evidence_only": true
+        }
+      }
+    },
+    {
+      "id": "fulton-permit-resubmission",
+      "kind": "task",
+      "statement": "Evidence says Jordan Reed owns the Fulton permit resubmission task, currently blocked until Kara provides the signed structural letter, with a target date of 2026-06-27.",
+      "subject": "Fulton permit resubmission",
+      "target_shape": "task",
+      "confidence": 0.76,
+      "source_refs": [
+        "Slack #install-coordination 2026-06-12 Jordan Reed"
+      ],
+      "needs_sme_confirmation": true,
+      "questions": [
+        "Does JobBoardPM show the Fulton permit resubmission task as blocked on Kara's signed structural letter?",
+        "Please confirm the 2026-06-27 target date because the source labels it Friday."
+      ],
+      "suggested_promotion": {
+        "type": "task",
+        "fields": {
+          "task_name": "Fulton permit resubmission",
+          "project": "Fulton Dental rooftop unit replacement",
+          "owner": "Jordan Reed",
+          "evidence_status": "blocked",
+          "blocker": "signed structural letter from Kara",
+          "target_date": "2026-06-27",
+          "official_status_source": "JobBoardPM",
+          "evidence_only": true
+        }
+      }
+    },
+    {
+      "id": "fulton-structural-letter-dependency",
+      "kind": "edge",
+      "statement": "The Fulton structural engineer signature is expected by 2026-06-26 if the roof curb cut sheet is final; without the cut sheet, the city may hold the permit.",
+      "subject": "Fulton structural engineer signature",
+      "target_shape": "edge",
+      "confidence": 0.78,
+      "source_refs": [
+        "Slack #install-coordination 2026-06-14 Kara Moss, CityPermit Expedite"
+      ],
+      "needs_sme_confirmation": true,
+      "questions": [
+        "Is the final roof curb cut sheet still the active dependency for the signed structural letter?"
+      ],
+      "suggested_promotion": {
+        "type": "edge",
+        "fields": {
+          "from": "Fulton permit release",
+          "relationship": "depends_on",
+          "to": "final roof curb cut sheet and signed structural engineer letter",
+          "dependency_target_date": "2026-06-26",
+          "risk_if_missing": "city holds permit",
+          "evidence_only": true
+        }
+      }
+    },
+    {
+      "id": "fulton-curb-adapter-order",
+      "kind": "task",
+      "statement": "Evidence says Sam Brooks owns the Fulton curb adapter order; the adapter is allocated but not ship-confirmed, and NorthAir is expected to confirm a ship date by 2026-06-30.",
+      "subject": "Fulton curb adapter order",
+      "target_shape": "task",
+      "confidence": 0.82,
+      "source_refs": [
+        "Slack #install-coordination 2026-06-15 Sam Brooks",
+        "Email 2026-06-20 Ari Levin to Sam Brooks 'NorthAir curb adapter allocation'"
+      ],
+      "needs_sme_confirmation": true,
+      "questions": [
+        "Does JobBoardPM show Sam Brooks as the owner of the Fulton curb adapter order and the task as in progress?"
+      ],
+      "suggested_promotion": {
+        "type": "task",
+        "fields": {
+          "task_name": "Order Fulton curb adapter",
+          "project": "Fulton Dental rooftop unit replacement",
+          "owner": "Sam Brooks",
+          "supplier": "NorthAir",
+          "evidence_status": "in progress",
+          "allocation_status": "allocated but not ship-confirmed",
+          "ship_confirmation_expected_by": "2026-06-30",
+          "ready_for_install_condition": "ship confirmation received",
+          "official_status_source": "JobBoardPM",
+          "evidence_only": true
+        }
+      }
+    },
+    {
+      "id": "fulton-after-hours-access",
+      "kind": "task",
+      "statement": "Evidence says Priya Nair will create the Fulton after-hours access plan, due 2026-07-01, and needs Nora to confirm Saturday entry and alarm instructions.",
+      "subject": "Fulton after-hours access plan",
+      "target_shape": "task",
+      "confidence": 0.72,
+      "source_refs": [
+        "Slack #install-coordination 2026-06-16 Priya Nair"
+      ],
+      "needs_sme_confirmation": true,
+      "questions": [
+        "Does JobBoardPM show the Fulton after-hours access plan as a todo owned by Priya Nair and due 2026-07-01?"
+      ],
+      "suggested_promotion": {
+        "type": "task",
+        "fields": {
+          "task_name": "Create Fulton after-hours access plan",
+          "project": "Fulton Dental rooftop unit replacement",
+          "owner": "Priya Nair",
+          "evidence_status": "todo",
+          "due_date": "2026-07-01",
+          "dependency": "Nora confirmation of Saturday entry and alarm instructions",
+          "official_status_source": "JobBoardPM",
+          "evidence_only": true
+        }
+      }
+    },
+    {
+      "id": "fulton-permit-release-milestone",
+      "kind": "task",
+      "statement": "Evidence says Fulton permit release should be tracked as a milestone waiting on city review, targeted for 2026-07-02, and marked approved only if the revised permit is released.",
+      "subject": "Fulton permit release",
+      "target_shape": "milestone",
+      "confidence": 0.74,
+      "source_refs": [
+        "Slack #install-coordination 2026-06-21 Jordan Reed"
+      ],
+      "needs_sme_confirmation": true,
+      "questions": [
+        "Does JobBoardPM show Fulton permit release as a milestone waiting on city review with target date 2026-07-02?"
+      ],
+      "suggested_promotion": {
+        "type": "milestone",
+        "fields": {
+          "milestone_name": "Fulton permit release",
+          "project": "Fulton Dental rooftop unit replacement",
+          "evidence_status": "waiting on city review",
+          "target_date": "2026-07-02",
+          "approval_condition": "revised permit is released",
+          "official_status_source": "JobBoardPM",
+          "evidence_only": true
+        }
+      }
+    },
+    {
+      "id": "riverbend-stage-evidence",
+      "kind": "fact",
+      "statement": "Evidence says Riverbend Brewery controls upgrade is still in qualification and should wait for a walkthrough after tank cleaning before proposal work.",
+      "subject": "Riverbend Brewery controls upgrade",
+      "target_shape": "opportunity",
+      "confidence": 0.75,
+      "source_refs": [
+        "Slack #sales 2026-06-19 Maya Patel",
+        "Email 2026-06-21 Marcus Hill to Maya Patel 'Riverbend controls walkthrough'"
+      ],
+      "needs_sme_confirmation": true,
+      "questions": [
+        "Does HearthCRM currently show Riverbend Brewery controls upgrade in qualification with walkthrough as the next sales action?"
+      ],
+      "suggested_promotion": {
+        "type": "opportunity",
+        "fields": {
+          "name": "Riverbend Brewery controls upgrade",
+          "account": "Riverbend Brewery",
+          "evidence_stage": "qualification",
+          "next_action": "complete brewhouse walkthrough after tank cleaning",
+          "official_stage_source": "HearthCRM",
+          "evidence_only": true
+        }
+      }
+    },
+    {
+      "id": "riverbend-walkthrough-plan",
+      "kind": "future_plan",
+      "statement": "Marcus Hill says Riverbend can host the brewhouse walkthrough on 2026-07-08 after tank cleaning; if it happens, the opportunity can move to site survey completed that day.",
+      "subject": "Riverbend brewhouse walkthrough",
+      "target_shape": "plan",
+      "confidence": 0.8,
+      "source_refs": [
+        "Email 2026-06-21 Marcus Hill to Maya Patel 'Riverbend controls walkthrough'",
+        "Slack #sales 2026-06-19 Maya Patel"
+      ],
+      "needs_sme_confirmation": true,
+      "questions": [
+        "Should the Riverbend walkthrough be scheduled for 2026-07-08 and used as the condition for moving the opportunity to site survey completed in HearthCRM?"
+      ],
+      "suggested_promotion": {
+        "type": "stage_plan",
+        "fields": {
+          "opportunity": "Riverbend Brewery controls upgrade",
+          "planned_activity": "brewhouse walkthrough",
+          "planned_date": "2026-07-08",
+          "condition": "walkthrough completed after tank cleaning",
+          "planned_stage": "site survey completed",
+          "official_stage_source": "HearthCRM",
+          "evidence_only": true
+        }
+      }
+    },
+    {
+      "id": "riverbend-forecast-value",
+      "kind": "fact",
+      "statement": "Evidence says Riverbend Brewery controls upgrade is forecast at $46,500 with 40% probability in the June forecast workbook.",
+      "subject": "Riverbend Brewery controls upgrade",
+      "target_shape": "assertion",
+      "confidence": 0.7,
+      "source_refs": [
+        "Slack #sales 2026-06-20 Ben Ortiz"
+      ],
+      "needs_sme_confirmation": true,
+      "questions": [
+        "Should Riverbend Brewery controls upgrade be promoted with $46,500 value and 40% probability from the June forecast workbook?"
+      ],
+      "suggested_promotion": {
+        "type": "assertion",
+        "fields": {
+          "opportunity": "Riverbend Brewery controls upgrade",
+          "amount": 46500,
+          "probability": 0.4,
+          "evidence_source": "June forecast workbook mentioned in Slack",
+          "evidence_only": true
+        }
+      }
+    },
+    {
+      "id": "riverbend-proposal-prereq",
+      "kind": "edge",
+      "statement": "Riverbend is not ready for proposal until Cedar Ridge inspects the controls cabinet in person.",
+      "subject": "Riverbend Brewery controls upgrade",
+      "target_shape": "edge",
+      "confidence": 0.82,
+      "source_refs": [
+        "Email 2026-06-21 Marcus Hill to Maya Patel 'Riverbend controls walkthrough'"
+      ],
+      "needs_sme_confirmation": true,
+      "questions": [
+        "Should in-person controls cabinet inspection be recorded as the prerequisite before Riverbend proposal work?"
+      ],
+      "suggested_promotion": {
+        "type": "edge",
+        "fields": {
+          "from": "Riverbend Brewery controls upgrade proposal readiness",
+          "relationship": "blocked_by",
+          "to": "in-person controls cabinet inspection",
+          "customer_contact": "Marcus Hill",
+          "evidence_only": true
+        }
+      }
+    }
+  ]
+}

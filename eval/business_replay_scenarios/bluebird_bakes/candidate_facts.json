@@ -1,0 +1,647 @@
+{
+  "scenario": "bluebird_bakes",
+  "source_window": {
+    "start": "2026-04-09",
+    "end": "2026-06-22"
+  },
+  "business_summary": "Bluebird Bakes is tightening retailer launch controls after a label mistake. Current source-policy evidence says CrumbCRM owns sales stages and next sales actions, while KitchenBoard owns launch tasks and milestones until LaunchPad takes over that status role on 2026-07-20. GreenMart is an active frozen pastry pilot with allergen label, case pack, shipment booking, customer approval, and contract-review dependencies. Lakeside Coffee is an earlier seasonal croissant opportunity waiting on final pricing before a proposal.",
+  "candidates": [
+    {
+      "id": "crumbcrm-sales-truth",
+      "kind": "source_policy",
+      "statement": "CrumbCRM is the current source of truth for sales stages and next sales actions.",
+      "subject": "CrumbCRM",
+      "target_shape": "source_policy",
+      "confidence": 0.98,
+      "source_refs": [
+        "Slack #wholesale-sales 2026-06-22 Elena Rossi",
+        "Email 2026-06-22 Jules Kim, Launch source rules"
+      ],
+      "needs_sme_confirmation": false,
+      "questions": [],
+      "suggested_promotion": {
+        "type": "source_policy",
+        "fields": {
+          "system": "CrumbCRM",
+          "owns": [
+            "sales_stage",
+            "next_sales_action"
+          ],
+          "scope": "current sales answers",
+          "effective_start": "2026-06-22"
+        }
+      }
+    },
+    {
+      "id": "kitchenboard-launch-truth",
+      "kind": "source_policy",
+      "statement": "KitchenBoard is the current source of truth for launch task and milestone status until 2026-07-20.",
+      "subject": "KitchenBoard",
+      "target_shape": "source_policy",
+      "confidence": 0.98,
+      "source_refs": [
+        "Slack #retail-launch 2026-05-02 Jules Kim",
+        "Slack #retail-launch 2026-06-22 Elena Rossi",
+        "Email 2026-06-22 Jules Kim, Launch source rules"
+      ],
+      "needs_sme_confirmation": false,
+      "questions": [],
+      "suggested_promotion": {
+        "type": "source_policy",
+        "fields": {
+          "system": "KitchenBoard",
+          "owns": [
+            "launch_task_status",
+            "launch_milestone_status"
+          ],
+          "scope": "retailer launch tasks and milestones",
+          "effective_end": "2026-07-20"
+        }
+      }
+    },
+    {
+      "id": "launchpad-status-future-truth",
+      "kind": "source_policy",
+      "statement": "LaunchPad becomes the source of truth for project task and milestone status on 2026-07-20.",
+      "subject": "LaunchPad",
+      "target_shape": "source_policy",
+      "confidence": 0.97,
+      "source_refs": [
+        "Slack #retail-launch 2026-06-22 Elena Rossi",
+        "Email 2026-06-22 Jules Kim, Launch source rules"
+      ],
+      "needs_sme_confirmation": false,
+      "questions": [],
+      "suggested_promotion": {
+        "type": "source_policy",
+        "fields": {
+          "system": "LaunchPad",
+          "owns": [
+            "project_task_status",
+            "project_milestone_status"
+          ],
+          "scope": "project tasks and milestones",
+          "effective_start": "2026-07-20"
+        }
+      }
+    },
+    {
+      "id": "launchpad-not-sales-source",
+      "kind": "source_policy",
+      "statement": "LaunchPad is not a sales source.",
+      "subject": "LaunchPad",
+      "target_shape": "source_policy",
+      "confidence": 0.96,
+      "source_refs": [
+        "Slack #wholesale-sales 2026-06-22 Elena Rossi"
+      ],
+      "needs_sme_confirmation": false,
+      "questions": [],
+      "suggested_promotion": {
+        "type": "source_policy",
+        "fields": {
+          "system": "LaunchPad",
+          "does_not_own": [
+            "sales_stage",
+            "next_sales_action"
+          ],
+          "scope": "sales data"
+        }
+      }
+    },
+    {
+      "id": "checklist-v2-new-launches-only",
+      "kind": "source_policy",
+      "statement": "Retailer onboarding checklist v2 starts on 2026-08-05 for new retailer launches only, and GreenMart should not be converted unless Elena approves.",
+      "subject": "Retailer onboarding checklist v2",
+      "target_shape": "source_policy",
+      "confidence": 0.96,
+      "source_refs": [
+        "Slack #wholesale-sales 2026-06-22 Elena Rossi",
+        "Email 2026-06-22 Jules Kim, Launch source rules"
+      ],
+      "needs_sme_confirmation": false,
+      "questions": [],
+      "suggested_promotion": {
+        "type": "source_policy",
+        "fields": {
+          "policy": "retailer_onboarding_checklist_v2",
+          "effective_start": "2026-08-05",
+          "scope": "new retailer launches only",
+          "excluded_project": "GreenMart frozen pastry pilot",
+          "exception_approver": "Elena Rossi"
+        }
+      }
+    },
+    {
+      "id": "qa-label-before-shipment",
+      "kind": "procedure",
+      "statement": "Retailer launches need a QA label approval task before first shipment.",
+      "subject": "Retailer launch process",
+      "target_shape": "assertion",
+      "confidence": 0.9,
+      "source_refs": [
+        "Slack #retail-launch 2026-04-09 Elena Rossi",
+        "Email 2026-04-09 Elena Rossi, Label mistake postmortem"
+      ],
+      "needs_sme_confirmation": true,
+      "questions": [
+        "Should the QA label approval requirement be treated as an active launch procedure for all current retailer launches?"
+      ],
+      "suggested_promotion": {
+        "type": "assertion",
+        "fields": {
+          "process": "retailer_launch",
+          "requirement": "QA label approval task before first shipment",
+          "effective_start": "2026-04-09"
+        }
+      }
+    },
+    {
+      "id": "retail-launch-checklist-items",
+      "kind": "procedure",
+      "statement": "The retail launch checklist has three required work items: QA label approval, case pack test, and first shipment booking.",
+      "subject": "Retail launch checklist",
+      "target_shape": "assertion",
+      "confidence": 0.86,
+      "source_refs": [
+        "Slack #retail-launch 2026-05-02 Jules Kim"
+      ],
+      "needs_sme_confirmation": true,
+      "questions": [
+        "Does the current retail launch checklist still require QA label approval, case pack test, and first shipment booking?"
+      ],
+      "suggested_promotion": {
+        "type": "assertion",
+        "fields": {
+          "checklist": "retail_launch",
+          "required_work_items": [
+            "QA label approval",
+            "case pack test",
+            "first shipment booking"
+          ],
+          "status_source": "KitchenBoard"
+        }
+      }
+    },
+    {
+      "id": "almond-label-status-risk",
+      "kind": "risk",
+      "statement": "A past almond label mistake happened after launch status was scattered between email and Slack.",
+      "subject": "Retailer launch status management",
+      "target_shape": "assertion",
+      "confidence": 0.84,
+      "source_refs": [
+        "Slack #retail-launch 2026-04-09 Elena Rossi",
+        "Email 2026-04-09 Elena Rossi, Label mistake postmortem"
+      ],
+      "needs_sme_confirmation": true,
+      "questions": [
+        "Is the almond label incident the accepted reason for the QA label approval process change?"
+      ],
+      "suggested_promotion": {
+        "type": "assertion",
+        "fields": {
+          "risk": "launch status scattered across informal channels can cause label mistakes",
+          "incident": "outdated almond proof shipped",
+          "mitigation": "explicit QA label approval before first shipment"
+        }
+      }
+    },
+    {
+      "id": "greenmart-opportunity-stage",
+      "kind": "fact",
+      "statement": "GreenMart frozen pastry pilot is reported as proposal sent.",
+      "subject": "GreenMart frozen pastry pilot",
+      "target_shape": "opportunity",
+      "confidence": 0.72,
+      "source_refs": [
+        "Slack #wholesale-sales 2026-06-17 Tina Alvarez"
+      ],
+      "needs_sme_confirmation": true,
+      "questions": [
+        "Does CrumbCRM currently show GreenMart frozen pastry pilot in proposal sent stage?"
+      ],
+      "suggested_promotion": {
+        "type": "opportunity",
+        "fields": {
+          "name": "GreenMart frozen pastry pilot",
+          "account": "GreenMart",
+          "stage_evidence": "proposal sent",
+          "source_of_truth_to_verify": "CrumbCRM"
+        }
+      }
+    },
+    {
+      "id": "greenmart-forecast",
+      "kind": "fact",
+      "statement": "GreenMart frozen pastry pilot is reported at $128,000 annualized forecast value with 70% probability.",
+      "subject": "GreenMart frozen pastry pilot",
+      "target_shape": "opportunity",
+      "confidence": 0.72,
+      "source_refs": [
+        "Slack #wholesale-sales 2026-06-18 Dana Wu"
+      ],
+      "needs_sme_confirmation": true,
+      "questions": [
+        "Is the GreenMart forecast still $128,000 annualized at 70% probability in the approved sales system?"
+      ],
+      "suggested_promotion": {
+        "type": "opportunity",
+        "fields": {
+          "name": "GreenMart frozen pastry pilot",
+          "annualized_value_usd": 128000,
+          "probability": 0.7
+        }
+      }
+    },
+    {
+      "id": "greenmart-allergen-label-task",
+      "kind": "task",
+      "statement": "GreenMart allergen label approval is reported as in review, owned by Priya Shah, and due on 2026-07-09.",
+      "subject": "GreenMart allergen label approval",
+      "target_shape": "task",
+      "confidence": 0.76,
+      "source_refs": [
+        "Slack #retail-launch 2026-06-18 Priya Shah"
+      ],
+      "needs_sme_confirmation": true,
+      "questions": [
+        "Does KitchenBoard confirm that Priya Shah owns GreenMart allergen label approval, that it is in review, and that it is due on 2026-07-09?"
+      ],
+      "suggested_promotion": {
+        "type": "task",
+        "fields": {
+          "title": "GreenMart allergen label approval",
+          "project": "GreenMart frozen pastry pilot",
+          "status_evidence": "in review",
+          "owner": "Priya Shah",
+          "due_date": "2026-07-09",
+          "source_of_truth_to_verify": "KitchenBoard"
+        }
+      }
+    },
+    {
+      "id": "greenmart-label-omar-dependency",
+      "kind": "edge",
+      "statement": "GreenMart allergen label approval cannot be approved until Omar Blake signs off on the revised allergen language.",
+      "subject": "GreenMart allergen label approval",
+      "target_shape": "edge",
+      "confidence": 0.78,
+      "source_refs": [
+        "Slack #retail-launch 2026-06-18 Priya Shah",
+        "Email 2026-06-17 Omar Blake, GreenMart allergen language"
+      ],
+      "needs_sme_confirmation": true,
+      "questions": [
+        "Is Omar Blake's signoff still required before GreenMart allergen label approval can be completed?"
+      ],
+      "suggested_promotion": {
+        "type": "edge",
+        "fields": {
+          "from": "GreenMart allergen label approval",
+          "to": "Omar Blake signoff on revised allergen language",
+          "relationship": "blocked_by"
+        }
+      }
+    },
+    {
+      "id": "greenmart-omar-approval-plan",
+      "kind": "future_plan",
+      "statement": "Omar Blake can approve the GreenMart allergen language on 2026-07-10 if the updated wording is acceptable.",
+      "subject": "GreenMart allergen language",
+      "target_shape": "plan",
+      "confidence": 0.74,
+      "source_refs": [
+        "Email 2026-06-17 Omar Blake, GreenMart allergen language"
+      ],
+      "needs_sme_confirmation": true,
+      "questions": [
+        "Should 2026-07-10 be tracked as the planned Omar Blake approval date for GreenMart allergen language if the wording is acceptable?"
+      ],
+      "suggested_promotion": {
+        "type": "task_status_plan",
+        "fields": {
+          "task": "Omar Blake signoff on GreenMart revised allergen language",
+          "planned_status": "approved",
+          "planned_date": "2026-07-10",
+          "condition": "updated wording is acceptable"
+        }
+      }
+    },
+    {
+      "id": "greenmart-contract-review-plan",
+      "kind": "future_plan",
+      "statement": "GreenMart should move to contract review on 2026-07-11 if Omar Blake accepts the revised allergen language.",
+      "subject": "GreenMart frozen pastry pilot",
+      "target_shape": "plan",
+      "confidence": 0.77,
+      "source_refs": [
+        "Slack #wholesale-sales 2026-06-17 Tina Alvarez",
+        "Email 2026-06-17 Omar Blake, GreenMart allergen language"
+      ],
+      "needs_sme_confirmation": true,
+      "questions": [
+        "Should CrumbCRM move GreenMart to contract review on 2026-07-11 only if Omar Blake accepts the revised allergen language?"
+      ],
+      "suggested_promotion": {
+        "type": "stage_plan",
+        "fields": {
+          "opportunity": "GreenMart frozen pastry pilot",
+          "to_stage": "contract review",
+          "planned_date": "2026-07-11",
+          "condition": "Omar Blake accepts revised allergen language",
+          "source_of_truth_to_update": "CrumbCRM"
+        }
+      }
+    },
+    {
+      "id": "greenmart-case-pack-task",
+      "kind": "task",
+      "statement": "GreenMart case pack test is reported as in progress, owned by Marcus Reed, and due on 2026-07-12.",
+      "subject": "GreenMart case pack test",
+      "target_shape": "task",
+      "confidence": 0.76,
+      "source_refs": [
+        "Slack #retail-launch 2026-06-19 Marcus Reed"
+      ],
+      "needs_sme_confirmation": true,
+      "questions": [
+        "Does KitchenBoard confirm that Marcus Reed owns the GreenMart case pack test, that it is in progress, and that it is due on 2026-07-12?"
+      ],
+      "suggested_promotion": {
+        "type": "task",
+        "fields": {
+          "title": "GreenMart case pack test",
+          "project": "GreenMart frozen pastry pilot",
+          "status_evidence": "in progress",
+          "owner": "Marcus Reed",
+          "due_date": "2026-07-12",
+          "source_of_truth_to_verify": "KitchenBoard"
+        }
+      }
+    },
+    {
+      "id": "greenmart-case-pack-12",
+      "kind": "decision",
+      "statement": "GreenMart is testing 12 packs per case because freezer shelf height is tight.",
+      "subject": "GreenMart case pack test",
+      "target_shape": "assertion",
+      "confidence": 0.73,
+      "source_refs": [
+        "Slack #retail-launch 2026-06-19 Marcus Reed"
+      ],
+      "needs_sme_confirmation": true,
+      "questions": [
+        "Is 12 packs per case still the case-pack configuration being tested for GreenMart?"
+      ],
+      "suggested_promotion": {
+        "type": "assertion",
+        "fields": {
+          "project": "GreenMart frozen pastry pilot",
+          "case_pack_under_test": 12,
+          "reason": "freezer shelf height is tight"
+        }
+      }
+    },
+    {
+      "id": "greenmart-first-shipment-task",
+      "kind": "task",
+      "statement": "ColdLink first shipment booking for GreenMart is reported as todo, owned by Caleb Moore, and due on 2026-07-15.",
+      "subject": "ColdLink first shipment booking",
+      "target_shape": "task",
+      "confidence": 0.75,
+      "source_refs": [
+        "Slack #retail-launch 2026-06-20 Caleb Moore"
+      ],
+      "needs_sme_confirmation": true,
+      "questions": [
+        "Does KitchenBoard confirm that Caleb Moore owns the ColdLink first shipment booking, that it is todo, and that it is due on 2026-07-15?"
+      ],
+      "suggested_promotion": {
+        "type": "task",
+        "fields": {
+          "title": "ColdLink first shipment booking",
+          "project": "GreenMart frozen pastry pilot",
+          "status_evidence": "todo",
+          "owner": "Caleb Moore",
+          "due_date": "2026-07-15",
+          "source_of_truth_to_verify": "KitchenBoard"
+        }
+      }
+    },
+    {
+      "id": "greenmart-dock-appointment-dependency",
+      "kind": "edge",
+      "statement": "GreenMart first shipment booking depends on Wyatt Ford confirming the frozen dock appointment, and ColdLink needs the final case pack by 2026-07-15 to hold a dock appointment for the week of 2026-07-22.",
+      "subject": "GreenMart first shipment booking",
+      "target_shape": "edge",
+      "confidence": 0.78,
+      "source_refs": [
+        "Slack #retail-launch 2026-06-20 Caleb Moore",
+        "Email 2026-06-21 Wyatt Ford, GreenMart first shipment booking"
+      ],
+      "needs_sme_confirmation": true,
+      "questions": [
+        "Is the final case pack by 2026-07-15 still required for ColdLink to hold the GreenMart frozen dock appointment for the week of 2026-07-22?"
+      ],
+      "suggested_promotion": {
+        "type": "edge",
+        "fields": {
+          "from": "ColdLink first shipment booking",
+          "to": "final GreenMart case pack",
+          "relationship": "depends_on",
+          "dependency_due_date": "2026-07-15",
+          "dock_appointment_window": "week of 2026-07-22",
+          "external_contact": "Wyatt Ford"
+        }
+      }
+    },
+    {
+      "id": "greenmart-ship-milestone",
+      "kind": "task",
+      "statement": "GreenMart pilot ship date is reported as a milestone waiting on customer approval with a target date of 2026-07-24.",
+      "subject": "GreenMart pilot ship date",
+      "target_shape": "milestone",
+      "confidence": 0.76,
+      "source_refs": [
+        "Slack #retail-launch 2026-06-21 Jules Kim"
+      ],
+      "needs_sme_confirmation": true,
+      "questions": [
+        "Does KitchenBoard confirm that the GreenMart pilot ship date milestone is waiting on customer approval and targeted for 2026-07-24?"
+      ],
+      "suggested_promotion": {
+        "type": "milestone",
+        "fields": {
+          "name": "GreenMart pilot ship date",
+          "project": "GreenMart frozen pastry pilot",
+          "status_evidence": "waiting on customer approval",
+          "target_date": "2026-07-24",
+          "source_of_truth_to_verify": "KitchenBoard"
+        }
+      }
+    },
+    {
+      "id": "greenmart-ship-approval-plan",
+      "kind": "future_plan",
+      "statement": "GreenMart pilot ship date should be marked approved on 2026-07-22 if label approval and case pack both pass.",
+      "subject": "GreenMart pilot ship date",
+      "target_shape": "plan",
+      "confidence": 0.76,
+      "source_refs": [
+        "Slack #retail-launch 2026-06-21 Jules Kim"
+      ],
+      "needs_sme_confirmation": true,
+      "questions": [
+        "Should the GreenMart pilot ship date milestone be marked approved on 2026-07-22 only if label approval and case pack both pass?"
+      ],
+      "suggested_promotion": {
+        "type": "milestone_status_plan",
+        "fields": {
+          "milestone": "GreenMart pilot ship date",
+          "planned_status": "approved",
+          "planned_date": "2026-07-22",
+          "conditions": [
+            "label approval passes",
+            "case pack passes"
+          ],
+          "source_of_truth_to_update": "KitchenBoard"
+        }
+      }
+    },
+    {
+      "id": "greenmart-launch-risk",
+      "kind": "risk",
+      "statement": "GreenMart's planned pilot shipment has launch risk because label approval, case pack completion, final case pack delivery, dock appointment confirmation, and customer approval are all dependencies.",
+      "subject": "GreenMart frozen pastry pilot",
+      "target_shape": "assertion",
+      "confidence": 0.72,
+      "source_refs": [
+        "Slack #retail-launch 2026-06-18 Priya Shah",
+        "Slack #retail-launch 2026-06-19 Marcus Reed",
+        "Slack #retail-launch 2026-06-20 Caleb Moore",
+        "Slack #retail-launch 2026-06-21 Jules Kim",
+        "Email 2026-06-21 Wyatt Ford, GreenMart first shipment booking"
+      ],
+      "needs_sme_confirmation": true,
+      "questions": [
+        "Are these the active dependencies that could affect the GreenMart pilot ship date?"
+      ],
+      "suggested_promotion": {
+        "type": "assertion",
+        "fields": {
+          "project": "GreenMart frozen pastry pilot",
+          "risk": "pilot shipment schedule depends on multiple open launch approvals",
+          "dependencies": [
+            "allergen label approval",
+            "case pack test",
+            "final case pack by 2026-07-15",
+            "frozen dock appointment confirmation",
+            "customer approval"
+          ]
+        }
+      }
+    },
+    {
+      "id": "lakeside-opportunity-stage",
+      "kind": "fact",
+      "statement": "Lakeside Coffee seasonal croissant program is reported as qualification.",
+      "subject": "Lakeside Coffee seasonal croissant program",
+      "target_shape": "opportunity",
+      "confidence": 0.71,
+      "source_refs": [
+        "Slack #wholesale-sales 2026-06-20 Tina Alvarez"
+      ],
+      "needs_sme_confirmation": true,
+      "questions": [
+        "Does CrumbCRM currently show Lakeside Coffee seasonal croissant program in qualification stage?"
+      ],
+      "suggested_promotion": {
+        "type": "opportunity",
+        "fields": {
+          "name": "Lakeside Coffee seasonal croissant program",
+          "account": "Lakeside Coffee",
+          "stage_evidence": "qualification",
+          "source_of_truth_to_verify": "CrumbCRM"
+        }
+      }
+    },
+    {
+      "id": "lakeside-forecast",
+      "kind": "fact",
+      "statement": "Lakeside Coffee seasonal croissant program is reported at $52,000 forecast value with 35% probability.",
+      "subject": "Lakeside Coffee seasonal croissant program",
+      "target_shape": "opportunity",
+      "confidence": 0.71,
+      "source_refs": [
+        "Slack #wholesale-sales 2026-06-18 Dana Wu"
+      ],
+      "needs_sme_confirmation": true,
+      "questions": [
+        "Is the Lakeside Coffee forecast still $52,000 at 35% probability in the approved sales system?"
+      ],
+      "suggested_promotion": {
+        "type": "opportunity",
+        "fields": {
+          "name": "Lakeside Coffee seasonal croissant program",
+          "forecast_value_usd": 52000,
+          "probability": 0.35
+        }
+      }
+    },
+    {
+      "id": "lakeside-final-pricing-task",
+      "kind": "task",
+      "statement": "Dana Wu needs to send final pricing before Lakeside Coffee will review a proposal, preferably before the 2026-07-18 buying meeting.",
+      "subject": "Lakeside Coffee final pricing",
+      "target_shape": "task",
+      "confidence": 0.78,
+      "source_refs": [
+        "Slack #wholesale-sales 2026-06-20 Tina Alvarez",
+        "Email 2026-06-18 Sophie Grant, Lakeside seasonal croissants"
+      ],
+      "needs_sme_confirmation": true,
+      "questions": [
+        "Is Dana Wu the owner for sending final pricing to Lakeside Coffee before the 2026-07-18 buying meeting?"
+      ],
+      "suggested_promotion": {
+        "type": "task",
+        "fields": {
+          "title": "Send final pricing to Lakeside Coffee",
+          "opportunity": "Lakeside Coffee seasonal croissant program",
+          "owner": "Dana Wu",
+          "due_before": "2026-07-18",
+          "customer_contact": "Sophie Grant",
+          "source_of_truth_to_verify": "CrumbCRM"
+        }
+      }
+    },
+    {
+      "id": "lakeside-proposal-plan",
+      "kind": "future_plan",
+      "statement": "Lakeside Coffee should move to proposal sent on 2026-07-18 if Dana Wu sends final pricing.",
+      "subject": "Lakeside Coffee seasonal croissant program",
+      "target_shape": "plan",
+      "confidence": 0.76,
+      "source_refs": [
+        "Slack #wholesale-sales 2026-06-20 Tina Alvarez",
+        "Email 2026-06-18 Sophie Grant, Lakeside seasonal croissants"
+      ],
+      "needs_sme_confirmation": true,
+      "questions": [
+        "Should CrumbCRM move Lakeside Coffee to proposal sent on 2026-07-18 only if Dana Wu sends final pricing?"
+      ],
+      "suggested_promotion": {
+        "type": "stage_plan",
+        "fields": {
+          "opportunity": "Lakeside Coffee seasonal croissant program",
+          "to_stage": "proposal sent",
+          "planned_date": "2026-07-18",
+          "condition": "Dana Wu sends final pricing",
+          "source_of_truth_to_update": "CrumbCRM"
+        }
+      }
+    }
+  ]
+}

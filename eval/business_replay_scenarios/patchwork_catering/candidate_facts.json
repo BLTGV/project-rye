@@ -1,0 +1,1180 @@
+{
+  "scenario": "patchwork_catering",
+  "source_files": [
+    "eval/business_replay_scenarios/patchwork_catering/source_material.md"
+  ],
+  "candidates": [
+    {
+      "id": "source-policy-evidence-not-truth",
+      "type": "source_policy",
+      "statement": "Lead tracker rows, workboard rows, Slack, and emails should be treated as evidence, not official truth, until Ana Rivera or Sofia Klein confirms them.",
+      "status": "candidate",
+      "confidence": 0.97,
+      "evidence": [
+        {
+          "source": "Slack #event-desk 2026-06-18 Ana Rivera",
+          "quote": "Assume sheet rows and Slack are evidence, not truth, until Ana or Sofia confirms."
+        },
+        {
+          "source": "Process Note - Rye Pilot Start 2026-06-22 Ana Rivera",
+          "quote": "Ana or Sofia needs to confirm the imported candidates before the records become official."
+        }
+      ],
+      "suggested_record": {
+        "record_type": "policy",
+        "name": "Candidate records require Ana or Sofia confirmation",
+        "fields": {
+          "policy_type": "source_of_truth",
+          "applies_to": [
+            "opportunities",
+            "event work",
+            "tasks",
+            "milestones"
+          ],
+          "confirming_people": [
+            "Ana Rivera",
+            "Sofia Klein"
+          ],
+          "effective_date": "2026-06-22"
+        }
+      }
+    },
+    {
+      "id": "process-policy-rye-import",
+      "type": "process_policy",
+      "statement": "Rye should build candidate opportunities and event work from the lead tracker, event workboard, Slack, and emails during the pilot intake.",
+      "status": "candidate",
+      "confidence": 0.95,
+      "evidence": [
+        {
+          "source": "Process Note - Rye Pilot Start 2026-06-22 Ana Rivera",
+          "quote": "Rye should build candidate opportunities and event work from the lead tracker, event workboard, Slack, and emails."
+        }
+      ],
+      "suggested_record": {
+        "record_type": "policy",
+        "name": "Rye pilot intake sources",
+        "fields": {
+          "policy_type": "intake_process",
+          "effective_date": "2026-06-22",
+          "source_inputs": [
+            "Lead Tracker.xlsx Active Leads",
+            "Event Workboard.xlsx Open Work",
+            "Slack #event-desk",
+            "email threads"
+          ],
+          "output_status": "candidate until SME confirmation"
+        }
+      }
+    },
+    {
+      "id": "future-policy-rye-first-july",
+      "type": "future_policy",
+      "statement": "Starting July 1, opportunity status, next sales action, task status, and milestone status should be checked in Rye first after records are confirmed.",
+      "status": "candidate",
+      "confidence": 0.95,
+      "evidence": [
+        {
+          "source": "Process Note - Rye Pilot Start 2026-06-22 Ana Rivera",
+          "quote": "Starting July 1... opportunity status, next sales action, task status, and milestone status should be checked in Rye first."
+        }
+      ],
+      "suggested_record": {
+        "record_type": "policy",
+        "name": "Rye becomes first status board on July 1",
+        "fields": {
+          "policy_type": "future_source_of_truth",
+          "effective_date": "2026-07-01",
+          "official_status_fields": [
+            "opportunity status",
+            "next sales action",
+            "task status",
+            "milestone status"
+          ],
+          "condition": "after Rye records are confirmed"
+        }
+      }
+    },
+    {
+      "id": "future-policy-spreadsheets-secondary",
+      "type": "future_policy",
+      "statement": "After confirmed Rye records exist, the lead tracker may be used for rough estimates and the workboard may be used for bulk imports, but neither spreadsheet should be the official status board.",
+      "status": "candidate",
+      "confidence": 0.94,
+      "evidence": [
+        {
+          "source": "Process Note - Rye Pilot Start 2026-06-22 Ana Rivera",
+          "quote": "The lead tracker can still be used for rough estimating... but neither spreadsheet should be treated as the official status board."
+        }
+      ],
+      "suggested_record": {
+        "record_type": "policy",
+        "name": "Spreadsheets become secondary after Rye confirmation",
+        "fields": {
+          "policy_type": "future_source_policy",
+          "effective_date": "2026-07-01",
+          "lead_tracker_use": "rough estimating",
+          "workboard_use": "bulk imports",
+          "not_official_for": "status after confirmed Rye records exist"
+        }
+      }
+    },
+    {
+      "id": "org-atlas-labs",
+      "type": "organization",
+      "statement": "Atlas Labs is a prospective catering customer for a summer offsite package.",
+      "status": "candidate",
+      "confidence": 0.92,
+      "evidence": [
+        {
+          "source": "Email Thread - Atlas Labs Summer Offsite",
+          "quote": "The offsite package looks close."
+        },
+        {
+          "source": "Lead Tracker.xlsx Active Leads",
+          "quote": "Atlas Labs summer offsite catering"
+        }
+      ],
+      "suggested_record": {
+        "record_type": "organization",
+        "name": "Atlas Labs",
+        "fields": {
+          "relationship": "prospective customer",
+          "related_opportunity": "Atlas Labs summer offsite catering"
+        }
+      }
+    },
+    {
+      "id": "org-crest-rentals",
+      "type": "organization",
+      "statement": "Crest Rentals is the rental vendor for Atlas Labs lounge furniture.",
+      "status": "candidate",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "source": "Email Thread - Atlas Labs Summer Offsite 2026-06-19 Lena Park",
+          "quote": "I can hold the soft seating package for Atlas."
+        },
+        {
+          "source": "Slack #event-desk 2026-06-19 Nora Voss",
+          "quote": "Crest still needs the revised tent dimensions before Lena can confirm the lounge furniture."
+        }
+      ],
+      "suggested_record": {
+        "record_type": "organization",
+        "name": "Crest Rentals",
+        "fields": {
+          "relationship": "rental vendor",
+          "related_opportunity": "Atlas Labs summer offsite catering",
+          "service": "lounge furniture and soft seating"
+        }
+      }
+    },
+    {
+      "id": "org-willow-creek-school",
+      "type": "organization",
+      "statement": "Willow Creek School is a prospective customer for a fall gala at River Hall.",
+      "status": "candidate",
+      "confidence": 0.92,
+      "evidence": [
+        {
+          "source": "Email Thread - Willow Creek School Gala 2026-06-20 Miguel Arroyo",
+          "quote": "Willow Creek is looking at River Hall for the fall gala."
+        },
+        {
+          "source": "Lead Tracker.xlsx Active Leads",
+          "quote": "Willow Creek School gala"
+        }
+      ],
+      "suggested_record": {
+        "record_type": "organization",
+        "name": "Willow Creek School",
+        "fields": {
+          "relationship": "prospective customer",
+          "related_opportunity": "Willow Creek School gala",
+          "event_venue_under_review": "River Hall"
+        }
+      }
+    },
+    {
+      "id": "org-river-hall",
+      "type": "organization",
+      "statement": "River Hall is the venue under review for the Willow Creek School gala.",
+      "status": "candidate",
+      "confidence": 0.87,
+      "evidence": [
+        {
+          "source": "Email Thread - Willow Creek School Gala 2026-06-20 Miguel Arroyo",
+          "quote": "Willow Creek is looking at River Hall for the fall gala."
+        },
+        {
+          "source": "Slack #event-desk 2026-06-21 Eli Grant",
+          "quote": "Staffing depends on whether River Hall lets us use their prep kitchen."
+        }
+      ],
+      "suggested_record": {
+        "record_type": "organization",
+        "name": "River Hall",
+        "fields": {
+          "relationship": "prospective event venue",
+          "related_opportunity": "Willow Creek School gala",
+          "open_question": "prep kitchen access"
+        }
+      }
+    },
+    {
+      "id": "org-baxter-diaz",
+      "type": "organization",
+      "statement": "The Baxter-Diaz wedding inquiry is a prospective customer account for a September late-night dessert bar.",
+      "status": "candidate",
+      "confidence": 0.78,
+      "evidence": [
+        {
+          "source": "Email - Baxter-Diaz Dessert Bar 2026-06-21 Jenna Baxter",
+          "quote": "Omar and I may want a late-night dessert bar for the September wedding."
+        },
+        {
+          "source": "Lead Tracker.xlsx Active Leads",
+          "quote": "Baxter-Diaz dessert bar"
+        }
+      ],
+      "suggested_record": {
+        "record_type": "organization",
+        "name": "Baxter-Diaz wedding",
+        "fields": {
+          "relationship": "prospective private event customer",
+          "related_opportunity": "Baxter-Diaz dessert bar",
+          "event_month": "2026-09"
+        }
+      }
+    },
+    {
+      "id": "person-ana-rivera",
+      "type": "person",
+      "statement": "Ana Rivera is an internal Patchwork Pantry contact who can confirm imported candidates and owns the Willow Creek opportunity.",
+      "status": "candidate",
+      "confidence": 0.92,
+      "evidence": [
+        {
+          "source": "Slack #event-desk 2026-06-18 Ana Rivera",
+          "quote": "Until Ana or Sofia confirms."
+        },
+        {
+          "source": "Lead Tracker.xlsx Active Leads",
+          "quote": "Willow Creek School gala | Miguel Arroyo | Ana Rivera"
+        }
+      ],
+      "suggested_record": {
+        "record_type": "person",
+        "name": "Ana Rivera",
+        "fields": {
+          "affiliation": "Patchwork Pantry Catering",
+          "role": "internal opportunity owner and SME confirmer",
+          "owned_opportunities": [
+            "Willow Creek School gala"
+          ]
+        }
+      }
+    },
+    {
+      "id": "person-sofia-klein",
+      "type": "person",
+      "statement": "Sofia Klein is an internal Patchwork Pantry contact who can confirm imported candidates and owns the Atlas Labs and Baxter-Diaz opportunities.",
+      "status": "candidate",
+      "confidence": 0.93,
+      "evidence": [
+        {
+          "source": "Process Note - Rye Pilot Start 2026-06-22 Ana Rivera",
+          "quote": "Ana or Sofia needs to confirm the imported candidates."
+        },
+        {
+          "source": "Lead Tracker.xlsx Active Leads",
+          "quote": "Atlas Labs... Sofia Klein; Baxter-Diaz... Sofia Klein"
+        }
+      ],
+      "suggested_record": {
+        "record_type": "person",
+        "name": "Sofia Klein",
+        "fields": {
+          "affiliation": "Patchwork Pantry Catering",
+          "role": "internal opportunity owner and SME confirmer",
+          "owned_opportunities": [
+            "Atlas Labs summer offsite catering",
+            "Baxter-Diaz dessert bar"
+          ]
+        }
+      }
+    },
+    {
+      "id": "person-marco-bell",
+      "type": "person",
+      "statement": "Marco Bell owns the Atlas revised vegetarian station pricing task unless Sofia takes it back.",
+      "status": "candidate",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "source": "Slack #event-desk 2026-06-19 Marco Bell",
+          "quote": "Owner me unless Sofia wants to take it back."
+        },
+        {
+          "source": "Event Workboard.xlsx Open Work",
+          "quote": "Atlas revised vegetarian station pricing | Marco Bell | In progress"
+        }
+      ],
+      "suggested_record": {
+        "record_type": "person",
+        "name": "Marco Bell",
+        "fields": {
+          "affiliation": "Patchwork Pantry Catering",
+          "role": "internal task owner",
+          "owned_tasks": [
+            "Atlas revised vegetarian station pricing"
+          ]
+        }
+      }
+    },
+    {
+      "id": "person-nora-voss",
+      "type": "person",
+      "statement": "Nora Voss owns the Atlas rentals confirmation work and says it should be treated as blocked.",
+      "status": "candidate",
+      "confidence": 0.89,
+      "evidence": [
+        {
+          "source": "Slack #event-desk 2026-06-19 Nora Voss",
+          "quote": "Treat rentals as blocked until Crest replies."
+        },
+        {
+          "source": "Event Workboard.xlsx Open Work",
+          "quote": "Atlas rentals confirmation | Nora Voss | Done?"
+        }
+      ],
+      "suggested_record": {
+        "record_type": "person",
+        "name": "Nora Voss",
+        "fields": {
+          "affiliation": "Patchwork Pantry Catering",
+          "role": "internal task owner",
+          "owned_tasks": [
+            "Atlas rentals confirmation"
+          ]
+        }
+      }
+    },
+    {
+      "id": "person-priya-menon",
+      "type": "person",
+      "statement": "Priya Menon is the Atlas Labs contact for the summer offsite package and may take the package to finance after updated pricing.",
+      "status": "candidate",
+      "confidence": 0.93,
+      "evidence": [
+        {
+          "source": "Email Thread - Atlas Labs Summer Offsite 2026-06-17 Priya Menon",
+          "quote": "Can you revise the vegetarian station price and resend?"
+        },
+        {
+          "source": "Lead Tracker.xlsx Active Leads",
+          "quote": "Atlas Labs summer offsite catering | Priya Menon"
+        }
+      ],
+      "suggested_record": {
+        "record_type": "person",
+        "name": "Priya Menon",
+        "fields": {
+          "affiliation": "Atlas Labs",
+          "role": "customer contact",
+          "related_opportunity": "Atlas Labs summer offsite catering",
+          "next_customer_action": "take updated package to finance if it fits budget"
+        }
+      }
+    },
+    {
+      "id": "person-lena-park",
+      "type": "person",
+      "statement": "Lena Park is the Crest Rentals contact who needs revised tent dimensions before confirming Atlas lounge furniture availability and price.",
+      "status": "candidate",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "source": "Email Thread - Atlas Labs Summer Offsite 2026-06-19 Lena Park",
+          "quote": "I need the revised tent dimensions before I can confirm availability and price."
+        },
+        {
+          "source": "Slack #event-desk 2026-06-19 Nora Voss",
+          "quote": "Crest still needs the revised tent dimensions before Lena can confirm."
+        }
+      ],
+      "suggested_record": {
+        "record_type": "person",
+        "name": "Lena Park",
+        "fields": {
+          "affiliation": "Crest Rentals",
+          "role": "vendor contact",
+          "related_opportunity": "Atlas Labs summer offsite catering",
+          "open_need": "revised tent dimensions"
+        }
+      }
+    },
+    {
+      "id": "person-miguel-arroyo",
+      "type": "person",
+      "statement": "Miguel Arroyo is the Willow Creek contact who requested the June 27 River Hall site walk and staffing estimate input.",
+      "status": "candidate",
+      "confidence": 0.92,
+      "evidence": [
+        {
+          "source": "Email Thread - Willow Creek School Gala 2026-06-20 Miguel Arroyo",
+          "quote": "Can you walk the site on June 27 and tell us whether the kitchen setup changes your staffing estimate?"
+        },
+        {
+          "source": "Lead Tracker.xlsx Active Leads",
+          "quote": "Willow Creek School gala | Miguel Arroyo"
+        }
+      ],
+      "suggested_record": {
+        "record_type": "person",
+        "name": "Miguel Arroyo",
+        "fields": {
+          "affiliation": "Willow Creek School",
+          "role": "customer contact",
+          "related_opportunity": "Willow Creek School gala",
+          "requested_action": "River Hall site walk on 2026-06-27"
+        }
+      }
+    },
+    {
+      "id": "person-rae-chen",
+      "type": "person",
+      "statement": "Rae Chen is an internal Patchwork Pantry contact preparing the Willow Creek site walk checklist with Ana.",
+      "status": "candidate",
+      "confidence": 0.84,
+      "evidence": [
+        {
+          "source": "Email Thread - Willow Creek School Gala 2026-06-20 Ana Rivera",
+          "quote": "Rae and I will prepare the site walk checklist."
+        },
+        {
+          "source": "Event Workboard.xlsx Open Work",
+          "quote": "Willow Creek site walk checklist | Rae Chen | To do"
+        }
+      ],
+      "suggested_record": {
+        "record_type": "person",
+        "name": "Rae Chen",
+        "fields": {
+          "affiliation": "Patchwork Pantry Catering",
+          "role": "internal task owner",
+          "owned_tasks": [
+            "Willow Creek site walk checklist"
+          ]
+        }
+      }
+    },
+    {
+      "id": "person-eli-grant",
+      "type": "person",
+      "statement": "Eli Grant is an internal Patchwork Pantry contact who identified the River Hall kitchen access staffing dependency.",
+      "status": "candidate",
+      "confidence": 0.78,
+      "evidence": [
+        {
+          "source": "Slack #event-desk 2026-06-21 Eli Grant",
+          "quote": "Staffing depends on whether River Hall lets us use their prep kitchen."
+        }
+      ],
+      "suggested_record": {
+        "record_type": "person",
+        "name": "Eli Grant",
+        "fields": {
+          "affiliation": "Patchwork Pantry Catering",
+          "role": "internal operations contributor",
+          "related_opportunity": "Willow Creek School gala"
+        }
+      }
+    },
+    {
+      "id": "person-theo-marsh",
+      "type": "person",
+      "statement": "Theo Marsh owns the Atlas contract signed workboard item.",
+      "status": "candidate",
+      "confidence": 0.76,
+      "evidence": [
+        {
+          "source": "Event Workboard.xlsx Open Work",
+          "quote": "Atlas contract signed | Atlas Labs summer offsite catering | Theo Marsh | Waiting customer"
+        }
+      ],
+      "suggested_record": {
+        "record_type": "person",
+        "name": "Theo Marsh",
+        "fields": {
+          "affiliation": "Patchwork Pantry Catering",
+          "role": "internal milestone owner",
+          "owned_milestones": [
+            "Atlas contract signed"
+          ]
+        }
+      }
+    },
+    {
+      "id": "person-jenna-baxter",
+      "type": "person",
+      "statement": "Jenna Baxter is the Baxter-Diaz contact who asked for rough dessert bar options for a September wedding.",
+      "status": "candidate",
+      "confidence": 0.91,
+      "evidence": [
+        {
+          "source": "Email - Baxter-Diaz Dessert Bar 2026-06-21 Jenna Baxter",
+          "quote": "Could you send rough options this week?"
+        },
+        {
+          "source": "Lead Tracker.xlsx Active Leads",
+          "quote": "Baxter-Diaz dessert bar | Jenna Baxter"
+        }
+      ],
+      "suggested_record": {
+        "record_type": "person",
+        "name": "Jenna Baxter",
+        "fields": {
+          "affiliation": "Baxter-Diaz wedding",
+          "role": "customer contact",
+          "related_opportunity": "Baxter-Diaz dessert bar",
+          "open_question": "dessert only or dessert plus coffee service"
+        }
+      }
+    },
+    {
+      "id": "person-omar-diaz",
+      "type": "person",
+      "statement": "Omar Diaz is a Baxter-Diaz wedding stakeholder mentioned by Jenna Baxter.",
+      "status": "candidate",
+      "confidence": 0.66,
+      "evidence": [
+        {
+          "source": "Email - Baxter-Diaz Dessert Bar 2026-06-21 Jenna Baxter",
+          "quote": "Omar and I may want a late-night dessert bar."
+        }
+      ],
+      "suggested_record": {
+        "record_type": "person",
+        "name": "Omar Diaz",
+        "fields": {
+          "affiliation": "Baxter-Diaz wedding",
+          "role": "customer stakeholder",
+          "related_opportunity": "Baxter-Diaz dessert bar"
+        }
+      }
+    },
+    {
+      "id": "opp-atlas-offsite",
+      "type": "opportunity",
+      "statement": "Atlas Labs summer offsite catering is a proposal-stage opportunity owned by Sofia Klein, with candidate value updated to $18,600 after menu revisions.",
+      "status": "candidate",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "source": "Slack #event-desk 2026-06-19 Sofia Klein",
+          "quote": "The value should be 18.6k after Marco's changes, not 17.8k."
+        },
+        {
+          "source": "Lead Tracker.xlsx Active Leads",
+          "quote": "Status: Proposal sent; Est Value: 17800; Probability: 55%; Old value before menu revision"
+        }
+      ],
+      "suggested_record": {
+        "record_type": "opportunity",
+        "name": "Atlas Labs summer offsite catering",
+        "fields": {
+          "account": "Atlas Labs",
+          "primary_contact": "Priya Menon",
+          "owner": "Sofia Klein",
+          "candidate_stage": "proposal sent",
+          "candidate_value": 18600,
+          "previous_tracker_value": 17800,
+          "probability": 0.55,
+          "next_sales_action": "send updated vegetarian station pricing by 2026-06-24",
+          "notes": "Keep lounge furniture line separate from food and staffing."
+        }
+      }
+    },
+    {
+      "id": "opp-willow-creek-gala",
+      "type": "opportunity",
+      "statement": "Willow Creek School gala is an early opportunity owned by Ana Rivera, with tentative value $32,000 and forecast probability no higher than 45% until kitchen access and headcount are known.",
+      "status": "candidate",
+      "confidence": 0.89,
+      "evidence": [
+        {
+          "source": "Slack #event-desk 2026-06-20 Ana Rivera",
+          "quote": "Willow Creek gala is real but early... Tentative value is 32k."
+        },
+        {
+          "source": "Lead Tracker.xlsx Active Leads",
+          "quote": "Early conversation | Site walk 6/27 | 32000 | 45%"
+        }
+      ],
+      "suggested_record": {
+        "record_type": "opportunity",
+        "name": "Willow Creek School gala",
+        "fields": {
+          "account": "Willow Creek School",
+          "primary_contact": "Miguel Arroyo",
+          "owner": "Ana Rivera",
+          "candidate_stage": "early conversation",
+          "candidate_value": 32000,
+          "probability": 0.45,
+          "next_sales_action": "complete River Hall site walk on 2026-06-27",
+          "estimated_guest_count": 220,
+          "forecast_note": "Do not forecast above 45% until kitchen access and headcount are known."
+        }
+      }
+    },
+    {
+      "id": "opp-baxter-diaz-dessert",
+      "type": "opportunity",
+      "statement": "Baxter-Diaz dessert bar is a new low-confidence inquiry owned by Sofia Klein and needs scope clarification before it can be treated as a full wedding package.",
+      "status": "candidate",
+      "confidence": 0.86,
+      "evidence": [
+        {
+          "source": "Slack #event-desk 2026-06-22 Sofia Klein",
+          "quote": "It is not a full wedding package yet... needs scope, maybe 7.8k and low confidence."
+        },
+        {
+          "source": "Lead Tracker.xlsx Active Leads",
+          "quote": "New inquiry | Ask dessert-only vs coffee service | 7800 | 30%"
+        }
+      ],
+      "suggested_record": {
+        "record_type": "opportunity",
+        "name": "Baxter-Diaz dessert bar",
+        "fields": {
+          "account": "Baxter-Diaz wedding",
+          "primary_contact": "Jenna Baxter",
+          "secondary_contact": "Omar Diaz",
+          "owner": "Sofia Klein",
+          "candidate_stage": "new inquiry",
+          "candidate_value": 7800,
+          "probability": 0.3,
+          "event_month": "2026-09",
+          "next_sales_action": "ask whether scope is dessert only or dessert plus coffee service"
+        }
+      }
+    },
+    {
+      "id": "task-atlas-veg-pricing",
+      "type": "task",
+      "statement": "Marco Bell is revising the Atlas vegetarian station pricing, and the task is in progress with a due date of June 24, 2026.",
+      "status": "candidate",
+      "confidence": 0.92,
+      "evidence": [
+        {
+          "source": "Slack #event-desk 2026-06-19 Marco Bell",
+          "quote": "I can finish the revised vegetarian station pricing by Wednesday 6/24. Mark menu pricing as in progress."
+        },
+        {
+          "source": "Event Workboard.xlsx Open Work",
+          "quote": "Atlas revised vegetarian station pricing | Marco Bell | In progress | 2026-06-24 | High"
+        }
+      ],
+      "suggested_record": {
+        "record_type": "task",
+        "name": "Atlas revised vegetarian station pricing",
+        "fields": {
+          "related_opportunity": "Atlas Labs summer offsite catering",
+          "owner": "Marco Bell",
+          "candidate_status": "in progress",
+          "due_date": "2026-06-24",
+          "priority": "High",
+          "blocking_next_step": "needed before Priya can take package to finance"
+        }
+      }
+    },
+    {
+      "id": "task-atlas-resend-pricing",
+      "type": "task",
+      "statement": "Sofia Klein needs to send Priya Menon updated Atlas pricing by June 24, 2026 after Marco finishes the vegetarian station revision.",
+      "status": "candidate",
+      "confidence": 0.88,
+      "evidence": [
+        {
+          "source": "Email Thread - Atlas Labs Summer Offsite 2026-06-18 Sofia Klein",
+          "quote": "Marco is revising the vegetarian station and I will send the updated pricing by June 24."
+        },
+        {
+          "source": "Email Thread - Atlas Labs Summer Offsite 2026-06-17 Priya Menon",
+          "quote": "Can you revise the vegetarian station price and resend?"
+        }
+      ],
+      "suggested_record": {
+        "record_type": "task",
+        "name": "Send updated Atlas pricing to Priya",
+        "fields": {
+          "related_opportunity": "Atlas Labs summer offsite catering",
+          "owner": "Sofia Klein",
+          "candidate_status": "to do after pricing revision",
+          "due_date": "2026-06-24",
+          "recipient": "Priya Menon",
+          "dependency": "Atlas revised vegetarian station pricing"
+        }
+      }
+    },
+    {
+      "id": "task-atlas-rentals-confirmation",
+      "type": "task",
+      "statement": "Atlas rentals confirmation should be treated as blocked, not done, until Crest Rentals receives revised tent dimensions and replies.",
+      "status": "candidate",
+      "confidence": 0.91,
+      "evidence": [
+        {
+          "source": "Slack #event-desk 2026-06-19 Nora Voss",
+          "quote": "Treat rentals as blocked until Crest replies."
+        },
+        {
+          "source": "Email Thread - Atlas Labs Summer Offsite 2026-06-19 Lena Park",
+          "quote": "Without that, please do not mark the lounge rental line confirmed."
+        },
+        {
+          "source": "Event Workboard.xlsx Open Work",
+          "quote": "Atlas rentals confirmation | Nora Voss | Done? | 2026-06-25"
+        }
+      ],
+      "suggested_record": {
+        "record_type": "task",
+        "name": "Atlas rentals confirmation",
+        "fields": {
+          "related_opportunity": "Atlas Labs summer offsite catering",
+          "owner": "Nora Voss",
+          "candidate_status": "blocked",
+          "due_date": "2026-06-25",
+          "priority": "High",
+          "vendor": "Crest Rentals",
+          "blocked_by": "revised tent dimensions needed before lounge furniture availability and price can be confirmed"
+        }
+      }
+    },
+    {
+      "id": "task-willow-site-walk-checklist",
+      "type": "task",
+      "statement": "Rae Chen and Ana Rivera need to prepare the Willow Creek River Hall site walk checklist by June 27, 2026.",
+      "status": "candidate",
+      "confidence": 0.88,
+      "evidence": [
+        {
+          "source": "Email Thread - Willow Creek School Gala 2026-06-20 Ana Rivera",
+          "quote": "Rae and I will prepare the site walk checklist."
+        },
+        {
+          "source": "Event Workboard.xlsx Open Work",
+          "quote": "Willow Creek site walk checklist | Rae Chen | To do | 2026-06-27"
+        }
+      ],
+      "suggested_record": {
+        "record_type": "task",
+        "name": "Willow Creek site walk checklist",
+        "fields": {
+          "related_opportunity": "Willow Creek School gala",
+          "owner": "Rae Chen",
+          "collaborator": "Ana Rivera",
+          "candidate_status": "to do",
+          "due_date": "2026-06-27",
+          "priority": "Medium",
+          "focus": "River Hall kitchen access and staffing estimate impact"
+        }
+      }
+    },
+    {
+      "id": "task-willow-staffing-estimate",
+      "type": "task",
+      "statement": "Patchwork Pantry needs to update the Willow Creek staffing estimate after confirming whether River Hall prep kitchen access is available.",
+      "status": "candidate",
+      "confidence": 0.84,
+      "evidence": [
+        {
+          "source": "Email Thread - Willow Creek School Gala 2026-06-20 Miguel Arroyo",
+          "quote": "Tell us whether the kitchen setup changes your staffing estimate."
+        },
+        {
+          "source": "Slack #event-desk 2026-06-21 Eli Grant",
+          "quote": "If not, we need two extra runners and a refrigerated van."
+        }
+      ],
+      "suggested_record": {
+        "record_type": "task",
+        "name": "Update Willow Creek staffing estimate",
+        "fields": {
+          "related_opportunity": "Willow Creek School gala",
+          "owner": "Ana Rivera",
+          "candidate_status": "waiting on site walk",
+          "due_date": "2026-06-27",
+          "dependency": "River Hall prep kitchen access",
+          "contingency": "without prep kitchen, add two runners and a refrigerated van"
+        }
+      }
+    },
+    {
+      "id": "task-baxter-scope-question",
+      "type": "task",
+      "statement": "Sofia Klein needs to ask Jenna Baxter whether the Baxter-Diaz inquiry is dessert only or dessert plus coffee service.",
+      "status": "candidate",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "source": "Slack #event-desk 2026-06-22 Sofia Klein",
+          "quote": "I need to ask if they want dessert only or dessert plus coffee service."
+        },
+        {
+          "source": "Lead Tracker.xlsx Active Leads",
+          "quote": "Ask dessert-only vs coffee service"
+        }
+      ],
+      "suggested_record": {
+        "record_type": "task",
+        "name": "Clarify Baxter-Diaz dessert bar scope",
+        "fields": {
+          "related_opportunity": "Baxter-Diaz dessert bar",
+          "owner": "Sofia Klein",
+          "candidate_status": "needs scope",
+          "customer_contact": "Jenna Baxter",
+          "question": "dessert trays only or dessert trays plus coffee service"
+        }
+      }
+    },
+    {
+      "id": "task-baxter-send-options",
+      "type": "task",
+      "statement": "Sofia Klein should send rough Baxter-Diaz dessert bar options during the week of June 21, 2026.",
+      "status": "candidate",
+      "confidence": 0.78,
+      "evidence": [
+        {
+          "source": "Email - Baxter-Diaz Dessert Bar 2026-06-21 Jenna Baxter",
+          "quote": "Could you send rough options this week?"
+        }
+      ],
+      "suggested_record": {
+        "record_type": "task",
+        "name": "Send rough Baxter-Diaz dessert bar options",
+        "fields": {
+          "related_opportunity": "Baxter-Diaz dessert bar",
+          "owner": "Sofia Klein",
+          "candidate_status": "to do",
+          "requested_by": "Jenna Baxter",
+          "target_week": "2026-06-21",
+          "scope_dependency": "dessert only versus coffee service"
+        }
+      }
+    },
+    {
+      "id": "milestone-atlas-contract-review",
+      "type": "milestone",
+      "statement": "Atlas contract review could be held on June 26, 2026 if Priya approves the updated package.",
+      "status": "candidate",
+      "confidence": 0.79,
+      "evidence": [
+        {
+          "source": "Email Thread - Atlas Labs Summer Offsite 2026-06-18 Sofia Klein",
+          "quote": "If you approve it, we can hold June 26 for contract review."
+        },
+        {
+          "source": "Email Thread - Atlas Labs Summer Offsite 2026-06-17 Priya Menon",
+          "quote": "Likely move to contract review next week."
+        }
+      ],
+      "suggested_record": {
+        "record_type": "milestone",
+        "name": "Atlas contract review",
+        "fields": {
+          "related_opportunity": "Atlas Labs summer offsite catering",
+          "candidate_status": "conditional",
+          "target_date": "2026-06-26",
+          "condition": "Priya Menon approves updated package"
+        }
+      }
+    },
+    {
+      "id": "milestone-atlas-contract-signed",
+      "type": "milestone",
+      "statement": "Atlas contract signed is a high-priority waiting-customer milestone due June 28, 2026, but it depends on Priya approving the package and a deposit being needed after approval.",
+      "status": "candidate",
+      "confidence": 0.73,
+      "evidence": [
+        {
+          "source": "Event Workboard.xlsx Open Work",
+          "quote": "Atlas contract signed | Theo Marsh | Waiting customer | 2026-06-28 | Deposit needed after Priya approves package"
+        }
+      ],
+      "suggested_record": {
+        "record_type": "milestone",
+        "name": "Atlas contract signed",
+        "fields": {
+          "related_opportunity": "Atlas Labs summer offsite catering",
+          "owner": "Theo Marsh",
+          "candidate_status": "waiting customer",
+          "due_date": "2026-06-28",
+          "priority": "High",
+          "dependency": "Priya Menon approves updated package",
+          "post_approval_need": "deposit"
+        }
+      }
+    },
+    {
+      "id": "milestone-willow-site-walk",
+      "type": "milestone",
+      "statement": "Willow Creek has a River Hall site walk planned for June 27, 2026.",
+      "status": "candidate",
+      "confidence": 0.91,
+      "evidence": [
+        {
+          "source": "Slack #event-desk 2026-06-20 Ana Rivera",
+          "quote": "Miguel wants the River Hall site walk Saturday 6/27."
+        },
+        {
+          "source": "Email Thread - Willow Creek School Gala 2026-06-20 Miguel Arroyo",
+          "quote": "Can you walk the site on June 27?"
+        }
+      ],
+      "suggested_record": {
+        "record_type": "milestone",
+        "name": "Willow Creek River Hall site walk",
+        "fields": {
+          "related_opportunity": "Willow Creek School gala",
+          "target_date": "2026-06-27",
+          "candidate_status": "planned",
+          "venue": "River Hall",
+          "purpose": "assess kitchen access and staffing impact"
+        }
+      }
+    },
+    {
+      "id": "milestone-willow-proposal-decision",
+      "type": "milestone",
+      "statement": "Patchwork Pantry should decide whether to send Willow Creek a formal proposal after the June 27 site walk if headcount and kitchen access are workable.",
+      "status": "candidate",
+      "confidence": 0.86,
+      "evidence": [
+        {
+          "source": "Slack #event-desk 2026-06-20 Ana Rivera",
+          "quote": "After that we can decide whether to send a full proposal."
+        },
+        {
+          "source": "Email Thread - Willow Creek School Gala 2026-06-20 Ana Rivera",
+          "quote": "After the June 27 River Hall walk, we can send a formal proposal if headcount and kitchen access are workable."
+        }
+      ],
+      "suggested_record": {
+        "record_type": "milestone",
+        "name": "Willow Creek proposal decision",
+        "fields": {
+          "related_opportunity": "Willow Creek School gala",
+          "candidate_status": "waiting on site walk",
+          "target_date": "2026-06-27",
+          "conditions": [
+            "headcount is workable",
+            "kitchen access is workable"
+          ]
+        }
+      }
+    },
+    {
+      "id": "dep-atlas-pricing-finance",
+      "type": "dependency",
+      "statement": "Priya Menon cannot take the Atlas package to finance until the vegetarian station pricing is cleaned up and resent.",
+      "status": "candidate",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "source": "Slack #event-desk 2026-06-19 Sofia Klein",
+          "quote": "Atlas Labs wants the vegetarian station pricing cleaned up before Priya can take the package to finance."
+        },
+        {
+          "source": "Email Thread - Atlas Labs Summer Offsite 2026-06-17 Priya Menon",
+          "quote": "If the new package stays inside the department event budget, I can take it to finance."
+        }
+      ],
+      "suggested_record": {
+        "record_type": "dependency",
+        "name": "Atlas finance review depends on revised vegetarian pricing",
+        "fields": {
+          "related_opportunity": "Atlas Labs summer offsite catering",
+          "blocked_record": "Atlas finance review",
+          "blocking_record": "Atlas revised vegetarian station pricing",
+          "blocked_party": "Priya Menon",
+          "condition": "updated package fits department event budget"
+        }
+      }
+    },
+    {
+      "id": "dep-atlas-lounge-separate-line",
+      "type": "dependency",
+      "statement": "Atlas pricing and package records should keep lounge furniture separate from food and staffing.",
+      "status": "candidate",
+      "confidence": 0.84,
+      "evidence": [
+        {
+          "source": "Email Thread - Atlas Labs Summer Offsite 2026-06-17 Priya Menon",
+          "quote": "Please keep the lounge furniture line separate from food and staffing."
+        }
+      ],
+      "suggested_record": {
+        "record_type": "dependency",
+        "name": "Atlas lounge furniture line separation",
+        "fields": {
+          "related_opportunity": "Atlas Labs summer offsite catering",
+          "applies_to": "proposal pricing",
+          "requirement": "lounge furniture should be tracked separately from food and staffing"
+        }
+      }
+    },
+    {
+      "id": "dep-atlas-rentals-tent-dimensions",
+      "type": "dependency",
+      "statement": "Atlas lounge rentals cannot be confirmed until Crest Rentals receives revised tent dimensions.",
+      "status": "candidate",
+      "confidence": 0.93,
+      "evidence": [
+        {
+          "source": "Email Thread - Atlas Labs Summer Offsite 2026-06-19 Lena Park",
+          "quote": "I need the revised tent dimensions before I can confirm availability and price."
+        },
+        {
+          "source": "Slack #event-desk 2026-06-19 Nora Voss",
+          "quote": "Treat rentals as blocked until Crest replies."
+        }
+      ],
+      "suggested_record": {
+        "record_type": "dependency",
+        "name": "Atlas rentals depend on revised tent dimensions",
+        "fields": {
+          "related_opportunity": "Atlas Labs summer offsite catering",
+          "blocked_record": "Atlas rentals confirmation",
+          "blocking_input": "revised tent dimensions",
+          "vendor": "Crest Rentals",
+          "vendor_contact": "Lena Park"
+        }
+      }
+    },
+    {
+      "id": "dep-atlas-contract-priya-approval",
+      "type": "dependency",
+      "statement": "Atlas contract signing and deposit collection depend on Priya Menon approving the updated package.",
+      "status": "candidate",
+      "confidence": 0.78,
+      "evidence": [
+        {
+          "source": "Event Workboard.xlsx Open Work",
+          "quote": "Deposit needed after Priya approves package."
+        },
+        {
+          "source": "Email Thread - Atlas Labs Summer Offsite 2026-06-18 Sofia Klein",
+          "quote": "If you approve it, we can hold June 26 for contract review."
+        }
+      ],
+      "suggested_record": {
+        "record_type": "dependency",
+        "name": "Atlas contract signing depends on Priya approval",
+        "fields": {
+          "related_opportunity": "Atlas Labs summer offsite catering",
+          "blocked_records": [
+            "Atlas contract review",
+            "Atlas contract signed",
+            "Atlas deposit"
+          ],
+          "blocking_party": "Priya Menon",
+          "condition": "updated package is approved"
+        }
+      }
+    },
+    {
+      "id": "dep-willow-kitchen-staffing",
+      "type": "dependency",
+      "statement": "Willow Creek staffing depends on River Hall prep kitchen access; without access, Patchwork Pantry expects to need two extra runners and a refrigerated van.",
+      "status": "candidate",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "source": "Slack #event-desk 2026-06-21 Eli Grant",
+          "quote": "If not, we need two extra runners and a refrigerated van."
+        },
+        {
+          "source": "Event Workboard.xlsx Open Work",
+          "quote": "River Hall kitchen access drives staffing."
+        }
+      ],
+      "suggested_record": {
+        "record_type": "dependency",
+        "name": "Willow Creek staffing depends on River Hall kitchen access",
+        "fields": {
+          "related_opportunity": "Willow Creek School gala",
+          "blocked_record": "Willow Creek staffing estimate",
+          "blocking_input": "River Hall prep kitchen access",
+          "contingency_if_no_access": [
+            "two extra runners",
+            "refrigerated van"
+          ]
+        }
+      }
+    },
+    {
+      "id": "dep-willow-proposal-headcount-kitchen",
+      "type": "dependency",
+      "statement": "A formal Willow Creek proposal depends on workable headcount and kitchen access after the River Hall site walk.",
+      "status": "candidate",
+      "confidence": 0.88,
+      "evidence": [
+        {
+          "source": "Email Thread - Willow Creek School Gala 2026-06-20 Ana Rivera",
+          "quote": "We can send a formal proposal if headcount and kitchen access are workable."
+        },
+        {
+          "source": "Lead Tracker.xlsx Active Leads",
+          "quote": "Need kitchen access and headcount."
+        }
+      ],
+      "suggested_record": {
+        "record_type": "dependency",
+        "name": "Willow Creek proposal depends on headcount and kitchen access",
+        "fields": {
+          "related_opportunity": "Willow Creek School gala",
+          "blocked_record": "Willow Creek proposal decision",
+          "blocking_inputs": [
+            "guest headcount",
+            "River Hall kitchen access"
+          ],
+          "current_guest_estimate": 220
+        }
+      }
+    },
+    {
+      "id": "dep-baxter-scope-jenna-answer",
+      "type": "dependency",
+      "statement": "Baxter-Diaz value, package type, and next options depend on Jenna Baxter clarifying whether the request is dessert only or dessert plus coffee service.",
+      "status": "candidate",
+      "confidence": 0.89,
+      "evidence": [
+        {
+          "source": "Email - Baxter-Diaz Dessert Bar 2026-06-21 Jenna Baxter",
+          "quote": "We are not sure whether we only need dessert trays or if coffee service should be included too."
+        },
+        {
+          "source": "Slack #event-desk 2026-06-22 Sofia Klein",
+          "quote": "Low confidence until Jenna answers."
+        }
+      ],
+      "suggested_record": {
+        "record_type": "dependency",
+        "name": "Baxter-Diaz scope depends on Jenna answer",
+        "fields": {
+          "related_opportunity": "Baxter-Diaz dessert bar",
+          "blocked_records": [
+            "Baxter-Diaz opportunity value",
+            "Baxter-Diaz package scope",
+            "Baxter-Diaz rough options"
+          ],
+          "blocking_party": "Jenna Baxter",
+          "open_question": "dessert trays only or dessert trays plus coffee service"
+        }
+      }
+    }
+  ]
+}
