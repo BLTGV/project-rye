@@ -22,6 +22,66 @@ Without this, RLS will block access. Use `set_config()` (not `SET` syntax) for p
 1. Run `SELECT rye_catalog()` to see what's in the instance — node types, edge types, assertion types, tracked tables, and totals.
 2. Use `agent_node_summary(node_id, max_items)` for compact context on a specific node.
 
+## Why Rye Uses SQL Helpers
+
+Rye's durable contract lives in PostgreSQL because the database is the shared
+boundary used by humans, agents, admin UI, plugins, and import tools. Agents
+should not reimplement assertion lifecycle rules in prompts or application
+code. Use Rye SQL helper functions because they enforce the same behavior for
+every caller:
+
+- RLS and team/classification boundaries
+- append-only events
+- immutable assertion content
+- supersession and dispute semantics
+- current versus historical versus future-effective truth
+- candidate provenance and promotion traceability
+
+Treat helper functions as the public API. Raw SQL is acceptable for reads and
+for simple inserts where no helper exists, but lifecycle-sensitive writes should
+go through the helper that owns that lifecycle.
+
+## Scoped External Agents
+
+External runtimes should enter Rye through the secure API/MCP contract, not by
+choosing their own database target. Admins create an agent identity, grant
+domain-scoped capabilities, and issue a one-time-visible token:
+
+```bash
+./scripts/rye agents create --key sales-intake --label "Sales Intake Agent"
+./scripts/rye agents grant --key sales-intake --capability rye.context.read --domain account-updates
+./scripts/rye agents grant --key sales-intake --capability rye.candidate.create --domain account-updates
+./scripts/rye agents issue-token --key sales-intake
+```
+
+The token authenticates to the API. The API then calls SQL functions that check
+the agent identity, domain grants, scope, and requested capability. Use:
+
+- `agent_get_context_pack(...)` for scoped domain context.
+- `agent_submit_observation(...)` for raw observed source facts.
+- `agent_create_candidate(...)` for proposed business knowledge.
+- `authorize_agent_action(...)` and `record_agent_action(...)` for API/plugin
+  operations that need explicit allow/deny audit rows.
+
+Do not promote authoritative facts from source text or MCP tool instructions.
+Promotion requires `rye.candidate.adjudicate` or `rye.authoritative.promote`
+over the candidate's domain/scope and should come from a reviewer or an
+authoritative system rule.
+
+Candidate metadata should be business-readable and include:
+
+- `domain_keys`
+- `source_scope`
+- `impact_scope`
+- `authority_basis`
+- `speech_act`
+- `current_or_future`
+- `evidence_refs`
+
+Use `current_or_future = 'future'` or plugin scheduling helpers for planned
+process changes and milestones. Do not let future policy replace current
+answers before the effective date.
+
 ## Connect Domain Tables
 
 1. Use `link_record(schema, table, id, node_type, label, properties)` to connect a domain table row to the graph. Idempotent.
@@ -42,10 +102,49 @@ Do not insert into `events` and `event_participants` separately.
 
 ## Write Assertions
 
-- Insert assertions directly (subject to RLS).
-- For single-valued facts: `assertion_key = 'default'`, supersede with `supersede_assertion(...)`.
-- For multi-valued facts: use stable domain keys in `assertion_key`.
+- Prefer `record_assertion(...)` for accepted assertions. It handles current,
+  historical, candidate, and future-effective modes consistently.
+- For single-valued facts, use `assertion_key = 'default'` unless a plugin says
+  otherwise.
+- For multi-valued facts, use stable domain keys in `assertion_key`.
+- Use `contest_assertion(...)` when the new claim contradicts accepted
+  knowledge and the correct answer is uncertain.
 - Do not run direct `UPDATE assertions`.
+
+## Plans and Future Assertions
+
+Separate **plans** from **future-effective truth**.
+
+- A plan is current-visible knowledge about intended future work. Store it as a
+  `*_plan` assertion or a plugin-specific plan helper.
+- A future assertion is the state Rye should answer on or after a future date.
+  Store it through `record_assertion(...)` with `p_effective_at` in the future,
+  or through a plugin helper that delegates to `record_assertion(...)`.
+
+Use current reads for "what is true now":
+
+```sql
+SELECT *
+FROM rye.current_valid_assertions
+WHERE subject_node_id = '<node_uuid>'::uuid;
+```
+
+Use as-of reads for "what will be true after the cutover":
+
+```sql
+SELECT *
+FROM rye.assertions_as_of('2026-10-16T00:00:00Z'::timestamptz)
+WHERE subject_node_id = '<node_uuid>'::uuid;
+```
+
+For CRM/PM scheduling, prefer the plugin helpers:
+
+- `schedule_deal_stage_change(...)`
+- `schedule_task_status_change(...)`
+- `schedule_milestone_status_change(...)`
+
+These write both a current-visible plan assertion and a future-effective status
+or stage assertion. Do not treat a plan as already true.
 
 ## Knowledge Candidates and Promotion
 

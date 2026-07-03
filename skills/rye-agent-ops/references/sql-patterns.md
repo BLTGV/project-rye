@@ -36,22 +36,159 @@ Do NOT insert into `events` and `event_participants` separately. The function ha
 SELECT agent_node_summary('<node_uuid>', 15);
 ```
 
-## Supersede singleton fact
+## Record or replace a singleton fact
+
+Use `record_assertion(...)` for accepted singleton facts. It owns the lifecycle
+rules for current, historical, candidate, and future-effective assertions.
 
 ```sql
-SELECT supersede_assertion(
-  p_old_assertion_id := '<old_assertion_uuid>',
-  p_new_assertion_type := 'task_status',
-  p_new_subject_node_id := '<task_uuid>',
-  p_new_subject_edge_id := NULL,
-  p_new_claim := '{"status": "in_progress"}',
-  p_new_assertion_key := 'default',
-  p_new_source_event_id := '<event_uuid>',
-  p_new_confidence := 0.9
+SELECT record_assertion(
+  p_assertion_type  := 'task_status',
+  p_assertion_key   := 'default',
+  p_subject_node_id := '<task_uuid>'::uuid,
+  p_claim           := '{"status": "in_progress"}',
+  p_source_event_id := '<event_uuid>'::uuid,
+  p_confidence      := 0.9,
+  p_mode            := 'current'
 );
 ```
 
+If an already scheduled future assertion exists for the same subject/type/key,
+`record_assertion(...)` closes the new current assertion at that future
+effective date. That prevents an agent from accidentally overwriting a planned
+cutover.
+
+Use `supersede_assertion(...)` only when you are deliberately replacing a known
+assertion by id and do not need the future-scheduling behavior.
+
 Direct `UPDATE assertions ...` is intentionally blocked by policy.
+
+### Uncertain or range-only values
+
+Never fabricate a scalar the source did not state. If a human gave only a
+range or approximation ("84 or maybe 86 grand"), leave the scalar field
+(`amount_usd`, `quantity`, etc.) null — do not store a midpoint or best
+guess a downstream consumer would read as fact. Record the range and the
+uncertainty explicitly, lower the confidence, and name who can confirm:
+
+```json
+{
+  "amount_usd": null,
+  "range_usd": [84000, 86000],
+  "exact": false,
+  "note": "Owner recalled 84k or 86k; office manager has the exact figure"
+}
+```
+
+Pair it with a confirmation task assigned to the named confirmer.
+
+## Domain-scoped agent candidates
+
+For external agents, prefer the secure API or secure MCP server. If you are
+inside trusted SQL tooling, the equivalent helper is `agent_create_candidate`.
+It centralizes capability checks, idempotency, metadata shape, and audit rows:
+
+```sql
+SELECT rye.agent_create_candidate(
+  p_agent_id          := '<agent_uuid>'::uuid,
+  p_candidate_kind    := 'fact',
+  p_statement         := 'Acme account health is green after the renewal call.',
+  p_target_payload    := '{}'::jsonb,
+  p_domain_keys       := ARRAY['account-updates'],
+  p_source_scope      := 'slack:#sales',
+  p_impact_scope      := 'account:acme',
+  p_authority_basis   := 'account owner confirmed in channel',
+  p_speech_act        := 'confirmed',
+  p_current_or_future := 'current',
+  p_evidence_refs     := '[{"source":"slack","channel":"#sales","ts":"..."}]'::jsonb,
+  p_confidence        := 0.82,
+  p_idempotency_key   := 'source-message-id:candidate-key'
+);
+```
+
+If the agent lacks `rye.candidate.create` for every requested domain and scope,
+the function raises `insufficient_privilege` and writes a denied audit row.
+That is deliberate: the database is the last enforcement boundary for API, MCP,
+CLI, UI, and plugin callers.
+
+Use `agent_get_context_pack(...)` rather than broad graph reads when an agent is
+working inside a channel or app context. It returns only domains the agent can
+read and only subscribed channel context. Channel-local domains should not leak
+to another channel unless that channel is explicitly subscribed to the shared
+domain.
+
+## Schedule future accepted knowledge
+
+Generic future-effective assertion:
+
+```sql
+SELECT record_assertion(
+  p_assertion_type  := 'source_of_truth_policy',
+  p_assertion_key   := 'status_domain:battery_dispatch_control_state',
+  p_subject_node_id := '<scope_uuid>'::uuid,
+  p_claim           := '{"status_domain":"battery_dispatch_control_state","authoritative_source":"BatteryEMS-v2"}',
+  p_effective_at    := '2026-10-15T00:00:00Z'::timestamptz,
+  p_confidence      := 1.0,
+  p_mode            := 'current'
+);
+```
+
+Before `2026-10-15`, current reads still show the old assertion:
+
+```sql
+SELECT assertion_type, assertion_key, claim, effective_at, effective_to
+FROM rye.current_valid_assertions
+WHERE subject_node_id = '<scope_uuid>'::uuid;
+```
+
+After the cutover date in an as-of read, Rye returns the scheduled future row:
+
+```sql
+SELECT assertion_type, assertion_key, claim, effective_at, effective_to
+FROM rye.assertions_as_of('2026-10-16T00:00:00Z'::timestamptz)
+WHERE subject_node_id = '<scope_uuid>'::uuid;
+```
+
+## Store a plan separately from the future truth
+
+A plan must be visible today. The future truth should become active later.
+
+For CRM:
+
+```sql
+SELECT schedule_deal_stage_change(
+  p_opp_id          := '<opportunity_uuid>'::uuid,
+  p_stage           := 'proposal',
+  p_effective_at    := '2026-07-15T00:00:00Z'::timestamptz,
+  p_reason          := 'Proposal package target',
+  p_actor           := 'agent:crm-planner',
+  p_plan_properties := '{"owner":"sales","risk":"legal review pending"}'
+);
+```
+
+For project management:
+
+```sql
+SELECT schedule_task_status_change(
+  p_task_id      := '<task_uuid>'::uuid,
+  p_status       := 'ready_for_review',
+  p_effective_at := '2026-07-15T00:00:00Z'::timestamptz,
+  p_reason       := 'Review window opens',
+  p_actor        := 'agent:pm-planner'
+);
+
+SELECT schedule_milestone_status_change(
+  p_milestone_id := '<milestone_uuid>'::uuid,
+  p_status       := 'launch_ready',
+  p_effective_at := '2026-08-01T00:00:00Z'::timestamptz,
+  p_reason       := 'Launch readiness target',
+  p_actor        := 'agent:pm-planner'
+);
+```
+
+These helpers create current-visible `*_plan` assertions and scheduled
+future-effective status/stage assertions. Do not infer that the planned future
+state is true today.
 
 ## Multi-valued fact keying
 

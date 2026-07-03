@@ -17,7 +17,7 @@
   },
   "requires": {
     "plugins": [],
-    "db_functions": ["rye_catalog", "agent_node_summary", "link_record", "track_table", "record_event", "record_assertion"],
+    "db_functions": ["rye_catalog", "agent_node_summary", "assertions_as_of", "link_record", "track_table", "record_event", "record_assertion", "schedule_deal_stage_change", "schedule_task_status_change", "schedule_milestone_status_change"],
     "db_views": ["current_valid_assertions"],
     "cli_commands": ["./scripts/rye status", "./scripts/rye catalog capabilities"]
   },
@@ -29,7 +29,7 @@
       "description": "Guide agents through RLS setup, safe reads, auditable writes, provenance, and candidate promotion flows.",
       "read_only": false,
       "requires": {
-        "db_functions": ["record_event", "record_assertion", "link_record", "track_table"]
+        "db_functions": ["record_event", "record_assertion", "schedule_deal_stage_change", "schedule_task_status_change", "schedule_milestone_status_change", "link_record", "track_table"]
       },
       "entrypoints": [
         { "type": "skill_install", "command": "npx skills add BLTGV/project-rye --skill rye-agent-ops" }
