@@ -14,8 +14,8 @@ import { serve } from "@hono/node-server";
 import app from "./worker";
 import type { Env } from "./db";
 
-// Load .dev.vars (KEY=VALUE lines) on top of process.env so the Hono app's
-// `c.env` mirrors what wrangler dev would provide.
+// Load .dev.vars (KEY=VALUE lines) for local defaults. Explicit process env
+// wins so tests and one-off runs can point at an isolated database.
 async function loadDevVars() {
   try {
     const text = await readFile(new URL("../../.dev.vars", import.meta.url), "utf8");
@@ -27,7 +27,9 @@ async function loadDevVars() {
       if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
         v = v.slice(1, -1);
       }
-      process.env[k] = v;
+      if (process.env[k] === undefined) {
+        process.env[k] = v;
+      }
     }
   } catch {
     /* no .dev.vars, fine */
@@ -88,6 +90,8 @@ await loadDevVars();
 const env: Env = {
   DEFAULT_INSTANCE: process.env.DEFAULT_INSTANCE ?? "",
   RYE_INSTANCES: process.env.RYE_INSTANCES,
+  RYE_API_AUTH_MODE: process.env.RYE_API_AUTH_MODE,
+  RYE_API_ALLOWED_ORIGINS: process.env.RYE_API_ALLOWED_ORIGINS,
   ASSETS: assets,
 };
 

@@ -24,10 +24,14 @@ const Ctx = createContext<InstanceCtx | null>(null);
 
 const STORAGE_KEY = "rye.admin.instance";
 
+function urlRequestedInstance(): string {
+  return new URLSearchParams(window.location.search).get("instance") ?? "";
+}
+
 export function InstanceProvider({ children }: { children: ReactNode }) {
   const [instances, setInstances] = useState<InstanceDef[]>([]);
   const [current, _setCurrent] = useState<string>(
-    () => localStorage.getItem(STORAGE_KEY) ?? ""
+    () => urlRequestedInstance() || localStorage.getItem(STORAGE_KEY) || ""
   );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -42,13 +46,26 @@ export function InstanceProvider({ children }: { children: ReactNode }) {
       })
       .then((data) => {
         setError(null);
-        setInstances(data.instances ?? []);
-        if (!current) {
-          const id = data.default ?? data.instances?.[0]?.id ?? "";
-          if (id) {
-            _setCurrent(id);
-            localStorage.setItem(STORAGE_KEY, id);
-          }
+        const configured = data.instances ?? [];
+        setInstances(configured);
+
+        const requested = urlRequestedInstance();
+        const requestedExists =
+          requested && configured.some((instance) => instance.id === requested);
+        const currentExists =
+          current && configured.some((instance) => instance.id === current);
+        const id =
+          (requestedExists ? requested : "") ||
+          (currentExists ? current : "") ||
+          data.default ||
+          configured[0]?.id ||
+          "";
+
+        if (id && id !== current) {
+          _setCurrent(id);
+          localStorage.setItem(STORAGE_KEY, id);
+        } else if (id) {
+          localStorage.setItem(STORAGE_KEY, id);
         }
       })
       .catch((err) => {

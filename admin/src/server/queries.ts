@@ -3,6 +3,284 @@ import { withAdminCte } from "./db";
 
 type Sql = ReturnType<typeof postgres>;
 
+function jsonParam(value: unknown): postgres.JSONValue {
+  return value as postgres.JSONValue;
+}
+
+export interface AgentCapabilityGrant {
+  capability: string;
+  domain_key: string | null;
+  scope_ref: string | null;
+  expires_at: string | null;
+}
+
+export interface AgentAuthContext {
+  agent_id: string;
+  agent_key: string;
+  label: string;
+  runtime: string;
+  default_scope_ref: string | null;
+  capabilities: AgentCapabilityGrant[];
+}
+
+export interface AgentAuthorizationResult {
+  allowed: boolean;
+  capability: string;
+  domain_keys: string[];
+  scope_ref: string | null;
+  target_ref: string | null;
+  reason: string;
+}
+
+export interface CandidateAccessEnvelope {
+  domain_keys: string[];
+  source_scope: string | null;
+  impact_scope: string | null;
+  current_or_future: string | null;
+}
+
+export async function authenticateAgentToken(sql: Sql, token: string): Promise<AgentAuthContext | null> {
+  const rows = await sql.unsafe(
+    withAdminCte() +
+      `SELECT rye.authenticate_agent_token($1::text) AS auth
+       FROM cfg`,
+    [token]
+  );
+  return (rows[0]?.auth ?? null) as AgentAuthContext | null;
+}
+
+export async function authorizeAgentAction(
+  sql: Sql,
+  input: {
+    agentId: string;
+    action: string;
+    capability: string;
+    domainKeys?: string[];
+    scopeRef?: string | null;
+    targetRef?: string | null;
+    request?: Record<string, unknown>;
+    result?: Record<string, unknown>;
+  }
+): Promise<AgentAuthorizationResult> {
+  const rows = await sql.unsafe(
+    withAdminCte() +
+      `, auth AS (
+         SELECT rye.authorize_agent_action(
+           p_agent_id     := $1::uuid,
+           p_capability   := $3::text,
+           p_domain_keys  := $4::text[],
+           p_scope_ref    := $5::text,
+           p_target_ref   := $6::text
+         ) AS payload
+         FROM cfg
+       ),
+       audit AS (
+         SELECT rye.record_agent_action(
+           p_agent_id    := $1::uuid,
+           p_action      := $2::text,
+           p_capability  := $3::text,
+           p_allowed     := (payload->>'allowed')::boolean,
+           p_domain_keys := $4::text[],
+           p_scope_ref   := $5::text,
+           p_target_ref  := $6::text,
+           p_reason      := payload->>'reason',
+           p_request     := $7::jsonb,
+           p_result      := $8::jsonb
+         ) AS action_id
+         FROM auth
+       )
+       SELECT payload
+       FROM auth, audit`,
+    [
+      input.agentId,
+      input.action,
+      input.capability,
+      input.domainKeys ?? [],
+      input.scopeRef ?? null,
+      input.targetRef ?? null,
+      jsonParam(input.request ?? {}),
+      jsonParam(input.result ?? {}),
+    ]
+  );
+  return rows[0]?.payload as AgentAuthorizationResult;
+}
+
+export async function fetchCandidateAccessEnvelope(
+  sql: Sql,
+  candidateId: string
+): Promise<CandidateAccessEnvelope> {
+  const rows = await sql.unsafe(
+    withAdminCte() +
+      `SELECT json_build_object(
+         'domain_keys',
+           COALESCE((
+             SELECT json_agg(value ORDER BY value)
+             FROM jsonb_array_elements_text(
+               CASE
+                 WHEN jsonb_typeof(n.properties->'target_payload'->'domain_keys') = 'array'
+                   THEN n.properties->'target_payload'->'domain_keys'
+                 ELSE '[]'::jsonb
+               END
+             ) AS value
+           ), '[]'::json),
+         'source_scope', n.properties->'target_payload'->>'source_scope',
+         'impact_scope', n.properties->'target_payload'->>'impact_scope',
+         'current_or_future', n.properties->'target_payload'->>'current_or_future'
+       ) AS envelope
+       FROM rye.nodes n, cfg
+       WHERE n.id = $1::uuid
+         AND n.node_type = 'knowledge_candidate'
+         AND n.archived_at IS NULL`,
+    [candidateId]
+  );
+  return (
+    rows[0]?.envelope ?? {
+      domain_keys: [],
+      source_scope: null,
+      impact_scope: null,
+      current_or_future: null,
+    }
+  ) as CandidateAccessEnvelope;
+}
+
+export async function fetchDomains(
+  sql: Sql,
+  opts: { includeProperties?: boolean } = {}
+) {
+  const rows = await sql.unsafe(
+    withAdminCte() +
+      `SELECT COALESCE(json_agg(row_to_json(d) ORDER BY d.domain_key), '[]'::json) AS domains
+       FROM (
+         SELECT
+           kd.id::text AS id,
+           kd.domain_key,
+           kd.label,
+           kd.purpose,
+           kd.owner_node_id::text AS owner_node_id,
+           CASE WHEN $1::boolean THEN kd.properties ELSE '{}'::jsonb END AS properties,
+           kd.created_at,
+           kd.updated_at,
+           COALESCE((
+             SELECT json_agg(json_build_object(
+               'authority_kind', da.authority_kind,
+               'authority_ref', da.authority_ref,
+               'claim_types', da.claim_types,
+               'scope_ref', da.scope_ref,
+               'speech_acts', da.speech_acts,
+               'effective_at', da.effective_at,
+               'effective_to', da.effective_to
+             ) ORDER BY da.authority_kind, da.authority_ref)
+             FROM rye.domain_authorities da
+             WHERE da.domain_id = kd.id
+               AND da.active = true
+           ), '[]'::json) AS authorities,
+           COALESCE((
+             SELECT json_agg(json_build_object(
+               'channel_ref', s.channel_ref,
+               'access_level', s.access_level,
+               'is_shared', s.is_shared
+             ) ORDER BY s.channel_ref)
+             FROM rye.channel_domain_subscriptions s
+             WHERE s.domain_id = kd.id
+           ), '[]'::json) AS channel_subscriptions
+         FROM rye.knowledge_domains kd, cfg
+         WHERE kd.archived_at IS NULL
+       ) d`,
+    [opts.includeProperties ?? false]
+  );
+  return rows[0]?.domains ?? [];
+}
+
+export async function fetchAgentContextPack(
+  sql: Sql,
+  agentId: string,
+  opts: { scopeRef?: string | null; channelRef?: string | null; domainKeys?: string[] }
+) {
+  const rows = await sql.unsafe(
+    withAdminCte() +
+      `SELECT rye.agent_get_context_pack(
+         p_agent_id    := $1::uuid,
+         p_scope_ref   := $2::text,
+         p_channel_ref := $3::text,
+         p_domain_keys := $4::text[]
+       ) AS payload
+       FROM cfg`,
+    [agentId, opts.scopeRef ?? null, opts.channelRef ?? null, opts.domainKeys ?? []]
+  );
+  return rows[0]?.payload ?? {};
+}
+
+export async function fetchAgentAuditActions(sql: Sql, limit = 100) {
+  const rows = await sql.unsafe(
+    withAdminCte() +
+      `SELECT COALESCE(json_agg(row_to_json(a) ORDER BY a.created_at DESC), '[]'::json) AS actions
+       FROM (
+         SELECT
+           l.id::text AS id,
+           l.agent_id::text AS agent_id,
+           ai.agent_key,
+           ai.label AS agent_label,
+           l.action,
+           l.capability,
+           kd.domain_key,
+           l.scope_ref,
+           l.target_ref,
+           l.allowed,
+           l.reason,
+           l.request,
+           l.result,
+           l.created_at
+         FROM rye.agent_action_log l
+         LEFT JOIN rye.agent_identities ai ON ai.id = l.agent_id
+         LEFT JOIN rye.knowledge_domains kd ON kd.id = l.domain_id
+         ORDER BY l.created_at DESC
+         LIMIT $1::int
+       ) a, cfg`,
+    [Math.max(1, Math.min(limit, 500))]
+  );
+  return rows[0]?.actions ?? [];
+}
+
+export async function submitAgentObservation(
+  sql: Sql,
+  agentId: string,
+  input: {
+    statement: string;
+    domain_keys?: string[];
+    source_scope?: string | null;
+    impact_scope?: string | null;
+    evidence_refs?: unknown;
+    observed_at?: string | null;
+    properties?: Record<string, unknown>;
+  }
+): Promise<{ id: string }> {
+  const rows = await sql.unsafe(
+    withAdminCte() +
+      `SELECT rye.agent_submit_observation(
+         p_agent_id      := $1::uuid,
+         p_statement     := $2::text,
+         p_domain_keys   := $3::text[],
+         p_source_scope  := $4::text,
+         p_impact_scope  := $5::text,
+         p_evidence_refs := $6::jsonb,
+         p_observed_at   := $7::timestamptz,
+         p_properties    := $8::jsonb
+       )::text AS id
+       FROM cfg`,
+    [
+      agentId,
+      input.statement,
+      input.domain_keys ?? [],
+      input.source_scope ?? null,
+      input.impact_scope ?? null,
+      jsonParam(input.evidence_refs ?? []),
+      input.observed_at ?? null,
+      jsonParam(input.properties ?? {}),
+    ]
+  );
+  return { id: rows[0]?.id as string };
+}
+
 export interface CatalogResult {
   totals: Record<string, number>;
   node_types: Record<string, number>;
@@ -124,6 +402,8 @@ export async function searchNodes(
        WHERE n.archived_at IS NULL
          AND ($1::text IS NULL OR n.node_type = $1)
          AND ($2::text = '' OR n.label ILIKE '%' || $2 || '%'
+              OR n.external_id ILIKE '%' || $2 || '%'
+              OR n.external_source ILIKE '%' || $2 || '%'
               OR n.properties::text ILIKE '%' || $2 || '%')
        ORDER BY similarity(n.label, $2) DESC NULLS LAST, n.created_at DESC
        LIMIT $3 OFFSET $4`,
@@ -643,6 +923,1152 @@ export async function fetchSupersessions(sql: Sql, limit = 8) {
   );
 }
 
+export interface KnowledgeMapResult {
+  generated_at: string;
+  scopes: Record<string, unknown>[];
+  current_process: Record<string, unknown>[];
+  future_process: Record<string, unknown>[];
+  historical_process: Record<string, unknown>[];
+  candidate_statuses: Record<string, unknown>[];
+  candidate_samples: Record<string, unknown>[];
+  plugin_bindings: Record<string, unknown>[];
+  operational_plans: Record<string, unknown>[];
+  warnings: Record<string, unknown>[];
+  stats: Record<string, unknown>;
+}
+
+export async function fetchKnowledgeMap(sql: Sql): Promise<KnowledgeMapResult> {
+  const rows = await sql.unsafe(
+    withAdminCte() +
+      `, policy_assertions AS (
+         SELECT
+           a.id,
+           a.id::text AS id_text,
+           a.subject_node_id,
+           a.subject_node_id::text AS subject_node_id_text,
+           n.label AS scope_label,
+           n.node_type AS scope_type,
+           a.assertion_type,
+           a.assertion_key,
+           a.claim,
+           a.attrs,
+           a.effective_at,
+           a.effective_to,
+           a.created_at,
+           a.superseded_at,
+           a.superseded_by::text AS superseded_by,
+           a.source_event_id::text AS source_event_id,
+           COALESCE(a.claim->>'status_domain', a.claim->>'goal', a.claim->>'plugin_id', a.assertion_key) AS domain,
+           COALESCE(
+             a.claim->>'title',
+             a.claim->>'summary',
+             a.claim->>'policy',
+             a.claim->>'authoritative_source',
+             a.claim->>'constraint',
+             a.claim->>'current_constraint',
+             a.claim->>'Identify',
+             a.claim->>'identify',
+             a.claim->>'plugin_id',
+             a.claim->>'purpose'
+           ) AS summary_value,
+           COALESCE(
+             a.claim->>'current_cases_since',
+             a.claim->>'cutover_effective_at',
+             a.claim->>'authority_started_at',
+             a.claim->>'effective_at'
+           ) AS claimed_authority_at
+         FROM rye.assertions a
+         JOIN rye.nodes n ON n.id = a.subject_node_id
+         WHERE a.assertion_type IN (
+           'process_document',
+           'business_policy',
+           'source_of_truth_policy',
+           'process_constraint',
+           'improvement_cycle',
+           'process_improvement_cycle',
+           'plugin_policy_binding',
+           'accepted_knowledge_policy',
+           'candidate_review_policy',
+           'candidate_evidence_policy',
+           'evidence_policy',
+           'review_gate',
+           'review_gate_policy',
+           'review_policy',
+           'scope_status',
+           'scope_purpose',
+           'scope_owner'
+         )
+       ),
+       scope_ids AS (
+         SELECT n.id
+         FROM rye.nodes n
+         WHERE n.node_type = 'onboarding_scope'
+         UNION
+         SELECT subject_node_id
+         FROM policy_assertions
+         WHERE subject_node_id IS NOT NULL
+       ),
+       scope_rows AS (
+         SELECT
+           n.id::text AS id,
+           n.label,
+           n.node_type,
+           n.created_at,
+           COALESCE(status.claim->>'status', n.properties->>'status') AS status,
+           COALESCE(purpose.claim->>'purpose', purpose.claim->>'text') AS purpose,
+           COALESCE(owner.claim->>'owner', owner.claim->>'team', owner.claim->>'name') AS owner,
+           (
+             SELECT COUNT(*)::int
+             FROM policy_assertions pa
+             WHERE pa.subject_node_id = n.id
+               AND pa.superseded_at IS NULL
+               AND (pa.effective_at IS NULL OR pa.effective_at <= now())
+               AND (pa.effective_to IS NULL OR pa.effective_to > now())
+              AND pa.assertion_type IN ('process_document', 'business_policy', 'source_of_truth_policy', 'process_constraint', 'improvement_cycle', 'process_improvement_cycle')
+           ) AS active_policy_count,
+           (
+             SELECT COUNT(*)::int
+             FROM policy_assertions pa
+             WHERE pa.subject_node_id = n.id
+               AND pa.superseded_at IS NOT NULL
+           ) AS superseded_policy_count,
+           (
+             SELECT COUNT(*)::int
+             FROM rye.nodes c
+             WHERE c.node_type = 'knowledge_candidate'
+               AND COALESCE(c.properties->'review_context_ids', '[]'::jsonb) ? n.id::text
+           ) AS candidate_count
+         FROM rye.nodes n
+         LEFT JOIN rye.current_assertions status
+           ON status.subject_node_id = n.id
+          AND status.assertion_type = 'scope_status'
+          AND status.assertion_key = 'default'
+         LEFT JOIN rye.current_assertions purpose
+           ON purpose.subject_node_id = n.id
+          AND purpose.assertion_type = 'scope_purpose'
+          AND purpose.assertion_key = 'default'
+         LEFT JOIN rye.current_assertions owner
+           ON owner.subject_node_id = n.id
+          AND owner.assertion_type = 'scope_owner'
+          AND owner.assertion_key = 'default'
+         WHERE n.id IN (SELECT id FROM scope_ids)
+           AND n.archived_at IS NULL
+       ),
+       current_process AS (
+         SELECT
+           pa.id_text AS id,
+           pa.subject_node_id_text AS subject_node_id,
+           pa.scope_label,
+           pa.scope_type,
+           pa.assertion_type,
+           pa.assertion_key,
+           pa.domain,
+           pa.summary_value,
+           pa.claimed_authority_at,
+           pa.claim,
+           pa.attrs,
+           pa.effective_at,
+           pa.effective_to,
+           pa.created_at,
+           pa.source_event_id
+         FROM policy_assertions pa
+         WHERE pa.superseded_at IS NULL
+           AND (pa.effective_at IS NULL OR pa.effective_at <= now())
+           AND (pa.effective_to IS NULL OR pa.effective_to > now())
+           AND pa.assertion_type IN ('process_document', 'business_policy', 'source_of_truth_policy', 'process_constraint', 'improvement_cycle', 'process_improvement_cycle')
+         ORDER BY pa.scope_label, pa.assertion_type, pa.domain, pa.effective_at NULLS FIRST
+       ),
+       future_process AS (
+         SELECT
+           pa.id_text AS id,
+           pa.subject_node_id_text AS subject_node_id,
+           pa.scope_label,
+           pa.scope_type,
+           pa.assertion_type,
+           pa.assertion_key,
+           pa.domain,
+           pa.summary_value,
+           pa.claimed_authority_at,
+           pa.claim,
+           pa.attrs,
+           pa.effective_at,
+           pa.effective_to,
+           pa.created_at,
+           pa.source_event_id
+         FROM policy_assertions pa
+         WHERE pa.superseded_at IS NULL
+           AND pa.effective_at > now()
+           AND pa.assertion_type IN ('process_document', 'business_policy', 'source_of_truth_policy', 'process_constraint', 'improvement_cycle', 'process_improvement_cycle')
+         ORDER BY pa.effective_at, pa.scope_label, pa.assertion_type, pa.domain
+       ),
+       historical_process AS (
+         SELECT
+           pa.id_text AS id,
+           pa.subject_node_id_text AS subject_node_id,
+           pa.scope_label,
+           pa.scope_type,
+           pa.assertion_type,
+           pa.assertion_key,
+           pa.domain,
+           pa.summary_value,
+           pa.claimed_authority_at,
+           pa.claim,
+           pa.attrs,
+           pa.effective_at,
+           pa.effective_to,
+           pa.created_at,
+           pa.superseded_at,
+           pa.superseded_by,
+           pa.source_event_id
+         FROM policy_assertions pa
+         WHERE (
+             pa.superseded_at IS NOT NULL
+             OR (pa.effective_to IS NOT NULL AND pa.effective_to <= now())
+           )
+           AND pa.assertion_type IN ('process_document', 'business_policy', 'source_of_truth_policy', 'process_constraint', 'improvement_cycle', 'process_improvement_cycle')
+         ORDER BY pa.scope_label, pa.effective_at DESC NULLS LAST, pa.created_at DESC
+         LIMIT 80
+       ),
+       candidate_base AS (
+         SELECT
+           n.id,
+           n.id::text AS id_text,
+           n.label,
+           n.properties,
+           n.attrs,
+           n.created_at,
+           COALESCE(status.claim->>'status', 'proposed') AS status,
+           status.claim AS status_claim
+         FROM rye.nodes n
+         LEFT JOIN rye.current_assertions status
+           ON status.subject_node_id = n.id
+          AND status.assertion_type = 'candidate_status'
+          AND status.assertion_key = 'default'
+         WHERE n.node_type = 'knowledge_candidate'
+           AND n.archived_at IS NULL
+       ),
+       candidate_statuses AS (
+         SELECT status, COUNT(*)::int AS count
+         FROM candidate_base
+         GROUP BY status
+         ORDER BY count DESC, status
+       ),
+       candidate_samples AS (
+         SELECT
+           cb.id_text AS id,
+           cb.label,
+           cb.status,
+           cb.properties->>'candidate_kind' AS candidate_kind,
+           cb.properties->>'statement' AS statement,
+           cb.properties->'target_payload' AS target_payload,
+           cb.properties->'review_context_ids' AS review_context_ids,
+           cb.properties->>'confidence' AS confidence,
+           cb.created_at,
+           COALESCE((
+             SELECT json_agg(json_build_object(
+               'id', source.id::text,
+               'label', source.label,
+               'node_type', source.node_type,
+               'edge_type', e.edge_type
+             ) ORDER BY e.edge_type, source.label)
+             FROM rye.edges e
+             JOIN rye.nodes source ON source.id = e.target_id
+             WHERE e.source_id = cb.id
+               AND e.edge_type IN ('supported_by', 'derived_from')
+               AND e.archived_at IS NULL
+           ), '[]'::json) AS supporting_sources
+         FROM candidate_base cb
+         ORDER BY cb.created_at DESC
+         LIMIT 20
+       ),
+       plugin_bindings AS (
+         SELECT
+           pa.id_text AS assertion_id,
+           pa.subject_node_id_text AS scope_id,
+           pa.scope_label,
+           pa.claim->>'plugin_id' AS plugin_id,
+           pa.claim->>'plugin_node_id' AS plugin_node_id,
+           COALESCE(pa.claim->'manifest'->>'label', pa.claim->>'plugin_id') AS plugin_label,
+           COALESCE(pa.claim->'manifest'->>'description', '') AS description,
+           (pa.claim->>'plugin_id') LIKE 'rye-%' AS is_expected_plugin,
+           pa.effective_at,
+           pa.created_at,
+           pa.claim
+         FROM policy_assertions pa
+         WHERE pa.assertion_type = 'plugin_policy_binding'
+           AND pa.superseded_at IS NULL
+         ORDER BY pa.scope_label, plugin_id
+       ),
+       operational_plans AS (
+         SELECT
+           a.id::text AS id,
+           n.id::text AS subject_node_id,
+           n.label AS subject_label,
+           n.node_type AS subject_type,
+           a.assertion_type,
+           a.assertion_key,
+           a.claim,
+           a.attrs,
+           a.effective_at,
+           a.effective_to,
+           a.created_at,
+           a.source_event_id::text AS source_event_id,
+           CASE
+             WHEN nullif(a.claim->>'effective_at', '') IS NULL THEN a.effective_at
+             ELSE (a.claim->>'effective_at')::timestamptz
+           END AS planned_for
+         FROM rye.current_valid_assertions a
+         JOIN rye.nodes n ON n.id = a.subject_node_id
+         WHERE a.assertion_type IN ('deal_stage_plan', 'task_status_plan', 'milestone_status_plan')
+           AND n.archived_at IS NULL
+         ORDER BY planned_for NULLS LAST, n.label, a.assertion_type
+       ),
+       authority_date_warnings AS (
+         SELECT json_build_object(
+           'severity', 'attention',
+           'kind', 'authority_date_mismatch',
+           'subject_node_id', pa.subject_node_id_text,
+           'scope_label', pa.scope_label,
+           'assertion_id', pa.id_text,
+           'assertion_type', pa.assertion_type,
+           'assertion_key', pa.assertion_key,
+           'domain', pa.domain,
+           'effective_at', pa.effective_at,
+           'claimed_authority_at', pa.claimed_authority_at,
+           'summary', 'Assertion effective date differs from the authority date stated in the claim.'
+         ) AS warning
+         FROM policy_assertions pa
+         WHERE pa.assertion_type = 'source_of_truth_policy'
+           AND pa.superseded_at IS NULL
+           AND pa.effective_at IS NOT NULL
+           AND pa.claimed_authority_at IS NOT NULL
+           AND substring(pa.claimed_authority_at from 1 for 10) <> to_char(pa.effective_at, 'YYYY-MM-DD')
+       ),
+       duplicate_truth_warnings AS (
+         SELECT json_build_object(
+           'severity', 'high',
+           'kind', 'duplicate_current_authority',
+           'subject_node_id', subject_node_id_text,
+           'scope_label', scope_label,
+           'domain', domain,
+           'count', COUNT(*)::int,
+           'summary', 'More than one current source-of-truth policy exists for the same status domain.'
+         ) AS warning
+         FROM policy_assertions
+         WHERE assertion_type = 'source_of_truth_policy'
+           AND superseded_at IS NULL
+           AND (effective_at IS NULL OR effective_at <= now())
+           AND (effective_to IS NULL OR effective_to > now())
+         GROUP BY subject_node_id_text, scope_label, domain
+         HAVING COUNT(*) > 1
+       ),
+       duplicate_plugin_warnings AS (
+         SELECT json_build_object(
+           'severity', 'attention',
+           'kind', 'duplicate_plugin_binding',
+           'subject_node_id', subject_node_id_text,
+           'scope_label', scope_label,
+           'domain', assertion_key,
+           'count', COUNT(*)::int,
+           'summary', 'More than one current plugin_policy_binding exists for the same plugin on this scope.'
+         ) AS warning
+         FROM policy_assertions
+         WHERE assertion_type = 'plugin_policy_binding'
+           AND superseded_at IS NULL
+           AND (effective_at IS NULL OR effective_at <= now())
+           AND (effective_to IS NULL OR effective_to > now())
+         GROUP BY subject_node_id_text, scope_label, assertion_key
+         HAVING COUNT(*) > 1
+       ),
+       duplicate_constraint_warnings AS (
+         SELECT json_build_object(
+           'severity', 'high',
+           'kind', 'multiple_current_constraints',
+           'subject_node_id', subject_node_id_text,
+           'scope_label', scope_label,
+           'count', COUNT(*)::int,
+           'summary', 'More than one current process_constraint exists for this scope.'
+         ) AS warning
+         FROM policy_assertions
+         WHERE assertion_type = 'process_constraint'
+           AND superseded_at IS NULL
+           AND (effective_at IS NULL OR effective_at <= now())
+           AND (effective_to IS NULL OR effective_to > now())
+         GROUP BY subject_node_id_text, scope_label
+         HAVING COUNT(*) > 1
+       ),
+       duplicate_improvement_warnings AS (
+         SELECT json_build_object(
+           'severity', 'high',
+           'kind', 'multiple_current_improvement_cycles',
+           'subject_node_id', subject_node_id_text,
+           'scope_label', scope_label,
+           'count', COUNT(*)::int,
+           'summary', 'More than one current improvement cycle exists for this scope.'
+         ) AS warning
+         FROM policy_assertions
+         WHERE assertion_type IN ('improvement_cycle', 'process_improvement_cycle')
+           AND superseded_at IS NULL
+           AND (effective_at IS NULL OR effective_at <= now())
+           AND (effective_to IS NULL OR effective_to > now())
+         GROUP BY subject_node_id_text, scope_label
+         HAVING COUNT(*) > 1
+       ),
+       unexpected_plugin_warnings AS (
+         SELECT json_build_object(
+           'severity', 'attention',
+           'kind', 'unexpected_plugin_binding',
+           'subject_node_id', pb.scope_id,
+           'scope_label', pb.scope_label,
+           'assertion_id', pb.assertion_id,
+           'domain', pb.plugin_id,
+           'summary', 'Current plugin binding does not look like a Rye plugin ID. Review gates and source policies should be normal assertions, not pseudo-plugin bindings.'
+         ) AS warning
+         FROM plugin_bindings pb
+         WHERE NOT pb.is_expected_plugin
+       ),
+       future_effective_warnings AS (
+         SELECT json_build_object(
+           'severity', 'attention',
+           'kind', 'future_effective_policy',
+           'subject_node_id', pa.subject_node_id_text,
+           'scope_label', pa.scope_label,
+           'assertion_id', pa.id_text,
+           'assertion_type', pa.assertion_type,
+           'assertion_key', pa.assertion_key,
+           'effective_at', pa.effective_at,
+           'summary', 'A non-superseded policy has a future effective date.'
+         ) AS warning
+         FROM policy_assertions pa
+         WHERE pa.superseded_at IS NULL
+           AND pa.effective_at > now()
+           AND coalesce(pa.attrs->>'scheduled_future', 'false') <> 'true'
+       ),
+       missing_plugin_warnings AS (
+         SELECT json_build_object(
+           'severity', 'attention',
+           'kind', 'missing_source_context_plugin',
+           'subject_node_id', sr.id,
+           'scope_label', sr.label,
+           'summary', 'Scope has source-of-truth policy but no current rye-source-context plugin binding.'
+         ) AS warning
+         FROM scope_rows sr
+         WHERE EXISTS (
+           SELECT 1 FROM policy_assertions pa
+           WHERE pa.subject_node_id::text = sr.id
+             AND pa.assertion_type = 'source_of_truth_policy'
+             AND pa.superseded_at IS NULL
+             AND (pa.effective_at IS NULL OR pa.effective_at <= now())
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM policy_assertions pa
+           WHERE pa.subject_node_id::text = sr.id
+             AND pa.assertion_type = 'plugin_policy_binding'
+             AND pa.assertion_key = 'rye-source-context'
+             AND pa.superseded_at IS NULL
+         )
+       ),
+       empty_candidate_policy_warnings AS (
+         SELECT json_build_object(
+           'severity', 'attention',
+           'kind', 'candidate_policy_without_candidates',
+           'subject_node_id', sr.id,
+           'scope_label', sr.label,
+           'summary', 'Scope has current candidate/review policy, but no knowledge_candidate rows exist for review.'
+         ) AS warning
+         FROM scope_rows sr
+         WHERE NOT EXISTS (SELECT 1 FROM candidate_base)
+           AND EXISTS (
+             SELECT 1
+             FROM policy_assertions pa
+             WHERE pa.subject_node_id::text = sr.id
+               AND pa.superseded_at IS NULL
+               AND pa.assertion_type IN (
+                 'accepted_knowledge_policy',
+                 'candidate_review_policy',
+                 'candidate_evidence_policy',
+                 'review_policy',
+                 'review_gate',
+                 'review_gate_policy',
+                 'evidence_policy'
+               )
+               AND pa.claim::text ILIKE '%candidate%'
+               AND (
+                 pa.claim::text ILIKE '%patient%'
+                 OR pa.claim::text ILIKE '%case%'
+                 OR pa.claim::text ILIKE '%shipment%'
+                 OR pa.claim::text ILIKE '%order%'
+               )
+           )
+       ),
+       warnings AS (
+         SELECT warning FROM authority_date_warnings
+         UNION ALL SELECT warning FROM duplicate_truth_warnings
+         UNION ALL SELECT warning FROM duplicate_plugin_warnings
+         UNION ALL SELECT warning FROM duplicate_constraint_warnings
+         UNION ALL SELECT warning FROM duplicate_improvement_warnings
+         UNION ALL SELECT warning FROM unexpected_plugin_warnings
+         UNION ALL SELECT warning FROM future_effective_warnings
+         UNION ALL SELECT warning FROM missing_plugin_warnings
+         UNION ALL SELECT warning FROM empty_candidate_policy_warnings
+       )
+       SELECT json_build_object(
+         'generated_at', now(),
+         'scopes', COALESCE((SELECT json_agg(sr ORDER BY sr.label) FROM scope_rows sr), '[]'::json),
+         'current_process', COALESCE((SELECT json_agg(cp) FROM current_process cp), '[]'::json),
+         'future_process', COALESCE((SELECT json_agg(fp) FROM future_process fp), '[]'::json),
+         'historical_process', COALESCE((SELECT json_agg(hp) FROM historical_process hp), '[]'::json),
+         'candidate_statuses', COALESCE((SELECT json_agg(cs) FROM candidate_statuses cs), '[]'::json),
+         'candidate_samples', COALESCE((SELECT json_agg(c) FROM candidate_samples c), '[]'::json),
+         'plugin_bindings', COALESCE((SELECT json_agg(pb) FROM plugin_bindings pb), '[]'::json),
+         'operational_plans', COALESCE((SELECT json_agg(op) FROM operational_plans op), '[]'::json),
+         'warnings', COALESCE((SELECT json_agg(w.warning) FROM warnings w), '[]'::json),
+         'stats', json_build_object(
+           'scope_count', (SELECT COUNT(*)::int FROM scope_rows),
+           'current_process_count', (SELECT COUNT(*)::int FROM current_process),
+           'future_process_count', (SELECT COUNT(*)::int FROM future_process),
+           'historical_process_count', (SELECT COUNT(*)::int FROM historical_process),
+           'candidate_count', (SELECT COUNT(*)::int FROM candidate_base),
+           'plugin_binding_count', (SELECT COUNT(*)::int FROM plugin_bindings),
+           'operational_plan_count', (SELECT COUNT(*)::int FROM operational_plans),
+           'warning_count', (SELECT COUNT(*)::int FROM warnings)
+         )
+       ) AS payload
+       FROM cfg`
+  );
+  return rows[0]?.payload as KnowledgeMapResult;
+}
+
+export interface CandidateReviewQueueOptions {
+  status?: string | null;
+  kind?: string | null;
+  q?: string | null;
+  includeClosed?: boolean;
+  limit?: number;
+  offset?: number;
+}
+
+export async function fetchCandidateReviewQueue(
+  sql: Sql,
+  opts: CandidateReviewQueueOptions = {}
+) {
+  const rows = await sql.unsafe(
+    withAdminCte() +
+      `, candidate_base AS (
+         SELECT
+           n.id,
+           n.id::text AS id_text,
+           n.label,
+           n.properties,
+           n.attrs,
+           n.created_at,
+           COALESCE(status.claim->>'status', 'proposed') AS status,
+           status.claim AS status_claim,
+           n.properties->>'candidate_kind' AS candidate_kind,
+           n.properties->>'statement' AS statement,
+           n.properties->>'normalized_key' AS normalized_key,
+           n.properties->>'created_by' AS created_by,
+           n.properties->>'confidence' AS confidence_text
+         FROM rye.nodes n
+         LEFT JOIN rye.current_valid_assertions status
+           ON status.subject_node_id = n.id
+          AND status.assertion_type = 'candidate_status'
+          AND status.assertion_key = 'default'
+         WHERE n.node_type = 'knowledge_candidate'
+           AND n.archived_at IS NULL
+       ),
+       filtered AS (
+         SELECT *
+         FROM candidate_base cb
+         WHERE ($1::text IS NULL OR cb.status = $1::text)
+           AND ($2::text IS NULL OR cb.candidate_kind = $2::text)
+           AND (
+             $5::boolean
+             OR cb.status NOT IN ('accepted', 'rejected', 'duplicate', 'superseded')
+           )
+           AND (
+             nullif(trim(coalesce($3::text, '')), '') IS NULL
+             OR cb.statement ILIKE '%' || $3::text || '%'
+             OR cb.label ILIKE '%' || $3::text || '%'
+             OR cb.normalized_key ILIKE '%' || $3::text || '%'
+             OR cb.properties::text ILIKE '%' || $3::text || '%'
+           )
+       ),
+       candidate_rows AS (
+         SELECT
+           f.id_text AS id,
+           f.label,
+           f.properties,
+           f.attrs,
+           f.created_at,
+           f.status,
+           f.status_claim,
+           COALESCE((
+             SELECT json_agg(json_build_object(
+               'id', ctx.id::text,
+               'label', ctx.label,
+               'node_type', ctx.node_type
+             ) ORDER BY ctx.label)
+             FROM jsonb_array_elements_text(coalesce(f.properties->'review_context_ids', '[]'::jsonb)) ctx_ids(id_text)
+             JOIN rye.nodes ctx ON ctx.id::text = ctx_ids.id_text
+             WHERE ctx.archived_at IS NULL
+           ), '[]'::json) AS review_contexts,
+           COALESCE((
+             SELECT json_agg(json_build_object(
+               'id', n.id::text,
+               'label', n.label,
+               'node_type', n.node_type,
+               'edge_type', e.edge_type
+             ) ORDER BY e.edge_type, n.label)
+             FROM rye.edges e
+             JOIN rye.nodes n ON n.id = e.target_id
+             WHERE e.source_id = f.id
+               AND e.edge_type IN ('supported_by', 'derived_from')
+               AND e.archived_at IS NULL
+           ), '[]'::json) AS supporting_sources,
+           COALESCE((
+             SELECT json_agg(json_build_object(
+               'id', n.id::text,
+               'label', n.label,
+               'node_type', n.node_type,
+               'edge_type', e.edge_type
+             ) ORDER BY n.label)
+             FROM rye.edges e
+             JOIN rye.nodes n ON n.id = e.target_id
+             WHERE e.source_id = f.id
+               AND e.edge_type = 'promoted_to'
+               AND e.archived_at IS NULL
+           ), '[]'::json) AS promoted_targets,
+           COALESCE((
+             SELECT json_agg(json_build_object(
+               'status', a.claim->>'status',
+               'reason', a.claim->>'reason',
+               'actor', a.claim->>'actor',
+               'status_at', a.claim->>'status_at',
+               'assertion_id', a.id::text
+             ) ORDER BY a.created_at DESC)
+             FROM rye.assertions a
+             WHERE a.subject_node_id = f.id
+               AND a.assertion_type = 'candidate_status'
+           ), '[]'::json) AS status_history
+         FROM filtered f
+         ORDER BY
+           CASE f.status
+             WHEN 'needs_review' THEN 0
+             WHEN 'proposed' THEN 1
+             ELSE 2
+           END,
+           f.created_at DESC
+         LIMIT $4::int
+         OFFSET $6::int
+       ),
+       status_counts AS (
+         SELECT status, COUNT(*)::int AS count
+         FROM candidate_base
+         GROUP BY status
+       ),
+       kind_counts AS (
+         SELECT candidate_kind AS kind, COUNT(*)::int AS count
+         FROM candidate_base
+         GROUP BY candidate_kind
+       )
+       SELECT json_build_object(
+         'candidates', COALESCE((SELECT json_agg(cr ORDER BY cr.created_at DESC) FROM candidate_rows cr), '[]'::json),
+         'statuses', COALESCE((SELECT json_agg(sc ORDER BY sc.count DESC, sc.status) FROM status_counts sc), '[]'::json),
+         'kinds', COALESCE((SELECT json_agg(kc ORDER BY kc.count DESC, kc.kind) FROM kind_counts kc), '[]'::json),
+         'stats', json_build_object(
+           'total', (SELECT COUNT(*)::int FROM candidate_base),
+           'filtered', (SELECT COUNT(*)::int FROM filtered),
+           'open', (SELECT COUNT(*)::int FROM candidate_base WHERE status IN ('proposed', 'needs_review')),
+           'accepted', (SELECT COUNT(*)::int FROM candidate_base WHERE status = 'accepted'),
+           'rejected', (SELECT COUNT(*)::int FROM candidate_base WHERE status IN ('rejected', 'duplicate', 'superseded'))
+         )
+       ) AS payload
+       FROM cfg`,
+    [
+      opts.status && opts.status !== "all" ? opts.status : null,
+      opts.kind && opts.kind !== "all" ? opts.kind : null,
+      opts.q ?? null,
+      opts.limit ?? 80,
+      opts.includeClosed ?? false,
+      opts.offset ?? 0,
+    ]
+  );
+  return rows[0]?.payload ?? {
+    candidates: [],
+    statuses: [],
+    kinds: [],
+    stats: { total: 0, filtered: 0, open: 0, accepted: 0, rejected: 0 },
+  };
+}
+
+export async function fetchCrmWorkspace(sql: Sql) {
+  const rows = await sql.unsafe(
+    withAdminCte() +
+      `, opportunities AS (
+         SELECT
+           oa.node_id::text AS id,
+           oa.label,
+           oa.code,
+           oa.name,
+           oa.stage,
+           oa.pipeline,
+           oa.assigned_to_name,
+           oa.primary_contact_name,
+           oa.current_value,
+           oa.win_probability,
+           COALESCE(next_action.claim->>'next_action', next_action.claim->>'action') AS next_action,
+           COALESCE(related.related_items, '[]'::json) AS related_items,
+           oa.created_at
+         FROM rye.opportunities_active oa
+         LEFT JOIN rye.current_valid_assertions next_action
+           ON next_action.subject_node_id = oa.node_id
+          AND next_action.assertion_type = 'next_sales_action'
+          AND next_action.assertion_key = 'default'
+         LEFT JOIN LATERAL (
+           SELECT json_agg(json_build_object(
+             'id', item.id,
+             'label', item.label,
+             'node_type', item.node_type,
+             'relation', item.edge_type,
+             'direction', item.direction,
+             'role', item.properties->>'role',
+             'relationship', item.properties->>'relationship',
+             'context', item.properties->>'context',
+             'reason', item.properties->>'reason'
+           ) ORDER BY item.sort_order, item.label) AS related_items
+           FROM (
+             SELECT
+               n.id::text AS id,
+               n.label,
+               n.node_type,
+               e.edge_type,
+               e.properties,
+               'out' AS direction,
+               1 AS sort_order
+             FROM rye.edges e
+             JOIN rye.nodes n ON n.id = e.target_id
+             WHERE e.source_id = oa.node_id
+               AND e.archived_at IS NULL
+               AND n.archived_at IS NULL
+               AND e.edge_type IN ('primary_contact', 'customer_account', 'venue_under_review', 'agency_review', 'assigned_to', 'regarding', 'depends_on')
+             UNION ALL
+             SELECT
+               n.id::text AS id,
+               n.label,
+               n.node_type,
+               e.edge_type,
+               e.properties,
+               'in' AS direction,
+               2 AS sort_order
+             FROM rye.edges e
+             JOIN rye.nodes n ON n.id = e.source_id
+             WHERE e.target_id = oa.node_id
+               AND e.archived_at IS NULL
+               AND n.archived_at IS NULL
+               AND e.edge_type IN ('regarding', 'depends_on', 'blocks')
+           ) item
+         ) related ON true
+         CROSS JOIN cfg
+         ORDER BY
+           CASE oa.stage
+             WHEN 'prospecting' THEN 1
+             WHEN 'qualification' THEN 2
+             WHEN 'site_survey_completed' THEN 3
+             WHEN 'proposal_sent' THEN 4
+             WHEN 'contract_review' THEN 5
+             WHEN 'negotiation' THEN 6
+             ELSE 20
+           END,
+           oa.created_at DESC
+       ),
+       plans AS (
+         SELECT
+           a.id::text AS id,
+           a.subject_node_id::text AS subject_id,
+           a.assertion_type,
+           a.assertion_key,
+           a.claim,
+           a.effective_at,
+           a.created_at
+         FROM rye.current_valid_assertions a
+         WHERE a.assertion_type = 'deal_stage_plan'
+       ),
+       source_policies AS (
+         SELECT
+           a.id::text AS id,
+           a.subject_node_id::text AS scope_id,
+           n.label AS scope_label,
+           a.assertion_key,
+           a.claim,
+           a.effective_at,
+           a.created_at
+         FROM rye.assertions a
+         JOIN rye.nodes n ON n.id = a.subject_node_id
+         WHERE a.assertion_type = 'source_of_truth_policy'
+           AND a.superseded_at IS NULL
+           AND a.claim->>'status_domain' IN ('deal_stage', 'sales_next_action')
+         ORDER BY a.effective_at NULLS FIRST, a.created_at DESC
+       ),
+       candidate_base AS (
+         SELECT
+           c.id,
+           c.id::text AS id_text,
+           c.label,
+           c.properties,
+           c.created_at,
+           COALESCE(status.claim->>'status', 'proposed') AS status
+         FROM rye.nodes c
+         LEFT JOIN rye.current_valid_assertions status
+           ON status.subject_node_id = c.id
+          AND status.assertion_type = 'candidate_status'
+          AND status.assertion_key = 'default'
+         WHERE c.node_type = 'knowledge_candidate'
+           AND c.archived_at IS NULL
+       ),
+       candidates AS (
+         SELECT
+           cb.id_text AS id,
+           cb.label,
+           cb.properties,
+           cb.created_at,
+           cb.status,
+           COALESCE((
+             SELECT json_agg(json_build_object(
+               'id', src.id::text,
+               'label', src.label,
+               'node_type', src.node_type,
+               'source_type', src.properties->>'source_type'
+             ) ORDER BY src.label)
+             FROM rye.edges support
+             JOIN rye.nodes src ON src.id = support.target_id
+             WHERE support.source_id = cb.id
+               AND support.edge_type = 'supported_by'
+               AND support.archived_at IS NULL
+               AND src.archived_at IS NULL
+           ), '[]'::json) AS sources,
+           COALESCE((
+             SELECT json_agg(json_build_object(
+               'id', ctx.id::text,
+               'label', ctx.label,
+               'node_type', ctx.node_type
+             ) ORDER BY ctx.label)
+             FROM jsonb_array_elements_text(coalesce(cb.properties->'review_context_ids', '[]'::jsonb)) ctx_ids(id_text)
+             JOIN rye.nodes ctx ON ctx.id::text = ctx_ids.id_text
+             WHERE ctx.archived_at IS NULL
+           ), '[]'::json) AS review_contexts
+         FROM candidate_base cb
+         WHERE cb.status IN ('proposed', 'needs_review')
+           AND (
+             coalesce(cb.properties->'target_payload', '{}'::jsonb) ? 'opportunity_id'
+             OR coalesce(cb.properties->'target_payload', '{}'::jsonb) ? 'opportunityId'
+             OR coalesce(cb.properties->'target_payload'->'target_payload', '{}'::jsonb) ? 'opportunity_id'
+             OR coalesce(cb.properties->'target_payload'->'target_payload', '{}'::jsonb) ? 'opportunityId'
+             OR coalesce(cb.properties->'target_payload', '{}'::jsonb)->>'record_type' = 'opportunity'
+             OR coalesce(cb.properties->'target_payload', '{}'::jsonb)->>'record_type' = 'decision'
+             OR cb.properties->>'statement' ILIKE '%opportunity%'
+             OR cb.properties->>'statement' ILIKE '%deal_stage%'
+             OR cb.properties->>'statement' ILIKE '%sales_next_action%'
+             OR cb.properties->>'statement' ILIKE '%CRM%'
+             OR cb.properties::text ILIKE '%BW-OPP-%'
+             OR cb.properties::text ILIKE '%PipelinePro%'
+             OR cb.properties::text ILIKE '%HearthCRM%'
+           )
+         ORDER BY cb.created_at DESC
+         LIMIT 40
+       )
+       SELECT json_build_object(
+         'generated_at', now(),
+         'opportunities', COALESCE((SELECT json_agg(o) FROM opportunities o), '[]'::json),
+         'plans', COALESCE((SELECT json_agg(p ORDER BY p.effective_at NULLS LAST, p.created_at DESC) FROM plans p), '[]'::json),
+         'source_policies', COALESCE((SELECT json_agg(sp) FROM source_policies sp), '[]'::json),
+         'candidates', COALESCE((SELECT json_agg(c) FROM candidates c), '[]'::json)
+       ) AS payload
+       FROM cfg`
+  );
+  return rows[0]?.payload ?? { opportunities: [], plans: [], source_policies: [], candidates: [] };
+}
+
+export async function fetchPmWorkspace(sql: Sql) {
+  const rows = await sql.unsafe(
+    withAdminCte() +
+      `, tasks AS (
+         SELECT
+           tb.node_id::text AS id,
+           tb.title,
+           tb.code,
+           tb.task_type,
+           tb.due_date,
+           tb.priority,
+           tb.status,
+           tb.owner_name,
+           tb.reviewer_name,
+           tb.project_name,
+           tb.project_code,
+           tb.sprint_name,
+           tb.blocker_count,
+           tb.subtask_count,
+           COALESCE(related.related_items, '[]'::json) AS related_items,
+           tb.created_at
+         FROM rye.task_board tb
+         LEFT JOIN LATERAL (
+           SELECT json_agg(json_build_object(
+             'id', item.id,
+             'label', item.label,
+             'node_type', item.node_type,
+             'relation', item.edge_type,
+             'direction', item.direction,
+             'role', item.properties->>'role',
+             'relationship', item.properties->>'relationship',
+             'context', item.properties->>'context',
+             'dependency_type', item.properties->>'dependency_type',
+             'reason', item.properties->>'reason'
+           ) ORDER BY item.sort_order, item.label) AS related_items
+           FROM (
+             SELECT
+               n.id::text AS id,
+               n.label,
+               n.node_type,
+               e.edge_type,
+               e.properties,
+               'out' AS direction,
+               1 AS sort_order
+             FROM rye.edges e
+             JOIN rye.nodes n ON n.id = e.target_id
+             WHERE e.source_id = tb.node_id
+               AND e.archived_at IS NULL
+               AND n.archived_at IS NULL
+               AND e.edge_type IN ('assigned_to', 'regarding', 'depends_on', 'blocks', 'collaborates_on')
+             UNION ALL
+             SELECT
+               n.id::text AS id,
+               n.label,
+               n.node_type,
+               e.edge_type,
+               e.properties,
+               'in' AS direction,
+               2 AS sort_order
+             FROM rye.edges e
+             JOIN rye.nodes n ON n.id = e.source_id
+             WHERE e.target_id = tb.node_id
+               AND e.archived_at IS NULL
+               AND n.archived_at IS NULL
+               AND e.edge_type IN ('contains', 'depends_on', 'blocks', 'regarding', 'collaborates_on', 'vendor_for', 'reviewed_by')
+           ) item
+         ) related ON true
+         CROSS JOIN cfg
+         WHERE COALESCE(tb.task_type, '') NOT IN ('evidence_review', 'source_verification')
+         ORDER BY
+           CASE tb.status
+             WHEN 'blocked' THEN 0
+             WHEN 'backlog' THEN 1
+             WHEN 'todo' THEN 2
+             WHEN 'in_progress' THEN 3
+             WHEN 'ready_for_install' THEN 4
+             WHEN 'in_review' THEN 5
+             WHEN 'done' THEN 6
+             ELSE 20
+           END,
+           tb.due_date NULLS LAST,
+           tb.created_at DESC
+       ),
+       milestones AS (
+         SELECT
+           n.id::text AS id,
+           n.label,
+           n.properties->>'code' AS code,
+           COALESCE(n.properties->>'name', n.properties->>'title', n.label) AS name,
+           n.properties->>'target_date' AS target_date,
+           n.properties->>'priority' AS priority,
+           status.claim->>'status' AS status,
+           status.claim AS status_claim,
+           owner.label AS owner_name,
+           owner.id AS owner_id,
+           COALESCE(related.related_items, '[]'::json) AS related_items,
+           n.created_at
+         FROM rye.nodes n
+         LEFT JOIN rye.current_valid_assertions status
+           ON status.subject_node_id = n.id
+          AND status.assertion_type = 'milestone_status'
+          AND status.assertion_key = 'default'
+         LEFT JOIN LATERAL (
+           SELECT own_n.id, own_n.label
+           FROM rye.edges own_e
+           JOIN rye.nodes own_n ON own_n.id = own_e.target_id
+           WHERE own_e.source_id = n.id
+             AND own_e.edge_type = 'assigned_to'
+             AND own_e.properties->>'role' = 'owner'
+             AND own_e.archived_at IS NULL
+             AND (own_e.effective_from IS NULL OR own_e.effective_from <= now())
+             AND (own_e.effective_to IS NULL OR own_e.effective_to > now())
+           ORDER BY own_e.effective_from DESC NULLS LAST, own_e.created_at DESC
+           LIMIT 1
+         ) owner ON true
+         LEFT JOIN LATERAL (
+           SELECT json_agg(json_build_object(
+             'id', item.id,
+             'label', item.label,
+             'node_type', item.node_type,
+             'relation', item.edge_type,
+             'direction', item.direction,
+             'role', item.properties->>'role',
+             'relationship', item.properties->>'relationship',
+             'context', item.properties->>'context',
+             'dependency_type', item.properties->>'dependency_type',
+             'reason', item.properties->>'reason'
+           ) ORDER BY item.sort_order, item.label) AS related_items
+           FROM (
+             SELECT
+               related_node.id::text AS id,
+               related_node.label,
+               related_node.node_type,
+               e.edge_type,
+               e.properties,
+               'out' AS direction,
+               1 AS sort_order
+             FROM rye.edges e
+             JOIN rye.nodes related_node ON related_node.id = e.target_id
+             WHERE e.source_id = n.id
+               AND e.archived_at IS NULL
+               AND related_node.archived_at IS NULL
+               AND e.edge_type IN ('assigned_to', 'regarding', 'depends_on', 'blocks')
+             UNION ALL
+             SELECT
+               related_node.id::text AS id,
+               related_node.label,
+               related_node.node_type,
+               e.edge_type,
+               e.properties,
+               'in' AS direction,
+               2 AS sort_order
+             FROM rye.edges e
+             JOIN rye.nodes related_node ON related_node.id = e.source_id
+             WHERE e.target_id = n.id
+               AND e.archived_at IS NULL
+               AND related_node.archived_at IS NULL
+               AND e.edge_type IN ('contains', 'depends_on', 'blocks', 'regarding', 'reviewed_by')
+           ) item
+         ) related ON true
+         WHERE n.node_type = 'milestone'
+           AND n.archived_at IS NULL
+         ORDER BY target_date NULLS LAST, n.created_at DESC
+       ),
+       plans AS (
+         SELECT
+           a.id::text AS id,
+           a.subject_node_id::text AS subject_id,
+           n.label AS subject_label,
+           n.node_type AS subject_type,
+           a.assertion_type,
+           a.assertion_key,
+           a.claim,
+           a.effective_at,
+           a.created_at
+         FROM rye.current_valid_assertions a
+         JOIN rye.nodes n ON n.id = a.subject_node_id
+         WHERE a.assertion_type IN ('task_status_plan', 'milestone_status_plan')
+           AND n.archived_at IS NULL
+       ),
+       source_policies AS (
+         SELECT
+           a.id::text AS id,
+           a.subject_node_id::text AS scope_id,
+           n.label AS scope_label,
+           a.assertion_key,
+           a.claim,
+           a.effective_at,
+           a.created_at
+         FROM rye.assertions a
+         JOIN rye.nodes n ON n.id = a.subject_node_id
+         WHERE a.assertion_type = 'source_of_truth_policy'
+           AND a.superseded_at IS NULL
+           AND a.claim->>'status_domain' IN ('project_task_status', 'project_milestone_status')
+         ORDER BY a.effective_at NULLS FIRST, a.created_at DESC
+       ),
+       candidate_base AS (
+         SELECT
+           c.id,
+           c.id::text AS id_text,
+           c.label,
+           c.properties,
+           c.created_at,
+           COALESCE(status.claim->>'status', 'proposed') AS status
+         FROM rye.nodes c
+         LEFT JOIN rye.current_valid_assertions status
+           ON status.subject_node_id = c.id
+          AND status.assertion_type = 'candidate_status'
+          AND status.assertion_key = 'default'
+         WHERE c.node_type = 'knowledge_candidate'
+           AND c.archived_at IS NULL
+       ),
+       candidates AS (
+         SELECT
+           cb.id_text AS id,
+           cb.label,
+           cb.properties,
+           cb.created_at,
+           cb.status,
+           COALESCE((
+             SELECT json_agg(json_build_object(
+               'id', src.id::text,
+               'label', src.label,
+               'node_type', src.node_type,
+               'source_type', src.properties->>'source_type'
+             ) ORDER BY src.label)
+             FROM rye.edges support
+             JOIN rye.nodes src ON src.id = support.target_id
+             WHERE support.source_id = cb.id
+               AND support.edge_type = 'supported_by'
+               AND support.archived_at IS NULL
+               AND src.archived_at IS NULL
+           ), '[]'::json) AS sources,
+           COALESCE((
+             SELECT json_agg(json_build_object(
+               'id', ctx.id::text,
+               'label', ctx.label,
+               'node_type', ctx.node_type
+             ) ORDER BY ctx.label)
+             FROM jsonb_array_elements_text(coalesce(cb.properties->'review_context_ids', '[]'::jsonb)) ctx_ids(id_text)
+             JOIN rye.nodes ctx ON ctx.id::text = ctx_ids.id_text
+             WHERE ctx.archived_at IS NULL
+           ), '[]'::json) AS review_contexts
+         FROM candidate_base cb
+         WHERE cb.status IN ('proposed', 'needs_review')
+           AND (
+             coalesce(cb.properties->'target_payload', '{}'::jsonb) ? 'task_id'
+             OR coalesce(cb.properties->'target_payload', '{}'::jsonb) ? 'taskId'
+             OR coalesce(cb.properties->'target_payload', '{}'::jsonb) ? 'milestone_id'
+             OR coalesce(cb.properties->'target_payload', '{}'::jsonb) ? 'milestoneId'
+             OR coalesce(cb.properties->'target_payload'->'target_payload', '{}'::jsonb) ? 'task_id'
+             OR coalesce(cb.properties->'target_payload'->'target_payload', '{}'::jsonb) ? 'taskId'
+             OR coalesce(cb.properties->'target_payload'->'target_payload', '{}'::jsonb) ? 'milestone_id'
+             OR coalesce(cb.properties->'target_payload'->'target_payload', '{}'::jsonb) ? 'milestoneId'
+             OR coalesce(cb.properties->'target_payload', '{}'::jsonb)->>'record_type' IN ('task', 'milestone', 'decision')
+             OR cb.properties->>'statement' ILIKE '%task%'
+             OR cb.properties->>'statement' ILIKE '%milestone%'
+             OR cb.properties->>'statement' ILIKE '%project_task_status%'
+             OR cb.properties->>'statement' ILIKE '%project_milestone_status%'
+             OR cb.properties::text ILIKE '%BW-TSK-%'
+             OR cb.properties::text ILIKE '%BW-MIL-%'
+             OR cb.properties::text ILIKE '%BuildBoard%'
+             OR cb.properties::text ILIKE '%JobBoardPM%'
+           )
+         ORDER BY cb.created_at DESC
+         LIMIT 50
+       )
+       SELECT json_build_object(
+         'generated_at', now(),
+         'tasks', COALESCE((SELECT json_agg(t) FROM tasks t), '[]'::json),
+         'milestones', COALESCE((SELECT json_agg(m) FROM milestones m), '[]'::json),
+         'plans', COALESCE((SELECT json_agg(p ORDER BY p.effective_at NULLS LAST, p.created_at DESC) FROM plans p), '[]'::json),
+         'source_policies', COALESCE((SELECT json_agg(sp) FROM source_policies sp), '[]'::json),
+         'candidates', COALESCE((SELECT json_agg(c) FROM candidates c), '[]'::json)
+       ) AS payload
+       FROM cfg`
+  );
+  return rows[0]?.payload ?? { tasks: [], milestones: [], plans: [], source_policies: [], candidates: [] };
+}
+
 // ---------------------------------------------------------------------------
 // Knowledge promotion: evidence -> candidate -> accepted knowledge
 // ---------------------------------------------------------------------------
@@ -1051,6 +2477,13 @@ export interface CreateKnowledgeCandidateInput {
   candidate_kind: string;
   statement: string;
   target_payload?: Record<string, unknown>;
+  domain_keys?: string[];
+  source_scope?: string | null;
+  impact_scope?: string | null;
+  authority_basis?: string | null;
+  speech_act?: string | null;
+  current_or_future?: string | null;
+  evidence_refs?: unknown;
   review_context_ids?: string[];
   normalized_key?: string | null;
   created_by?: string | null;
@@ -1080,13 +2513,69 @@ export async function createKnowledgeCandidate(
     [
       input.candidate_kind,
       input.statement,
-      JSON.stringify(input.target_payload ?? {}),
+      jsonParam(input.target_payload ?? {}),
       input.review_context_ids ?? [],
       input.normalized_key ?? null,
       input.created_by ?? null,
       input.source_node_ids ?? [],
       input.derived_from_node_ids ?? [],
       input.confidence ?? null,
+    ]
+  );
+  return { id: rows[0]?.id as string };
+}
+
+export async function createAgentKnowledgeCandidate(
+  sql: Sql,
+  agentId: string,
+  input: CreateKnowledgeCandidateInput,
+  idempotencyKey?: string | null
+): Promise<{ id: string }> {
+  const targetPayload = input.target_payload ?? {};
+  const domainKeys = input.domain_keys ?? (
+    Array.isArray(targetPayload.domain_keys) ? (targetPayload.domain_keys as string[]) : []
+  );
+  const rows = await sql.unsafe(
+    withAdminCte() +
+      `SELECT rye.agent_create_candidate(
+         p_agent_id               := $1::uuid,
+         p_candidate_kind         := $2::text,
+         p_statement              := $3::text,
+         p_target_payload         := $4::jsonb,
+         p_domain_keys            := $5::text[],
+         p_source_scope           := $6::text,
+         p_impact_scope           := $7::text,
+         p_authority_basis        := $8::text,
+         p_speech_act             := $9::text,
+         p_current_or_future      := $10::text,
+         p_evidence_refs          := $11::jsonb,
+         p_review_context_ids     := $12::uuid[],
+         p_normalized_key         := $13::text,
+         p_source_node_ids        := $14::uuid[],
+         p_derived_from_node_ids  := $15::uuid[],
+         p_confidence             := $16::numeric,
+         p_idempotency_key        := $17::text
+       )::text AS id
+       FROM cfg`,
+    [
+      agentId,
+      input.candidate_kind,
+      input.statement,
+      jsonParam(targetPayload),
+      domainKeys,
+      input.source_scope ?? (typeof targetPayload.source_scope === "string" ? targetPayload.source_scope : null),
+      input.impact_scope ?? (typeof targetPayload.impact_scope === "string" ? targetPayload.impact_scope : null),
+      input.authority_basis ?? (typeof targetPayload.authority_basis === "string" ? targetPayload.authority_basis : null),
+      input.speech_act ?? (typeof targetPayload.speech_act === "string" ? targetPayload.speech_act : null),
+      input.current_or_future ??
+        (typeof targetPayload.current_or_future === "string" ? targetPayload.current_or_future : "current"),
+      jsonParam(input.evidence_refs ?? targetPayload.evidence_refs ?? []),
+      input.review_context_ids ?? [],
+      input.normalized_key ?? null,
+      input.source_node_ids ?? [],
+      input.derived_from_node_ids ?? [],
+      input.confidence ?? null,
+      idempotencyKey ?? null,
     ]
   );
   return { id: rows[0]?.id as string };
@@ -1165,7 +2654,7 @@ export async function promoteKnowledgeCandidate(
         input.subject_node_id,
         input.assertion_type,
         input.assertion_key ?? "default",
-        JSON.stringify(input.claim),
+        jsonParam(input.claim),
         input.effective_at ?? null,
         input.effective_to ?? null,
         input.confidence ?? null,
@@ -1185,7 +2674,7 @@ export async function promoteKnowledgeCandidate(
            p_actor        := $4::text
          )::text AS id
          FROM cfg`,
-      [candidateId, input.label, JSON.stringify(input.properties ?? {}), input.actor ?? null]
+      [candidateId, input.label, jsonParam(input.properties ?? {}), input.actor ?? null]
     );
     return { target_type: "task", id: rows[0]?.id as string };
   }
@@ -1208,13 +2697,352 @@ export async function promoteKnowledgeCandidate(
       input.source_id,
       input.target_id,
       input.edge_type,
-      JSON.stringify(input.properties ?? {}),
+      jsonParam(input.properties ?? {}),
       input.effective_from ?? null,
       input.effective_to ?? null,
       input.actor ?? null,
     ]
   );
   return { target_type: "edge", id: rows[0]?.id as string };
+}
+
+export interface AcceptSourcePolicyCandidateInput {
+  scope_id: string;
+  status_domains: string[];
+  authoritative_source: string;
+  effective_at?: string | null;
+  review_gate?: string | null;
+  evidence_allowed?: string[];
+  supersedes?: string | null;
+  notes?: string | null;
+  actor?: string | null;
+}
+
+export async function acceptSourcePolicyCandidate(
+  sql: Sql,
+  candidateId: string,
+  input: AcceptSourcePolicyCandidateInput
+): Promise<{ target_type: "source_policy"; ids: string[]; subject_node_id: string }> {
+  const domains = Array.from(
+    new Set(input.status_domains.map((domain) => domain.trim()).filter(Boolean))
+  );
+  if (domains.length === 0) throw new Error("At least one status domain is required");
+
+  const rows = await sql.unsafe(
+    withAdminCte() +
+      `, domains AS MATERIALIZED (
+         SELECT DISTINCT nullif(trim(value), '') AS domain
+         FROM unnest($3::text[]) AS value
+         WHERE nullif(trim(value), '') IS NOT NULL
+       ),
+       policies AS MATERIALIZED (
+         SELECT
+           d.domain,
+           rye.record_source_of_truth_policy(
+             p_scope_id              := $2::uuid,
+             p_status_domain         := d.domain,
+             p_authoritative_source  := $4::text,
+             p_effective_at          := $5::timestamptz,
+             p_review_gate           := $6::text,
+             p_evidence_allowed      := $7::text[],
+             p_supersedes            := $8::text,
+             p_notes                 := $9::text,
+             p_actor                 := $10::text
+           ) AS assertion_id
+         FROM cfg, domains d
+       ),
+       status_update AS (
+         SELECT rye.set_candidate_status(
+           p_candidate_id := $1::uuid,
+           p_status       := 'accepted',
+           p_reason       := format(
+             'Accepted as %s source-of-truth polic%s: %s',
+             COUNT(*)::int,
+             CASE WHEN COUNT(*) = 1 THEN 'y' ELSE 'ies' END,
+             string_agg(assertion_id::text, ', ' ORDER BY domain)
+           ),
+           p_actor        := $10::text
+         ) AS status_assertion_id
+         FROM policies
+       ),
+       link AS (
+         INSERT INTO rye.edges (edge_type, source_id, target_id, properties, attrs)
+         SELECT
+           'promoted_to',
+           $1::uuid,
+           $2::uuid,
+           jsonb_build_object(
+             'target_type', 'source_of_truth_policy',
+             'assertion_ids', p.assertion_ids,
+             'status_domains', p.status_domains
+           ),
+           jsonb_build_object('candidate_id', $1::uuid)
+         FROM (
+           SELECT
+             jsonb_agg(assertion_id::text ORDER BY domain) AS assertion_ids,
+             jsonb_agg(domain ORDER BY domain) AS status_domains
+           FROM policies
+         ) p
+         WHERE p.assertion_ids IS NOT NULL
+           AND NOT EXISTS (
+             SELECT 1 FROM rye.edges e
+             WHERE e.source_id = $1::uuid
+               AND e.target_id = $2::uuid
+               AND e.edge_type = 'promoted_to'
+               AND e.archived_at IS NULL
+           )
+         RETURNING id
+       )
+       SELECT COALESCE(json_agg(p.assertion_id::text ORDER BY p.domain), '[]'::json) AS ids,
+              (SELECT COUNT(*)::int FROM link) AS link_count
+       FROM policies p
+       CROSS JOIN status_update`,
+    [
+      candidateId,
+      input.scope_id,
+      domains,
+      input.authoritative_source,
+      input.effective_at ?? null,
+      input.review_gate ?? null,
+      input.evidence_allowed ?? [],
+      input.supersedes ?? null,
+      input.notes ?? null,
+      input.actor ?? null,
+    ]
+  );
+  return {
+    target_type: "source_policy",
+    ids: (rows[0]?.ids ?? []) as string[],
+    subject_node_id: input.scope_id,
+  };
+}
+
+export interface AcceptCrmStagePlanCandidateInput {
+  opportunity_id: string;
+  stage: string;
+  effective_at: string;
+  reason?: string | null;
+  actor?: string | null;
+  plan_properties?: Record<string, unknown>;
+}
+
+export async function acceptCrmStagePlanCandidate(
+  sql: Sql,
+  candidateId: string,
+  input: AcceptCrmStagePlanCandidateInput
+): Promise<{ target_type: "crm_stage_plan"; id: string; subject_node_id: string }> {
+  const rows = await sql.unsafe(
+    withAdminCte() +
+      `, scheduled AS (
+         SELECT rye.schedule_deal_stage_change(
+           p_opp_id          := $2::uuid,
+           p_stage           := $3::text,
+           p_effective_at    := $4::timestamptz,
+           p_reason          := $5::text,
+           p_actor           := $6::text,
+           p_plan_properties := $7::jsonb
+         ) AS assertion_id
+         FROM cfg
+       ),
+       status_update AS (
+         SELECT rye.set_candidate_status(
+           p_candidate_id := $1::uuid,
+           p_status       := 'accepted',
+           p_reason       := 'Accepted as scheduled CRM stage change ' || assertion_id::text,
+           p_actor        := $6::text
+         ) AS status_assertion_id
+         FROM scheduled
+       ),
+       link AS (
+         INSERT INTO rye.edges (edge_type, source_id, target_id, properties, attrs)
+         SELECT
+           'promoted_to',
+           $1::uuid,
+           $2::uuid,
+           jsonb_build_object(
+             'target_type', 'crm_stage_plan',
+             'scheduled_assertion_id', assertion_id,
+             'stage', $3::text,
+             'effective_at', $4::timestamptz
+           ),
+           jsonb_build_object('candidate_id', $1::uuid)
+         FROM scheduled
+         WHERE NOT EXISTS (
+           SELECT 1 FROM rye.edges e
+           WHERE e.source_id = $1::uuid
+             AND e.target_id = $2::uuid
+             AND e.edge_type = 'promoted_to'
+             AND e.archived_at IS NULL
+         )
+         RETURNING id
+       )
+       SELECT scheduled.assertion_id::text AS id,
+              (SELECT COUNT(*)::int FROM link) AS link_count
+       FROM scheduled
+       CROSS JOIN status_update`,
+    [
+      candidateId,
+      input.opportunity_id,
+      input.stage,
+      input.effective_at,
+      input.reason ?? null,
+      input.actor ?? null,
+      jsonParam(input.plan_properties ?? {}),
+    ]
+  );
+  return { target_type: "crm_stage_plan", id: rows[0]?.id as string, subject_node_id: input.opportunity_id };
+}
+
+export interface AcceptPmTaskPlanCandidateInput {
+  task_id: string;
+  status: string;
+  effective_at: string;
+  reason?: string | null;
+  actor?: string | null;
+  plan_properties?: Record<string, unknown>;
+}
+
+export async function acceptPmTaskPlanCandidate(
+  sql: Sql,
+  candidateId: string,
+  input: AcceptPmTaskPlanCandidateInput
+): Promise<{ target_type: "pm_task_plan"; id: string; subject_node_id: string }> {
+  const rows = await sql.unsafe(
+    withAdminCte() +
+      `, scheduled AS (
+         SELECT rye.schedule_task_status_change(
+           p_task_id         := $2::uuid,
+           p_status          := $3::text,
+           p_effective_at    := $4::timestamptz,
+           p_reason          := $5::text,
+           p_actor           := $6::text,
+           p_plan_properties := $7::jsonb
+         ) AS assertion_id
+         FROM cfg
+       ),
+       status_update AS (
+         SELECT rye.set_candidate_status(
+           p_candidate_id := $1::uuid,
+           p_status       := 'accepted',
+           p_reason       := 'Accepted as scheduled PM task status change ' || assertion_id::text,
+           p_actor        := $6::text
+         ) AS status_assertion_id
+         FROM scheduled
+       ),
+       link AS (
+         INSERT INTO rye.edges (edge_type, source_id, target_id, properties, attrs)
+         SELECT
+           'promoted_to',
+           $1::uuid,
+           $2::uuid,
+           jsonb_build_object(
+             'target_type', 'pm_task_plan',
+             'scheduled_assertion_id', assertion_id,
+             'status', $3::text,
+             'effective_at', $4::timestamptz
+           ),
+           jsonb_build_object('candidate_id', $1::uuid)
+         FROM scheduled
+         WHERE NOT EXISTS (
+           SELECT 1 FROM rye.edges e
+           WHERE e.source_id = $1::uuid
+             AND e.target_id = $2::uuid
+             AND e.edge_type = 'promoted_to'
+             AND e.archived_at IS NULL
+         )
+         RETURNING id
+       )
+       SELECT scheduled.assertion_id::text AS id,
+              (SELECT COUNT(*)::int FROM link) AS link_count
+       FROM scheduled
+       CROSS JOIN status_update`,
+    [
+      candidateId,
+      input.task_id,
+      input.status,
+      input.effective_at,
+      input.reason ?? null,
+      input.actor ?? null,
+      jsonParam(input.plan_properties ?? {}),
+    ]
+  );
+  return { target_type: "pm_task_plan", id: rows[0]?.id as string, subject_node_id: input.task_id };
+}
+
+export interface AcceptPmMilestonePlanCandidateInput {
+  milestone_id: string;
+  status: string;
+  effective_at: string;
+  reason?: string | null;
+  actor?: string | null;
+  plan_properties?: Record<string, unknown>;
+}
+
+export async function acceptPmMilestonePlanCandidate(
+  sql: Sql,
+  candidateId: string,
+  input: AcceptPmMilestonePlanCandidateInput
+): Promise<{ target_type: "pm_milestone_plan"; id: string; subject_node_id: string }> {
+  const rows = await sql.unsafe(
+    withAdminCte() +
+      `, scheduled AS (
+         SELECT rye.schedule_milestone_status_change(
+           p_milestone_id    := $2::uuid,
+           p_status          := $3::text,
+           p_effective_at    := $4::timestamptz,
+           p_reason          := $5::text,
+           p_actor           := $6::text,
+           p_plan_properties := $7::jsonb
+         ) AS assertion_id
+         FROM cfg
+       ),
+       status_update AS (
+         SELECT rye.set_candidate_status(
+           p_candidate_id := $1::uuid,
+           p_status       := 'accepted',
+           p_reason       := 'Accepted as scheduled PM milestone status change ' || assertion_id::text,
+           p_actor        := $6::text
+         ) AS status_assertion_id
+         FROM scheduled
+       ),
+       link AS (
+         INSERT INTO rye.edges (edge_type, source_id, target_id, properties, attrs)
+         SELECT
+           'promoted_to',
+           $1::uuid,
+           $2::uuid,
+           jsonb_build_object(
+             'target_type', 'pm_milestone_plan',
+             'scheduled_assertion_id', assertion_id,
+             'status', $3::text,
+             'effective_at', $4::timestamptz
+           ),
+           jsonb_build_object('candidate_id', $1::uuid)
+         FROM scheduled
+         WHERE NOT EXISTS (
+           SELECT 1 FROM rye.edges e
+           WHERE e.source_id = $1::uuid
+             AND e.target_id = $2::uuid
+             AND e.edge_type = 'promoted_to'
+             AND e.archived_at IS NULL
+         )
+         RETURNING id
+       )
+       SELECT scheduled.assertion_id::text AS id,
+              (SELECT COUNT(*)::int FROM link) AS link_count
+       FROM scheduled
+       CROSS JOIN status_update`,
+    [
+      candidateId,
+      input.milestone_id,
+      input.status,
+      input.effective_at,
+      input.reason ?? null,
+      input.actor ?? null,
+      jsonParam(input.plan_properties ?? {}),
+    ]
+  );
+  return { target_type: "pm_milestone_plan", id: rows[0]?.id as string, subject_node_id: input.milestone_id };
 }
 
 // ---------------------------------------------------------------------------

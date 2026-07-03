@@ -3,20 +3,41 @@ import { NavLink, Outlet, useNavigate } from "react-router";
 import {
   Activity,
   AlertTriangle,
+  BriefcaseBusiness,
+  ClipboardCheck,
   CircuitBoard,
+  KanbanSquare,
   LayoutDashboard,
+  type LucideIcon,
   Network,
   Search,
 } from "lucide-react";
 import { useInstance } from "../lib/instance";
 import { CommandPalette } from "./CommandPalette";
 
-const NAV: { to: string; label: string; Icon: typeof LayoutDashboard }[] = [
-  { to: "/", label: "Overview", Icon: LayoutDashboard },
-  { to: "/search", label: "Records", Icon: Search },
-  { to: "/graph", label: "Graph", Icon: Network },
-  { to: "/events", label: "Activity", Icon: Activity },
-  { to: "/disputes", label: "Disputes", Icon: AlertTriangle },
+const NAV_SECTIONS: {
+  label: string;
+  items: { to: string; label: string; Icon: LucideIcon }[];
+}[] = [
+  {
+    label: "Work",
+    items: [
+      { to: "/", label: "Overview", Icon: LayoutDashboard },
+      { to: "/sales", label: "Sales", Icon: BriefcaseBusiness },
+      { to: "/projects", label: "Projects", Icon: KanbanSquare },
+      { to: "/review", label: "Decisions", Icon: ClipboardCheck },
+    ],
+  },
+  {
+    label: "Admin tools",
+    items: [
+      { to: "/search", label: "Records", Icon: Search },
+      { to: "/knowledge", label: "Process Map", Icon: CircuitBoard },
+      { to: "/graph", label: "Graph", Icon: Network },
+      { to: "/events", label: "Activity", Icon: Activity },
+      { to: "/disputes", label: "Disputes", Icon: AlertTriangle },
+    ],
+  },
 ];
 
 export function AppLayout() {
@@ -35,66 +56,73 @@ export function AppLayout() {
   }, []);
 
   return (
-    <div className="grid min-h-screen grid-cols-[224px_minmax(0,1fr)] text-[color:var(--color-ink)]">
+    <div className="grid min-h-screen grid-cols-1 text-[color:var(--color-ink)] md:grid-cols-[224px_minmax(0,1fr)]">
       {/* Sidebar */}
-      <aside className="sticky top-0 flex h-screen min-h-0 flex-col overflow-hidden border-r border-[color:var(--color-line)] bg-[color:var(--color-surface)]/70 backdrop-blur">
+      <aside className="top-0 hidden h-screen min-h-0 flex-col overflow-hidden border-r border-[color:var(--color-line)] bg-[color:var(--color-surface)]/70 backdrop-blur md:sticky md:flex">
         <div className="shrink-0 border-b border-[color:var(--color-line-soft)] px-5 py-5">
           <div className="flex items-center gap-2">
             <RyeMark />
             <div className="flex flex-col leading-tight">
               <span className="text-sm font-semibold tracking-tight">Rye</span>
               <span className="text-[10px] uppercase tracking-[0.18em] text-[color:var(--color-ink-dim)]">
-                admin console
+                business knowledge
               </span>
             </div>
           </div>
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3 scrollbar">
-          <nav className="flex flex-col gap-0.5">
-            {NAV.map(({ to, label, Icon }) => (
-              <NavLink
-                key={to}
-                to={to}
-                end={to === "/"}
-                className={({ isActive }) =>
-                  [
-                    "group flex items-center gap-3 rounded-md px-3 py-2 text-sm transition",
-                    isActive
-                      ? "bg-[color:var(--color-surface-2)] text-white"
-                      : "text-[color:var(--color-ink-muted)] hover:bg-[color:var(--color-surface-2)] hover:text-white",
-                  ].join(" ")
-                }
-              >
-                <Icon size={15} className="shrink-0 opacity-80" />
-                <span>{label}</span>
-              </NavLink>
+          <nav className="flex flex-col gap-4">
+            {NAV_SECTIONS.map((section) => (
+              <div key={section.label} className="flex flex-col gap-0.5">
+                <div className="px-3 pb-1 text-[10px] uppercase tracking-[0.18em] text-[color:var(--color-ink-dim)]">
+                  {section.label}
+                </div>
+                {section.items.map(({ to, label, Icon }) => (
+                  <NavLink
+                    key={to}
+                    to={to}
+                    end={to === "/"}
+                    className={({ isActive }) =>
+                      [
+                        "group flex items-center gap-3 rounded-md px-3 py-2 text-sm transition",
+                        isActive
+                          ? "bg-[color:var(--color-surface-2)] text-white"
+                          : "text-[color:var(--color-ink-muted)] hover:bg-[color:var(--color-surface-2)] hover:text-white",
+                      ].join(" ")
+                    }
+                  >
+                    <Icon size={15} className="shrink-0 opacity-80" />
+                    <span>{label}</span>
+                  </NavLink>
+                ))}
+              </div>
             ))}
           </nav>
         </div>
 
         <div className="shrink-0 border-t border-[color:var(--color-line-soft)] bg-[color:var(--color-surface)]/80 px-4 py-4">
           <div className="flex flex-col gap-3">
-          <InstancePicker />
-          <button
-            onClick={() => setPaletteOpen(true)}
-            className="flex items-center justify-between rounded-md border border-[color:var(--color-line)] bg-[color:var(--color-surface-2)] px-3 py-2 text-xs text-[color:var(--color-ink-muted)] hover:border-[color:var(--color-rye)] hover:text-white"
-          >
-            <span className="flex items-center gap-2">
-              <Search size={13} /> Quick find
-            </span>
-            <kbd className="font-mono text-[10px] text-[color:var(--color-ink-dim)]">
-              ⌘K
-            </kbd>
-          </button>
-          <a
-            href="https://projectrye.dev"
-            target="_blank"
-            rel="noreferrer"
-            className="text-[10px] uppercase tracking-[0.18em] text-[color:var(--color-ink-dim)] hover:text-[color:var(--color-rye)]"
-          >
-            projectrye.dev ↗
-          </a>
+            <InstancePicker />
+            <button
+              onClick={() => setPaletteOpen(true)}
+              className="flex items-center justify-between rounded-md border border-[color:var(--color-line)] bg-[color:var(--color-surface-2)] px-3 py-2 text-xs text-[color:var(--color-ink-muted)] hover:border-[color:var(--color-rye)] hover:text-white"
+            >
+              <span className="flex items-center gap-2">
+                <Search size={13} /> Quick find
+              </span>
+              <kbd className="font-mono text-[10px] text-[color:var(--color-ink-dim)]">
+                ⌘K
+              </kbd>
+            </button>
+            <a
+              href="https://projectrye.dev"
+              target="_blank"
+              rel="noreferrer"
+              className="text-[10px] uppercase tracking-[0.18em] text-[color:var(--color-ink-dim)] hover:text-[color:var(--color-rye)]"
+            >
+              projectrye.dev ↗
+            </a>
           </div>
         </div>
       </aside>
@@ -102,6 +130,7 @@ export function AppLayout() {
       {/* Main */}
       <main className="flex min-h-screen min-w-0 flex-col">
         <TopBar onOpenPalette={() => setPaletteOpen(true)} />
+        <MobileNav />
         <div className="min-w-0 flex-1 overflow-x-hidden px-4 py-6 scrollbar md:px-8">
           <Outlet />
         </div>
@@ -119,6 +148,32 @@ export function AppLayout() {
   );
 }
 
+function MobileNav() {
+  const items = NAV_SECTIONS.flatMap((section) => section.items);
+  return (
+    <nav className="sticky top-[55px] z-10 flex gap-1 overflow-x-auto border-b border-[color:var(--color-line)] bg-[color:var(--color-canvas)]/90 px-3 py-2 backdrop-blur scrollbar md:hidden">
+      {items.map(({ to, label, Icon }) => (
+        <NavLink
+          key={to}
+          to={to}
+          end={to === "/"}
+          className={({ isActive }) =>
+            [
+              "flex shrink-0 items-center gap-2 rounded-md px-3 py-2 text-xs",
+              isActive
+                ? "bg-[color:var(--color-surface-2)] text-white"
+                : "text-[color:var(--color-ink-muted)]",
+            ].join(" ")
+          }
+        >
+          <Icon size={14} />
+          {label}
+        </NavLink>
+      ))}
+    </nav>
+  );
+}
+
 function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
   const { current, error, loading } = useInstance();
   const statusLabel = error ? "offline" : loading ? "checking" : "live";
@@ -126,7 +181,7 @@ function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
     <div className="sticky top-0 z-10 flex min-w-0 items-center justify-between gap-4 border-b border-[color:var(--color-line)] bg-[color:var(--color-canvas)]/80 px-4 py-3 backdrop-blur md:px-8">
       <div className="flex items-center gap-3">
         <span className="text-[10px] uppercase tracking-[0.22em] text-[color:var(--color-ink-dim)]">
-          Instance
+          Workspace
         </span>
         <span className="font-mono text-xs text-[color:var(--color-ink)]">
           {current || "—"}
@@ -151,7 +206,7 @@ function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
       >
         <span className="flex min-w-0 items-center gap-2">
           <Search size={13} />
-          <span className="truncate">Search records, standards, clients…</span>
+          <span className="truncate">Search people, deals, projects…</span>
         </span>
         <kbd className="font-mono text-[10px] text-[color:var(--color-ink-dim)]">
           ⌘K
@@ -184,7 +239,7 @@ function InstancePicker() {
   return (
     <label className="flex flex-col gap-1">
       <span className="text-[10px] uppercase tracking-[0.18em] text-[color:var(--color-ink-dim)]">
-        Instance
+        Workspace
       </span>
       <select
         className="input text-xs"

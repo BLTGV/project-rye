@@ -45,6 +45,61 @@ export function useCatalog() {
   });
 }
 
+export function useKnowledgeMap() {
+  const { current } = useInstance();
+  return useQuery({
+    queryKey: ["knowledge-map", current],
+    queryFn: () => get<KnowledgeMapResponse>(`${BASE}/knowledge-map`, current),
+    enabled: !!current,
+  });
+}
+
+export function useCrmWorkspace() {
+  const { current } = useInstance();
+  return useQuery({
+    queryKey: ["crm-workspace", current],
+    queryFn: () => get<CrmWorkspaceResponse>(`${BASE}/workspace/crm`, current),
+    enabled: !!current,
+  });
+}
+
+export function usePmWorkspace() {
+  const { current } = useInstance();
+  return useQuery({
+    queryKey: ["pm-workspace", current],
+    queryFn: () => get<PmWorkspaceResponse>(`${BASE}/workspace/pm`, current),
+    enabled: !!current,
+  });
+}
+
+export interface CandidateReviewQueueOptions {
+  status?: string;
+  kind?: string;
+  q?: string;
+  includeClosed?: boolean;
+  limit?: number;
+  offset?: number;
+}
+
+export function useCandidateReviewQueue(opts: CandidateReviewQueueOptions = {}) {
+  const { current } = useInstance();
+  return useQuery({
+    queryKey: ["candidate-review", current, opts],
+    queryFn: () => {
+      const params = new URLSearchParams();
+      if (opts.status && opts.status !== "all") params.set("status", opts.status);
+      if (opts.kind && opts.kind !== "all") params.set("kind", opts.kind);
+      if (opts.q) params.set("q", opts.q);
+      if (opts.includeClosed) params.set("include_closed", "true");
+      if (opts.limit) params.set("limit", String(opts.limit));
+      if (opts.offset) params.set("offset", String(opts.offset));
+      const suffix = params.toString() ? `?${params.toString()}` : "";
+      return get<CandidateReviewQueueResponse>(`${BASE}/candidates/review${suffix}`, current);
+    },
+    enabled: !!current,
+  });
+}
+
 export function useNodeSearch(q: string, type: string | null, limit = 50) {
   const { current } = useInstance();
   return useQuery({
@@ -168,6 +223,93 @@ export function promoteKnowledgeCandidate(
   return post<{ target_type: string; id: string }>(`${BASE}/candidates/${id}/promote`, instance, input);
 }
 
+export interface AcceptSourcePolicyCandidateInput {
+  scope_id: string;
+  status_domains: string[];
+  authoritative_source: string;
+  effective_at?: string | null;
+  review_gate?: string | null;
+  evidence_allowed?: string[];
+  supersedes?: string | null;
+  notes?: string | null;
+  actor?: string | null;
+}
+
+export function acceptSourcePolicyCandidate(
+  instance: string,
+  id: string,
+  input: AcceptSourcePolicyCandidateInput
+) {
+  return post<{ target_type: "source_policy"; ids: string[]; subject_node_id: string }>(
+    `${BASE}/candidates/${id}/accept-source-policy`,
+    instance,
+    input
+  );
+}
+
+export interface AcceptCrmStagePlanCandidateInput {
+  opportunity_id: string;
+  stage: string;
+  effective_at: string;
+  reason?: string | null;
+  actor?: string | null;
+  plan_properties?: Record<string, unknown>;
+}
+
+export function acceptCrmStagePlanCandidate(
+  instance: string,
+  id: string,
+  input: AcceptCrmStagePlanCandidateInput
+) {
+  return post<{ target_type: "crm_stage_plan"; id: string; subject_node_id: string }>(
+    `${BASE}/candidates/${id}/accept-crm-stage-plan`,
+    instance,
+    input
+  );
+}
+
+export interface AcceptPmTaskPlanCandidateInput {
+  task_id: string;
+  status: string;
+  effective_at: string;
+  reason?: string | null;
+  actor?: string | null;
+  plan_properties?: Record<string, unknown>;
+}
+
+export function acceptPmTaskPlanCandidate(
+  instance: string,
+  id: string,
+  input: AcceptPmTaskPlanCandidateInput
+) {
+  return post<{ target_type: "pm_task_plan"; id: string; subject_node_id: string }>(
+    `${BASE}/candidates/${id}/accept-pm-task-plan`,
+    instance,
+    input
+  );
+}
+
+export interface AcceptPmMilestonePlanCandidateInput {
+  milestone_id: string;
+  status: string;
+  effective_at: string;
+  reason?: string | null;
+  actor?: string | null;
+  plan_properties?: Record<string, unknown>;
+}
+
+export function acceptPmMilestonePlanCandidate(
+  instance: string,
+  id: string,
+  input: AcceptPmMilestonePlanCandidateInput
+) {
+  return post<{ target_type: "pm_milestone_plan"; id: string; subject_node_id: string }>(
+    `${BASE}/candidates/${id}/accept-pm-milestone-plan`,
+    instance,
+    input
+  );
+}
+
 export function useDisputes() {
   const { current } = useInstance();
   return useQuery({
@@ -288,6 +430,254 @@ export interface KnowledgeDashboardResponse {
   recent: EventRow[];
 }
 
+export interface KnowledgeMapScope {
+  id: string;
+  label: string;
+  node_type: string;
+  created_at: string;
+  status: string | null;
+  purpose: string | null;
+  owner: string | null;
+  active_policy_count: number;
+  superseded_policy_count: number;
+  candidate_count: number;
+}
+
+export interface KnowledgeMapPolicyRow {
+  id: string;
+  subject_node_id: string;
+  scope_label: string;
+  scope_type: string;
+  assertion_type: string;
+  assertion_key: string;
+  domain: string | null;
+  summary_value: string | null;
+  claimed_authority_at: string | null;
+  claim: Record<string, unknown>;
+  attrs?: Record<string, unknown>;
+  effective_at: string | null;
+  effective_to: string | null;
+  created_at: string;
+  superseded_at?: string | null;
+  superseded_by?: string | null;
+  source_event_id: string | null;
+}
+
+export interface KnowledgeMapCandidateStatus {
+  status: string;
+  count: number;
+}
+
+export interface KnowledgeMapCandidateSample {
+  id: string;
+  label: string | null;
+  status: string;
+  candidate_kind: string | null;
+  statement: string | null;
+  target_payload: Record<string, unknown> | null;
+  review_context_ids: string[] | null;
+  confidence: string | null;
+  created_at: string;
+  supporting_sources: {
+    id: string;
+    label: string | null;
+    node_type: string;
+    edge_type: string;
+  }[];
+}
+
+export interface KnowledgeMapPluginBinding {
+  assertion_id: string;
+  scope_id: string;
+  scope_label: string;
+  plugin_id: string;
+  plugin_node_id: string | null;
+  plugin_label: string | null;
+  description: string;
+  is_expected_plugin: boolean;
+  effective_at: string | null;
+  created_at: string;
+  claim: Record<string, unknown>;
+}
+
+export interface KnowledgeMapOperationalPlan {
+  id: string;
+  subject_node_id: string;
+  subject_label: string;
+  subject_type: string;
+  assertion_type: string;
+  assertion_key: string;
+  claim: Record<string, unknown>;
+  attrs: Record<string, unknown>;
+  effective_at: string | null;
+  effective_to: string | null;
+  planned_for: string | null;
+  created_at: string;
+  source_event_id: string | null;
+}
+
+export interface KnowledgeMapWarning {
+  severity: "high" | "attention" | string;
+  kind: string;
+  subject_node_id?: string | null;
+  scope_label?: string | null;
+  assertion_id?: string | null;
+  assertion_type?: string | null;
+  assertion_key?: string | null;
+  domain?: string | null;
+  count?: number;
+  effective_at?: string | null;
+  claimed_authority_at?: string | null;
+  summary: string;
+}
+
+export interface KnowledgeMapResponse {
+  generated_at: string;
+  scopes: KnowledgeMapScope[];
+  current_process: KnowledgeMapPolicyRow[];
+  future_process: KnowledgeMapPolicyRow[];
+  historical_process: KnowledgeMapPolicyRow[];
+  candidate_statuses: KnowledgeMapCandidateStatus[];
+  candidate_samples: KnowledgeMapCandidateSample[];
+  plugin_bindings: KnowledgeMapPluginBinding[];
+  operational_plans: KnowledgeMapOperationalPlan[];
+  warnings: KnowledgeMapWarning[];
+  stats: {
+    scope_count: number;
+    current_process_count: number;
+    future_process_count: number;
+    historical_process_count: number;
+    candidate_count: number;
+    plugin_binding_count: number;
+    operational_plan_count: number;
+    warning_count: number;
+  };
+}
+
+export interface WorkspaceRelatedItem {
+  id: string;
+  label: string | null;
+  node_type: string;
+  relation: string;
+  direction: "in" | "out" | string;
+  role?: string | null;
+  relationship?: string | null;
+  context?: string | null;
+  dependency_type?: string | null;
+  reason?: string | null;
+}
+
+export interface WorkspacePlan {
+  id: string;
+  subject_id: string;
+  assertion_type: string;
+  assertion_key: string;
+  claim: Record<string, unknown>;
+  effective_at: string | null;
+  created_at: string;
+}
+
+export interface WorkspaceSourcePolicy {
+  id: string;
+  scope_id: string;
+  scope_label: string;
+  assertion_key: string;
+  claim: Record<string, unknown>;
+  effective_at: string | null;
+  created_at: string;
+}
+
+export interface WorkspaceCandidate {
+  id: string;
+  label: string | null;
+  properties: {
+    statement?: string;
+    candidate_kind?: KnowledgeCandidateKind;
+    target_payload?: Record<string, unknown>;
+    confidence?: number | null;
+  } & Record<string, unknown>;
+  created_at: string;
+  status: KnowledgeCandidateStatus | string;
+  sources: {
+    id: string;
+    label: string | null;
+    node_type: string;
+    source_type?: string | null;
+  }[];
+  review_contexts: {
+    id: string;
+    label: string | null;
+    node_type: string;
+  }[];
+}
+
+export interface CrmOpportunity {
+  id: string;
+  label: string;
+  code: string | null;
+  name: string | null;
+  stage: string | null;
+  pipeline: string | null;
+  assigned_to_name: string | null;
+  primary_contact_name: string | null;
+  current_value: number | null;
+  win_probability: number | null;
+  next_action: string | null;
+  related_items: WorkspaceRelatedItem[];
+  created_at: string;
+}
+
+export interface CrmWorkspaceResponse {
+  generated_at: string;
+  opportunities: CrmOpportunity[];
+  plans: WorkspacePlan[];
+  source_policies: WorkspaceSourcePolicy[];
+  candidates: WorkspaceCandidate[];
+}
+
+export interface PmTask {
+  id: string;
+  title: string;
+  code: string | null;
+  task_type: string | null;
+  due_date: string | null;
+  priority: string | null;
+  status: string | null;
+  owner_name: string | null;
+  reviewer_name: string | null;
+  project_name: string | null;
+  project_code: string | null;
+  sprint_name: string | null;
+  blocker_count: number;
+  subtask_count: number;
+  related_items: WorkspaceRelatedItem[];
+  created_at: string;
+}
+
+export interface PmMilestone {
+  id: string;
+  label: string;
+  code: string | null;
+  name: string | null;
+  target_date: string | null;
+  priority: string | null;
+  status: string | null;
+  status_claim: Record<string, unknown> | null;
+  owner_name: string | null;
+  owner_id: string | null;
+  related_items: WorkspaceRelatedItem[];
+  created_at: string;
+}
+
+export interface PmWorkspaceResponse {
+  generated_at: string;
+  tasks: PmTask[];
+  milestones: PmMilestone[];
+  plans: WorkspacePlan[];
+  source_policies: WorkspaceSourcePolicy[];
+  candidates: WorkspaceCandidate[];
+}
+
 export interface EventRow {
   id: string;
   event_type: string;
@@ -393,6 +783,34 @@ export interface KnowledgeCandidateRow {
     node_type: string;
     edge_type: string;
   }[];
+}
+
+export interface CandidateReviewRow extends KnowledgeCandidateRow {
+  review_contexts: {
+    id: string;
+    label: string | null;
+    node_type: string;
+  }[];
+  status_history: {
+    status: string | null;
+    reason: string | null;
+    actor: string | null;
+    status_at: string | null;
+    assertion_id: string;
+  }[];
+}
+
+export interface CandidateReviewQueueResponse {
+  candidates: CandidateReviewRow[];
+  statuses: { status: KnowledgeCandidateStatus | string; count: number }[];
+  kinds: { kind: KnowledgeCandidateKind | string | null; count: number }[];
+  stats: {
+    total: number;
+    filtered: number;
+    open: number;
+    accepted: number;
+    rejected: number;
+  };
 }
 
 export interface AcceptedKnowledgeRow extends AssertionRow {

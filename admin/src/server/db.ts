@@ -11,6 +11,8 @@ export interface InstanceConfig {
 export interface Env {
   DEFAULT_INSTANCE: string;
   RYE_INSTANCES?: string;
+  RYE_API_AUTH_MODE?: string;
+  RYE_API_ALLOWED_ORIGINS?: string;
   ASSETS: Fetcher;
 }
 

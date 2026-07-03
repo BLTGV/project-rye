@@ -10,6 +10,10 @@ import { NodeDetailPage } from "./pages/NodeDetailPage";
 import { GraphPage } from "./pages/GraphPage";
 import { EventsPage } from "./pages/EventsPage";
 import { DisputesPage } from "./pages/DisputesPage";
+import { KnowledgeMapPage } from "./pages/KnowledgeMapPage";
+import { CandidateReviewPage } from "./pages/CandidateReviewPage";
+import { SalesWorkspacePage } from "./pages/SalesWorkspacePage";
+import { ProjectsWorkspacePage } from "./pages/ProjectsWorkspacePage";
 import "./styles/app.css";
 
 const queryClient = new QueryClient({
@@ -27,7 +31,11 @@ ReactDOM.createRoot(root).render(
           <Routes>
             <Route element={<AppLayout />}>
               <Route path="/" element={<DashboardPage />} />
+              <Route path="/sales" element={<SalesWorkspacePage />} />
+              <Route path="/projects" element={<ProjectsWorkspacePage />} />
               <Route path="/search" element={<SearchPage />} />
+              <Route path="/knowledge" element={<KnowledgeMapPage />} />
+              <Route path="/review" element={<CandidateReviewPage />} />
               <Route path="/nodes/:id" element={<NodeDetailPage />} />
               <Route path="/graph" element={<GraphPage />} />
               <Route path="/graph/:id" element={<GraphPage />} />
