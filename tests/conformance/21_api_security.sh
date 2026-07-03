@@ -3,11 +3,21 @@ set -euo pipefail
 
 : "${DATABASE_URL:?DATABASE_URL is required for API security tests}"
 
+# The admin API server is a Node app; inside the postgres test container there
+# is no node/npm, so skip there — docker-test.sh re-runs this test from the host.
+if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
+  echo "SKIP: node/npm not available; skipping API security test"
+  exit 0
+fi
+
 pick_port() {
   node -e "const net = require('node:net'); const server = net.createServer(); server.listen(0, '127.0.0.1', () => { console.log(server.address().port); server.close(); });"
 }
 
 PORT="${RYE_API_SECURITY_TEST_PORT:-$(pick_port)}"
+# Unique per run: idempotency keys persist in the database, so a reused key
+# from a prior run would return that run's (already promoted) candidate.
+IDEM_KEY="api-security-idem-$(date +%s)-$$"
 BASE_URL="http://127.0.0.1:${PORT}"
 LOG_FILE="${TMPDIR:-/tmp}/rye-api-security-${PORT}.log"
 
@@ -113,7 +123,7 @@ candidate_body='{
 candidate_json_1="$(curl -sS \
   -H "Authorization: Bearer ${candidate_token}" \
   -H "Content-Type: application/json" \
-  -H "Idempotency-Key: api-security-idem-1" \
+  -H "Idempotency-Key: ${IDEM_KEY}" \
   -d "$candidate_body" \
   "${BASE_URL}/api/candidates")"
 candidate_id_1="$(json_get "$candidate_json_1" "id")"
@@ -121,7 +131,7 @@ candidate_id_1="$(json_get "$candidate_json_1" "id")"
 candidate_json_2="$(curl -sS \
   -H "Authorization: Bearer ${candidate_token}" \
   -H "Content-Type: application/json" \
-  -H "Idempotency-Key: api-security-idem-1" \
+  -H "Idempotency-Key: ${IDEM_KEY}" \
   -d "$candidate_body" \
   "${BASE_URL}/api/candidates")"
 candidate_id_2="$(json_get "$candidate_json_2" "id")"

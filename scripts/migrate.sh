@@ -37,9 +37,12 @@ profile_enabled() {
   [[ "$list" == *",${needle},"* ]]
 }
 
-# rye_migrations stays in public so the migrator can find it without knowing the schema
+# rye_migrations stays in public so the migrator can find it without knowing the schema.
+# Schema-qualified everywhere: if the DB role name matches an existing schema (e.g. role
+# "rye" + schema "rye"), the default search_path would otherwise resolve unqualified
+# references to a shadow table in that schema, hiding public.rye_migrations.
 psql "$DB_URL" -v ON_ERROR_STOP=1 <<'SQL'
-CREATE TABLE IF NOT EXISTS rye_migrations (
+CREATE TABLE IF NOT EXISTS public.rye_migrations (
   name text PRIMARY KEY,
   applied_at timestamptz NOT NULL DEFAULT now()
 );
@@ -58,7 +61,7 @@ for file in $(find schema/migrations -maxdepth 1 -type f -name '*.sql' | sort); 
     continue
   fi
 
-  applied="$(psql "$DB_URL" -Atqc "SELECT 1 FROM rye_migrations WHERE name = '$base' LIMIT 1")"
+  applied="$(psql "$DB_URL" -Atqc "SELECT 1 FROM public.rye_migrations WHERE name = '$base' LIMIT 1")"
   if [[ "$applied" == "1" ]]; then
     echo "Already applied: $base"
     continue
@@ -66,7 +69,7 @@ for file in $(find schema/migrations -maxdepth 1 -type f -name '*.sql' | sort); 
 
   echo "Applying $base"
   psql "$DB_URL" -v ON_ERROR_STOP=1 -f "$file"
-  psql "$DB_URL" -v ON_ERROR_STOP=1 -c "INSERT INTO rye_migrations(name) VALUES ('$base')"
+  psql "$DB_URL" -v ON_ERROR_STOP=1 -c "INSERT INTO public.rye_migrations(name) VALUES ('$base')"
 done
 
 echo "Migrations complete"

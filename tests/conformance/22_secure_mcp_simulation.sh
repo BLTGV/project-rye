@@ -3,6 +3,13 @@ set -euo pipefail
 
 : "${DATABASE_URL:?DATABASE_URL is required for secure MCP simulation tests}"
 
+# The MCP server is a Node app; inside the postgres test container there is
+# no node/npm, so skip there — docker-test.sh re-runs this test from the host.
+if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
+  echo "SKIP: node/npm not available; skipping secure MCP simulation test"
+  exit 0
+fi
+
 pick_port() {
   node -e "const net = require('node:net'); const server = net.createServer(); server.listen(0, '127.0.0.1', () => { console.log(server.address().port); server.close(); });"
 }

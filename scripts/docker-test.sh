@@ -95,6 +95,22 @@ cmd_test() {
 
   if [[ "$RUN_CONFORMANCE" -eq 1 ]]; then
     compose exec -T rye-db bash -lc "cd /workspace && DATABASE_URL='${container_dsn}' ./scripts/conformance.sh --schema '${SCHEMA}'"
+
+    # These tests need node, which the postgres container lacks (they
+    # self-skip there), so run them from the host against the mapped port.
+    if command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
+      local host_dsn="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:${RYE_POSTGRES_PORT:-54329}/${POSTGRES_DB}"
+      local node_test
+      for node_test in \
+        tests/conformance/21_api_security.sh \
+        tests/conformance/22_secure_mcp_simulation.sh \
+        tests/conformance/23_cli_agent_security.sh; do
+        echo "Running node-dependent test from host: $(basename "$node_test")"
+        DATABASE_URL="$host_dsn" bash "$node_test"
+      done
+    else
+      echo "Skipping host node-dependent tests (node/npm not installed on host)"
+    fi
   fi
 
   echo "Docker test flow passed."

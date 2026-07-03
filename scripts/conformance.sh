@@ -106,8 +106,16 @@ done
 if [[ -d tests/scenarios ]]; then
   seed_file="tests/scenarios/00_seed.sql"
   if [[ -f "$seed_file" ]]; then
-    echo "Seeding scenario data..."
-    run_sql_suite_file "$seed_file"
+    # The seed uses fixed UUIDs and scenario tests roll back their changes,
+    # so on a reused database the data is already present — re-running the
+    # seed would fail on duplicate keys.
+    already_seeded="$(psql "$DB_URL" -Atqc "SELECT 1 FROM ${SCHEMA}.nodes WHERE id = 'a0000001-0001-0001-0001-000000000001'")"
+    if [[ "$already_seeded" == "1" ]]; then
+      echo "Scenario seed already present; skipping seed."
+    else
+      echo "Seeding scenario data..."
+      run_sql_suite_file "$seed_file"
+    fi
   fi
 
   for file in $(find tests/scenarios -maxdepth 1 -type f -name '*.sql' ! -name '00_seed.sql' | sort); do

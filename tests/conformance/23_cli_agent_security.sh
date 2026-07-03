@@ -3,6 +3,13 @@ set -euo pipefail
 
 : "${DATABASE_URL:?DATABASE_URL is required for CLI agent security tests}"
 
+# json_get needs node; inside the postgres test container there is no
+# node/npm, so skip there — docker-test.sh re-runs this test from the host.
+if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
+  echo "SKIP: node/npm not available; skipping CLI agent security test"
+  exit 0
+fi
+
 ENV_FILE="${TMPDIR:-/tmp}/rye-cli-agent-security.env"
 rm -f "$ENV_FILE"
 

@@ -17,7 +17,34 @@ DECLARE
   v_event_count int;
   v_change_type text;
   v_changed_fields jsonb;
+  v_stale_node_ids uuid[];
+  v_stale_event_ids uuid[];
 BEGIN
+  -- Remove graph state left by prior runs (including failed ones): the test
+  -- node and its domain_change events survive the table drop at the end, and
+  -- link_record would return that same node with a non-zero event count.
+  SELECT array_agg(id) INTO v_stale_node_ids
+  FROM (
+    SELECT node_id AS id FROM node_source_map
+    WHERE source_schema = 'public' AND source_table = '_rye_test_products'
+    UNION
+    SELECT id FROM nodes WHERE external_source = 'public._rye_test_products'
+  ) stale;
+
+  IF v_stale_node_ids IS NOT NULL THEN
+    SELECT array_agg(DISTINCT event_id) INTO v_stale_event_ids
+    FROM event_participants
+    WHERE node_id = ANY(v_stale_node_ids);
+
+    IF v_stale_event_ids IS NOT NULL THEN
+      DELETE FROM event_participants WHERE event_id = ANY(v_stale_event_ids);
+      DELETE FROM events WHERE id = ANY(v_stale_event_ids);
+    END IF;
+
+    DELETE FROM node_source_map WHERE node_id = ANY(v_stale_node_ids);
+    DELETE FROM nodes WHERE id = ANY(v_stale_node_ids);
+  END IF;
+
   -- Create a domain table in public schema
   CREATE TABLE IF NOT EXISTS public._rye_test_products (
     id serial PRIMARY KEY,
