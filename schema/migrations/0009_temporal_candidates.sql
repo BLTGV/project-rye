@@ -81,7 +81,8 @@ AS $$
     SELECT *
     FROM assertions
     WHERE (effective_at IS NULL OR effective_at <= p_as_of)
-      AND (effective_to IS NULL OR effective_to > p_as_of);
+      AND (effective_to IS NULL OR effective_to > p_as_of)
+      AND superseded_by IS NULL;
 $$ LANGUAGE sql STABLE;
 
 CREATE OR REPLACE FUNCTION record_assertion(
