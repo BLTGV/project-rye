@@ -73,7 +73,7 @@ export function CommandPalette({ open, onClose, onNavigate }: Props) {
               autoFocus
               value={q}
               onValueChange={setQ}
-              placeholder="Search records, standards, clients…"
+              placeholder="Search people, deals, projects, tasks…"
               className="w-full bg-transparent text-sm placeholder:text-[color:var(--color-ink-dim)] focus:outline-none"
             />
             {loading ? <span className="text-xs text-[color:var(--color-ink-dim)]">searching…</span> : null}
@@ -81,7 +81,7 @@ export function CommandPalette({ open, onClose, onNavigate }: Props) {
           <Command.List className="max-h-[420px] overflow-y-auto p-2 scrollbar">
             {q.length < 2 ? (
               <div className="px-3 py-8 text-center text-xs text-[color:var(--color-ink-dim)]">
-                Type to search nodes by label, standard, or property…
+                Type to search business records by name or detail…
               </div>
             ) : hits.length === 0 && !loading ? (
               <div className="px-3 py-8 text-center text-xs text-[color:var(--color-ink-dim)]">
@@ -103,18 +103,24 @@ export function CommandPalette({ open, onClose, onNavigate }: Props) {
                   <span className="truncate">{h.label}</span>
                 </div>
                 <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-[color:var(--color-ink-dim)]">
-                  <span>{h.node_type}</span>
+                  <span>{humanizeType(h.node_type)}</span>
                   <span className="font-mono">{shortId(h.id)}</span>
                 </div>
               </Command.Item>
             ))}
           </Command.List>
           <div className="flex items-center justify-between border-t border-[color:var(--color-line)] px-4 py-2 text-[10px] uppercase tracking-wider text-[color:var(--color-ink-dim)]">
-            <span>↵ open • esc close</span>
-            <span>fuzzy via pg_trgm</span>
+            <span>Enter opens selected result</span>
+            <span>Esc closes search</span>
           </div>
         </Command>
       </div>
     </div>
   );
+}
+
+function humanizeType(value: string) {
+  return value
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }

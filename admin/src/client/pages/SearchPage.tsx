@@ -1,9 +1,9 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import { Filter, Search } from "lucide-react";
 import { useCatalog, useNodeSearch } from "../lib/api";
 import type { NodeRow } from "../lib/api";
-import { colorForType, fmtNumber, fmtRel, shortId } from "../lib/format";
+import { colorForType, fmtNumber, fmtRel } from "../lib/format";
 
 export function SearchPage() {
   const [q, setQ] = useState("");
@@ -24,8 +24,8 @@ export function SearchPage() {
         <div className="min-w-0">
           <h1 className="text-xl font-semibold tracking-tight">Records</h1>
           <p className="max-w-3xl text-sm text-[color:var(--color-ink-muted)]">
-            Search source evidence, classification context, and accepted knowledge.
-            Source items are intake records until validated into facts, tasks, or graph connections.
+            Search people, companies, deals, projects, tasks, source messages,
+            and accepted business knowledge in this workspace.
           </p>
         </div>
         <div className="shrink-0 text-xs text-[color:var(--color-ink-dim)]">
@@ -39,7 +39,7 @@ export function SearchPage() {
           autoFocus
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          placeholder="e.g. MIL-DTL-83513, AS22759, Lockheed…"
+          placeholder="Search by customer, deal, project, person, or source detail"
           className="min-w-0 flex-1 bg-transparent text-sm placeholder:text-[color:var(--color-ink-dim)] focus:outline-none"
         />
         <span className="chip shrink-0">
@@ -58,7 +58,7 @@ export function SearchPage() {
             onClick={() => setType(name)}
             color={colorForType(name)}
           >
-            {name} · {fmtNumber(count)}
+            {humanizeType(name)} · {fmtNumber(count)}
           </Pill>
         ))}
       </div>
@@ -71,7 +71,6 @@ export function SearchPage() {
               <col className="w-36" />
               <col className="w-36" />
               <col className="w-24" />
-              <col className="w-24" />
             </colgroup>
             <thead className="text-[10px] uppercase tracking-wider text-[color:var(--color-ink-dim)]">
               <tr className="bg-[color:var(--color-surface-2)]/60">
@@ -79,7 +78,6 @@ export function SearchPage() {
                 <th className="px-4 py-2.5 text-left">Type</th>
                 <th className="px-4 py-2.5 text-left">Source</th>
                 <th className="px-4 py-2.5 text-right">Created</th>
-                <th className="px-4 py-2.5 text-right">ID</th>
               </tr>
             </thead>
             <tbody>
@@ -104,7 +102,7 @@ export function SearchPage() {
                     </Link>
                   </td>
                   <td className="truncate px-4 py-2.5 text-[color:var(--color-ink-muted)]" title={r.node_type}>
-                    {r.node_type}
+                    {humanizeType(r.node_type)}
                   </td>
                   <td className="truncate px-4 py-2.5 text-[color:var(--color-ink-muted)]" title={r.external_source ?? undefined}>
                     {r.external_source ?? "—"}
@@ -112,15 +110,12 @@ export function SearchPage() {
                   <td className="px-4 py-2.5 text-right text-[color:var(--color-ink-muted)]">
                     {fmtRel(r.created_at)}
                   </td>
-                  <td className="px-4 py-2.5 text-right font-mono text-[10px] text-[color:var(--color-ink-dim)]">
-                    {shortId(r.id)}
-                  </td>
                 </tr>
               ))}
               {search.isLoading
                 ? Array.from({ length: 8 }).map((_, i) => (
                     <tr key={`s-${i}`} className="border-t border-[color:var(--color-line-soft)]">
-                      <td colSpan={5} className="px-4 py-3">
+                      <td colSpan={4} className="px-4 py-3">
                         <div className="h-4 w-full animate-pulse rounded bg-[color:var(--color-surface-2)]" />
                       </td>
                     </tr>
@@ -129,7 +124,7 @@ export function SearchPage() {
               {!search.isLoading && rows.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={5}
+                    colSpan={4}
                     className="px-4 py-10 text-center text-xs text-[color:var(--color-ink-dim)]"
                   >
                     No records match
@@ -160,16 +155,13 @@ export function SearchPage() {
                   </span>
                 </div>
                 <div className="mt-2 flex flex-wrap gap-1">
-                  <span className="pill">{r.node_type}</span>
+                  <span className="pill">{humanizeType(r.node_type)}</span>
                   <span className="pill">{r.external_source ?? "no source"}</span>
                 </div>
               </div>
               <span className="shrink-0 text-xs text-[color:var(--color-ink-muted)]">
                 {fmtRel(r.created_at)}
               </span>
-            </div>
-            <div className="mt-3 font-mono text-[10px] text-[color:var(--color-ink-dim)]">
-              {shortId(r.id)}
             </div>
           </Link>
         ))}
@@ -197,7 +189,7 @@ function Pill({
   onClick,
   color,
 }: {
-  children: React.ReactNode;
+  children: ReactNode;
   active: boolean;
   onClick: () => void;
   color?: string;
@@ -216,6 +208,12 @@ function Pill({
       {children}
     </button>
   );
+}
+
+function humanizeType(value: string): string {
+  return value
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 function displaySearchLabel(node: NodeRow): string {

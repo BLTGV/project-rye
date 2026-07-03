@@ -30,6 +30,7 @@ export function fmtDate(iso: string | null | undefined): string {
     year: "numeric",
     month: "short",
     day: "numeric",
+    timeZone: "UTC",
   });
 }
 

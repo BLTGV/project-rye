@@ -19,8 +19,8 @@ export function GraphPage() {
 
   useEffect(() => {
     if (!seed && current) {
-      // bootstrap with a sensible seed: first popular node label
-      fetch(`/api/nodes?instance=${current}&limit=1&q=AS22759`)
+      // Bootstrap with any available record for the selected workspace.
+      fetch(`/api/nodes?instance=${current}&limit=1`)
         .then((r) => r.json() as Promise<{ rows: { id: string }[] }>)
         .then((d) => {
           if (d.rows?.[0]?.id) {
