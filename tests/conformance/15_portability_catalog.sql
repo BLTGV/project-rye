@@ -101,8 +101,24 @@ BEGIN
           AND capability->>'source_id' = 'rye-source-context'
           AND capability->>'id' = 'manage-source-context'
           AND capability->'entrypoints' @> '[{"type": "db_function", "name": "rye_source_inventory"}]'::jsonb
+          AND capability->'entrypoints' @> '[{"type": "db_function", "name": "record_source_of_truth_policy"}]'::jsonb
+          AND capability->'requires'->'db_functions' ? 'record_source_of_truth_policy'
     ) THEN
         RAISE EXCEPTION 'Expected rye-source-context DB entrypoint capability metadata';
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM jsonb_array_elements(rye_capability_catalog()->'capabilities') AS c(capability)
+        WHERE capability->>'source_kind' = 'plugin'
+          AND capability->>'source_id' = 'rye-org'
+          AND capability->>'id' = 'model-organization'
+          AND capability->'entrypoints' @> '[{"type": "db_function", "name": "record_improvement_cycle"}]'::jsonb
+          AND capability->'entrypoints' @> '[{"type": "db_function", "name": "register_scope_convention"}]'::jsonb
+          AND capability->'requires'->'db_functions' ? 'record_improvement_cycle'
+          AND capability->'requires'->'db_functions' ? 'register_scope_convention'
+    ) THEN
+        RAISE EXCEPTION 'Expected rye-org process improvement and convention registry metadata';
     END IF;
 
     IF NOT EXISTS (

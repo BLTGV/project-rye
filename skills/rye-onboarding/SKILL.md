@@ -135,11 +135,84 @@ Before running discovery, ask the user to confirm:
    - `retention_policy` or `evidence_policy`
    - allowed node, edge, assertion, event, and artifact types
    - human review and agent autonomy gates
+   - use `record_source_of_truth_policy(...)` when the scope depends on which
+     system/source is authoritative for a status or fact domain
+   - use `record_improvement_cycle(...)` when the scope is about improving a
+     recurring business process with a goal, current constraint, metrics, and
+     repeat trigger
+   - use `register_scope_convention(...)` when repeated local vocabulary needs
+     aliases, use/avoid guidance, and status before it becomes a full plugin
 4. Enable plugins with `enable_plugin_for_scope(...)`.
 5. Compile the active policy with `compile_scope_policy(...)` before handing
    instructions to collector, classifier, or promotion agents.
 6. Activate with `activate_onboarding_scope(...)` only after policy and plugin
    bindings are present.
+
+## Business Knowledge Setup
+
+Do not treat logging or tracing as the primary output of onboarding. Logs,
+exports, transcripts, and connector results are evidence. The setup should
+persist changing business knowledge:
+
+- the scope purpose and boundary
+- source-of-truth policy by fact/status domain
+- accepted knowledge and review gates
+- retention and evidence policy
+- current process constraint
+- process-improvement cycle
+- local conventions that fresh agents should reuse
+
+For process-improvement scopes, preserve the constraint loop explicitly:
+
+```text
+Identify -> Exploit -> Subordinate -> Elevate -> Repeat
+```
+
+Keep operational row-level facts, customer/patient/person-specific statuses, and
+source-derived semantic relationships as candidates until the relevant review
+policy allows promotion.
+
+When the business process includes planned future changes, teach agents to
+separate current plans from future-effective truth:
+
+- current-visible plan assertions say what the organization intends to do,
+  who owns it, what date it targets, and what dependencies or risks remain
+- future-effective assertions say what Rye should answer on or after a date
+- `current_valid_assertions` answers what is true now
+- `assertions_as_of(...)` answers what was or will be true at a specific time
+- CRM/PM scheduling helpers should be used instead of hand-rolled SQL when
+  scheduling stage, task status, or milestone status changes
+
+## Interviewing Discipline
+
+When onboarding knowledge arrives through conversation instead of documents,
+elicitation quality determines graph quality. Rules:
+
+- When a date or amount is tied to a deadline, decision, or money, do not
+  accept a vague answer ("early June", "around 80 grand") as final. Either
+  ask once for the specific value, or record the vague value with explicit
+  uncertainty AND a named confirmer ("Priya has the exact number") plus a
+  confirmation task. Never let vagueness silently become precision.
+- Ask for full names and contact details of people who will appear in the
+  graph, at least once. "Priya" is a weaker node than "Priya Shah".
+- Play the captured facts back to the interviewee in plain language before
+  closing, and record their corrections. People volunteer specifics when they
+  hear their own facts summarized.
+- Confirm the review policy in plain words — who signs off before something
+  counts as official — rather than inferring it silently from context.
+
+## Scope Revisions Must Stay Consistent
+
+A scope is defined by several records at once: the scope node's properties,
+the `scope_boundary` assertion, the `expected_contexts` policy, and any
+compiled policy. When the scope changes (widening, narrowing, re-purposing),
+enumerate and supersede ALL scope-defining assertions in the same change —
+never update one and leave another carrying the old wording. A split-brain
+scope (node property says one boundary, current assertion says another) is
+worse than either wording alone, because downstream consumers cannot tell
+which is authoritative. After a revision, re-run `compile_scope_policy` and
+verify the boundary reads consistently from both the node and the current
+assertions.
 
 ## Fresh Setup Path
 

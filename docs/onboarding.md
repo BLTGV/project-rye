@@ -19,6 +19,51 @@ An `onboarding_scope` records:
 Onboarding decisions are stored as Rye assertions and events. Later changes
 supersede earlier assertions instead of overwriting them.
 
+## SQL as the Agent Contract
+
+Rye stores its durable behavior in PostgreSQL because the database is the
+contract shared by agents, the admin UI, plugin helpers, import tools, and
+human operators. Agents should treat helper functions as the write API, not as
+incidental implementation details.
+
+This matters most for assertion lifecycle behavior. `record_assertion(...)`
+knows how to record current, historical, candidate, and future-effective
+knowledge. `current_valid_assertions` knows what is valid now.
+`assertions_as_of(...)` knows what was or will be valid at a point in time.
+
+Agents should use those database surfaces rather than recreating lifecycle
+logic in prompts, local code, or ad hoc SQL.
+
+## Plans Versus Future Truth
+
+Future work has two different knowledge shapes:
+
+- A **plan** is current-visible knowledge about intended future work: target
+  date, owner, status, dependencies, risks, and review gates.
+- A **future-effective assertion** is accepted knowledge Rye should answer on
+  or after its `effective_at` date.
+
+For example, a project-management agent scheduling a launch milestone should
+store the plan as current knowledge and the future milestone status as
+future-effective knowledge. Before the cutover, current questions should still
+return the current milestone status. As-of questions after the cutover should
+return the scheduled future status.
+
+Use plugin scheduling helpers where available:
+
+- `schedule_deal_stage_change(...)`
+- `schedule_task_status_change(...)`
+- `schedule_milestone_status_change(...)`
+
+These helpers write both the current-visible plan assertion and the scheduled
+future assertion.
+
+Onboarding should preserve changing business knowledge. Logs, source exports,
+and connector traces are evidence. The durable setup record should say what the
+organization is trying to improve, which source is authoritative for which
+facts, what remains candidate-only, what evidence must be retained, and what
+process constraint is being improved.
+
 ## Agent-Assisted Onboarding Modes
 
 Agent-assisted onboarding has two supported modes. The same Rye concepts apply
@@ -216,6 +261,9 @@ Migration `0010_onboarding_scope_plugins.sql` adds convention helpers:
 
 - `create_onboarding_scope(...)`
 - `record_scope_policy(...)`
+- `record_source_of_truth_policy(...)`
+- `record_improvement_cycle(...)`
+- `register_scope_convention(...)`
 - `enable_plugin_for_scope(...)`
 - `compile_scope_policy(...)`
 - `activate_onboarding_scope(...)`
@@ -225,6 +273,22 @@ Migration `0010_onboarding_scope_plugins.sql` adds convention helpers:
 
 These helpers use existing Rye tables. They create nodes, edges, assertions,
 and events; they do not add new core tables.
+
+Migration `0013_onboarding_knowledge_policies.sql` adds focused policy helpers
+for agent-guided setup:
+
+- `record_source_of_truth_policy(...)` stores an authority matrix entry for a
+  status or fact domain, including effective date, review gate, allowed
+  evidence, and superseded source/policy.
+- `record_improvement_cycle(...)` stores the reviewed process-improvement loop:
+  goal, current constraint, `Identify`, `Exploit`, `Subordinate`, `Elevate`,
+  `Repeat`, metrics, and next likely constraint.
+- `register_scope_convention(...)` stores lightweight local vocabulary guidance
+  with label, aliases, use/avoid rules, status, and optional plugin owner.
+
+Use these helpers before broad source ingestion when the scope depends on
+source authority, recurring business-process improvement, or repeated local
+terms that fresh agents need to reuse.
 
 Migration `0011_portability_catalog.sql` adds discovery helpers:
 

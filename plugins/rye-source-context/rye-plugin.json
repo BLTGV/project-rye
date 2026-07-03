@@ -9,7 +9,7 @@
   "contributes": {
     "node_types": ["source_account", "source_container", "source_item", "retrieval_channel", "intake_run", "review_context"],
     "edge_types": ["contains_item", "retrieved_via", "observed_in_run", "reviewed_under", "expected_by_profile"],
-    "assertion_types": ["source_purpose", "source_context_confirmation", "classification_rationale", "expected_contexts", "holding_context", "unexpected_context_policy", "blocked_contexts"],
+    "assertion_types": ["source_purpose", "source_context_confirmation", "classification_rationale", "expected_contexts", "holding_context", "unexpected_context_policy", "blocked_contexts", "source_of_truth_policy"],
     "event_types": ["source_context_record_observed", "source_context_confirmed", "source_context_intake_started", "source_context_intake_completed"],
     "artifact_types": ["source_context_record", "source_item_raw"]
   },
@@ -21,11 +21,12 @@
       "description": "Register connector-neutral source accounts, containers, items, retrieval channels, expected contexts, and context gaps.",
       "read_only": false,
       "requires": {
-        "db_functions": ["rye_source_inventory", "rye_pending_context_confirmations", "create_context_gap_candidate"]
+        "db_functions": ["rye_source_inventory", "rye_pending_context_confirmations", "create_context_gap_candidate", "record_source_of_truth_policy"]
       },
       "entrypoints": [
         { "type": "db_function", "name": "rye_source_inventory" },
-        { "type": "db_function", "name": "rye_pending_context_confirmations" }
+        { "type": "db_function", "name": "rye_pending_context_confirmations" },
+        { "type": "db_function", "name": "record_source_of_truth_policy" }
       ]
     }
   ],
@@ -48,6 +49,10 @@
       {
         "assertion_type": "unexpected_context_policy",
         "claim": { "action": "create_context_gap_candidate" }
+      },
+      {
+        "assertion_type": "source_of_truth_policy",
+        "claim": { "review_gate": "required_before_authority" }
       }
     ],
     "never_infer_defaults": [

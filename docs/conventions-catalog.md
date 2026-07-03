@@ -13,7 +13,7 @@ Onboarding and plugin metadata add convention-owned infrastructure types:
 
 - **Node types:** `onboarding_scope`, `intake_profile`, `retrieval_channel`, `intake_run`, `plugin`
 - **Edge types:** `scope_uses_profile`, `scope_enables_plugin`, `scope_applies_to_source`, `scope_uses_retrieval_channel`, `retrieved_via`, `observed_in_run`, `expected_by_profile`, `scope_has_context_gap`
-- **Assertion types:** `scope_status`, `scope_purpose`, `scope_boundary`, `scope_owner`, `expected_contexts`, `holding_context`, `unexpected_context_policy`, `blocked_contexts`, `retention_policy`, `evidence_policy`, `review_gate`, `agent_autonomy_policy`, `accepted_knowledge_policy`, `plugin_policy_binding`
+- **Assertion types:** `scope_status`, `scope_purpose`, `scope_boundary`, `scope_owner`, `expected_contexts`, `holding_context`, `unexpected_context_policy`, `blocked_contexts`, `retention_policy`, `evidence_policy`, `review_gate`, `agent_autonomy_policy`, `accepted_knowledge_policy`, `source_of_truth_policy`, `process_constraint`, `process_metric`, `improvement_cycle`, `convention_registry`, `plugin_policy_binding`
 - **Event types:** `onboarding_started`, `scope_policy_recorded`, `plugin_policy_bound`, `onboarding_completed`, `scope_revision_proposed`
 
 Run `SELECT rye_catalog()` to see which types are in use in a given instance.
@@ -40,6 +40,66 @@ The implementation reference lives in:
 
 - `docs/onboarding.md`
 - `schema/migrations/0010_onboarding_scope_plugins.sql`
+- `schema/migrations/0013_onboarding_knowledge_policies.sql`
+
+## Convention Registry Pattern
+
+Use `convention_registry` assertions when a scope has repeated local vocabulary
+that agents should reuse, but the pattern is not stable enough to become a full
+plugin.
+
+Each registered convention should include:
+
+- `label`
+- `aliases`
+- `description`
+- `use_when`
+- `avoid_when`
+- `status`: `observed`, `proposed`, `accepted`, `deprecated`, or
+  `plugin_owned`
+- optional `owning_plugin_id`
+
+Use `register_scope_convention(...)` to write the assertion. Prefer this over
+letting fresh agents infer semantics from existing node or edge labels alone.
+
+## Source Of Truth Policy Pattern
+
+Use `source_of_truth_policy` assertions to say which source is authoritative
+for a specific status or fact domain.
+
+Each policy should include:
+
+- `status_domain`
+- `authoritative_source`
+- `effective_at`
+- `review_gate`
+- `evidence_allowed`
+- `supersedes`
+- `notes`
+
+Use `record_source_of_truth_policy(...)` during onboarding when source authority
+is part of the setup. Source names, connector names, folder names, channel
+names, or logs are never authority by themselves.
+
+## Process Improvement Cycle Pattern
+
+Use `improvement_cycle` assertions when a scope is about improving an
+organizational process. The pattern follows the constraint-oriented improvement
+loop:
+
+- `goal`
+- `Identify`: current constraint
+- `Exploit`: how to get the most from the current constraint
+- `Subordinate`: what other work must align to the constraint
+- `Elevate`: when and how to add capacity or change the system
+- `Repeat`: when to inspect the next constraint
+- `metrics`
+- `next_constraint`
+
+Use `record_improvement_cycle(...)` to store the cycle. The helper also records
+a `process_constraint` assertion for the current constraint. Logs and traces may
+support the metrics, but the durable assertion is the reviewed business
+knowledge about the process.
 
 ## Pattern Library Convention
 
@@ -64,22 +124,53 @@ Use `assertion_key` to define uniqueness scope for active facts:
 
 - **Single-valued facts**: `assertion_key = 'default'`
   - Examples: `task_status`, `deal_stage`, `project_status`, `health_score`, `churn_risk`
-  - Supersede with `supersede_assertion(...)`
+  - Replace with `record_assertion(...)` for normal accepted writes
 - **Multi-valued facts**: use a stable domain key
   - `ownership` keyed by `owner:<node_id>`
   - `candidate_stage` keyed by `role:<opportunity_code>`
   - `interview_feedback` keyed by `round:<round_name>`
 
-The unique index on `(assertion_type, assertion_key, subject_node_id) WHERE superseded_at IS NULL` prevents duplicate active facts for the same key.
+Rye enforces active uniqueness by subject, assertion type, assertion key, and
+effective window. This allows a current row and a scheduled future row for the
+same key to coexist without making future knowledge current too early.
 
 ## Assertion Write Convention
 
-- INSERT assertions directly (subject to RLS and assertion-type gating).
-- Assertion content is immutable after insert. Only `superseded_at` and `superseded_by` may be updated.
-- Use `supersede_assertion(...)` to replace single-valued facts when you're certain the new value is correct.
+- Prefer `record_assertion(...)` for accepted assertions. It handles current,
+  historical, candidate, and future-effective writes consistently.
+- Assertion content is immutable after insert. Only lifecycle metadata and
+  effective-window narrowing may be updated by Rye helper functions.
+- Use `supersede_assertion(...)` only when replacing a known assertion by id and
+  you do not need future-scheduling behavior.
 - Use `contest_assertion(...)` when contradictory information arrives but you're uncertain which is correct. Both claims coexist until resolved.
 - Use `resolve_dispute(...)` to pick a winner among competing assertions.
 - Do not run direct `UPDATE assertions` — RLS blocks it outside the supersession function context.
+
+## Future Assertion And Planning Pattern
+
+Use this pattern when an accepted future change should be visible for planning
+but not treated as current truth.
+
+1. Store the plan as current-visible knowledge.
+   - Examples: `deal_stage_plan`, `task_status_plan`,
+     `milestone_status_plan`.
+   - Include owner, target/effective date, status, dependencies, risks, and
+     the scheduled assertion id when available.
+2. Store the future truth as a future-effective assertion.
+   - Use the same `assertion_key` as the current fact it will replace.
+   - Set `effective_at` to the cutover date.
+   - Let `record_assertion(...)` close the current row's `effective_to`.
+3. Read current truth from `current_valid_assertions`.
+4. Read future or historical truth from `assertions_as_of(...)`.
+
+Use CRM/PM helpers when available:
+
+- `schedule_deal_stage_change(...)`
+- `schedule_task_status_change(...)`
+- `schedule_milestone_status_change(...)`
+
+Do not report a plan as already true. A plan says "we intend this"; the
+future-effective assertion says "Rye should answer this as true at that time."
 
 ## Assertion Dispute Convention
 

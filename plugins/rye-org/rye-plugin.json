@@ -38,7 +38,11 @@
       "goal_status",
       "policy_status",
       "procedure_status",
-      "responsibility_scope"
+      "responsibility_scope",
+      "process_constraint",
+      "process_metric",
+      "improvement_cycle",
+      "convention_registry"
     ],
     "event_types": [],
     "artifact_types": []
@@ -51,10 +55,12 @@
       "description": "Represent people, systems, departments, mission, vision, goals, related organizations, policies, and procedures.",
       "read_only": false,
       "requires": {
-        "db_functions": ["record_assertion", "record_event"]
+        "db_functions": ["record_assertion", "record_event", "record_improvement_cycle", "register_scope_convention"]
       },
       "entrypoints": [
-        { "type": "plugin", "name": "rye-org" }
+        { "type": "plugin", "name": "rye-org" },
+        { "type": "db_function", "name": "record_improvement_cycle" },
+        { "type": "db_function", "name": "register_scope_convention" }
       ]
     }
   ],
@@ -64,7 +70,10 @@
       "Which people or departments are involved?",
       "Which systems are used?",
       "Which policies or procedures govern this work?",
-      "What goals does this function support?"
+      "What goals does this function support?",
+      "What is the current constraint limiting this process?",
+      "What would show that the constraint moved?",
+      "Which repeated local terms should agents register as conventions before creating new vocabulary?"
     ],
     "source_questions": [],
     "retention_questions": [],

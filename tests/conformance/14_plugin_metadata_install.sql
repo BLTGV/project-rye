@@ -90,6 +90,7 @@ BEGIN
           AND p.properties->'contributes'->'node_types' ? 'source_account'
           AND p.properties->'contributes'->'edge_types' ? 'retrieved_via'
           AND p.properties->'contributes'->'assertion_types' ? 'source_context_confirmation'
+          AND p.properties->'contributes'->'assertion_types' ? 'source_of_truth_policy'
           AND p.properties->'contributes'->'event_types' ? 'source_context_intake_completed'
           AND p.properties->'contributes'->'artifact_types' ? 'source_item_raw'
     ) THEN
@@ -105,6 +106,9 @@ BEGIN
           AND p.properties->'contributes'->'node_types' ? 'person'
           AND p.properties->'contributes'->'node_types' ? 'system'
           AND p.properties->'contributes'->'node_types' ? 'department'
+          AND p.properties->'contributes'->'assertion_types' ? 'process_constraint'
+          AND p.properties->'contributes'->'assertion_types' ? 'improvement_cycle'
+          AND p.properties->'contributes'->'assertion_types' ? 'convention_registry'
           AND p.properties->'onboarding'->'never_infer_defaults' ? 'Do not infer employment, department membership, responsibility, or policy ownership from source membership alone.'
     ) THEN
         RAISE EXCEPTION 'Expected rye-org organization metadata and never-infer defaults to be synced';
