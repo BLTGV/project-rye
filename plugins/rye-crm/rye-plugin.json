@@ -9,8 +9,8 @@
   "contributes": {
     "node_types": ["person", "org", "opportunity", "pipeline", "territory", "campaign"],
     "edge_types": ["employs", "affiliated_with", "primary_contact", "secondary_contact", "pipeline_member", "territory_member", "campaign_target", "assigned_to", "targets", "referral"],
-    "assertion_types": ["deal_stage", "deal_value", "sentiment", "contact_info", "lead_score", "win_probability", "do_not_contact"],
-    "event_types": ["email", "phone_call", "meeting", "note", "offer_sent", "stage_change"],
+    "assertion_types": ["deal_stage", "deal_stage_plan", "deal_value", "sentiment", "contact_info", "lead_score", "win_probability", "do_not_contact"],
+    "event_types": ["email", "phone_call", "meeting", "note", "offer_sent", "stage_change", "stage_change_scheduled"],
     "artifact_types": []
   },
   "capabilities": [
@@ -22,7 +22,7 @@
       "read_only": false,
       "requires": {
         "plugins": ["rye-org"],
-        "db_functions": ["record_assertion", "record_event"]
+        "db_functions": ["record_assertion", "record_event", "schedule_deal_stage_change"]
       },
       "entrypoints": [
         { "type": "plugin", "name": "rye-crm" }
@@ -38,7 +38,8 @@
     "evidence_questions": [],
     "default_policies": [],
     "never_infer_defaults": [
-      "Do not create opportunities or pipeline stage facts from source chatter without scope policy."
+      "Do not create opportunities or pipeline stage facts from source chatter without scope policy.",
+      "Do not treat a planned future stage change as current; use schedule_deal_stage_change so current and future-as-of answers remain distinct."
     ],
     "agent_autonomy_rules": []
   },

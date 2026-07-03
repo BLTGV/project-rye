@@ -79,6 +79,12 @@ can reset before the read. Use `ROLLBACK`, not `COMMIT`, when wrapping reads.
      assertions.
    - Use `effective_at` and `effective_to` for domain truth windows.
    - Use `superseded_at` for Rye belief replacement, not domain truth ending.
+   - Future-effective assertions are accepted knowledge for a future as-of
+     time, not current knowledge before their `effective_at`.
+   - Plan assertions such as `deal_stage_plan`, `task_status_plan`, and
+     `milestone_status_plan` are current-visible intentions. Do not report the
+     planned status/stage as already true unless the corresponding status/stage
+     assertion is valid for the requested time.
 
 6. **Read action status**
    - Task nodes use `node_type = 'task'`.
@@ -146,6 +152,27 @@ SELECT assertion_type, assertion_key, claim, confidence, effective_at,
 FROM rye.assertions_as_of('<as_of_iso>'::timestamptz)
 WHERE subject_node_id = '<node_id>'::uuid
 ORDER BY assertion_type, assertion_key;
+```
+
+Current plans for a node:
+
+```sql
+SELECT assertion_type, assertion_key, claim, effective_at, attrs
+FROM rye.current_valid_assertions
+WHERE subject_node_id = '<node_id>'::uuid
+  AND assertion_type IN ('deal_stage_plan', 'task_status_plan', 'milestone_status_plan')
+ORDER BY assertion_type, assertion_key;
+```
+
+Scheduled future rows:
+
+```sql
+SELECT assertion_type, assertion_key, claim, effective_at, attrs
+FROM rye.assertions
+WHERE subject_node_id = '<node_id>'::uuid
+  AND superseded_at IS NULL
+  AND attrs->>'scheduled_future' = 'true'
+ORDER BY effective_at;
 ```
 
 Open tasks:

@@ -9,8 +9,8 @@
   "contributes": {
     "node_types": ["task", "project", "milestone", "sprint", "workflow_template"],
     "edge_types": ["contains", "subtask_of", "blocks", "depends_on", "assigned_to", "milestone_target", "sprint_member", "project_member", "regarding", "originated_from"],
-    "assertion_types": ["task_status", "task_priority", "estimate", "progress", "project_status", "sprint_goal_status", "milestone_status"],
-    "event_types": ["status_change", "comment", "time_log", "assignment_change", "blocker_added", "blocker_resolved", "review_requested", "task_created"],
+    "assertion_types": ["task_status", "task_status_plan", "task_priority", "estimate", "progress", "project_status", "sprint_goal_status", "milestone_status", "milestone_status_plan"],
+    "event_types": ["status_change", "task_status_change_scheduled", "milestone_status_change_scheduled", "comment", "time_log", "assignment_change", "blocker_added", "blocker_resolved", "review_requested", "task_created"],
     "artifact_types": []
   },
   "capabilities": [
@@ -22,7 +22,7 @@
       "read_only": false,
       "requires": {
         "plugins": ["rye-org"],
-        "db_functions": ["record_assertion", "create_knowledge_candidate", "promote_candidate_to_task"]
+        "db_functions": ["record_assertion", "schedule_task_status_change", "schedule_milestone_status_change", "create_knowledge_candidate", "promote_candidate_to_task"]
       },
       "entrypoints": [
         { "type": "plugin", "name": "rye-project-management" }
@@ -38,7 +38,8 @@
     "evidence_questions": [],
     "default_policies": [],
     "never_infer_defaults": [
-      "Do not infer project membership or task ownership from channel participation alone."
+      "Do not infer project membership or task ownership from channel participation alone.",
+      "Do not treat planned future task or milestone status as current; use scheduling helpers so current and future-as-of answers remain distinct."
     ],
     "agent_autonomy_rules": []
   },
