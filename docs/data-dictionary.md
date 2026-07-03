@@ -468,7 +468,7 @@ Helper function used internally by `supersede_assertion()` and `merge_nodes()`. 
 
 #### `create_opportunity()`
 
-Creates an opportunity node with a generated code, links it to a pipeline, assigns an owner, sets the initial `deal_stage` assertion, and records an `opportunity_created` event. Auto-sets `classification: "internal"` when teams are provided.
+Creates an opportunity node with a generated code, links it to a pipeline, assigns an owner, records an `opportunity_created` event, and sets the initial `deal_stage` assertion. The initial assertion carries provenance: its `source_event_id` is the caller-supplied `p_source_event_id` when given, otherwise the `opportunity_created` event. Auto-sets `classification: "internal"` when teams are provided.
 
 #### `advance_deal_stage()`
 
@@ -484,7 +484,7 @@ Thin wrapper around `record_event()` for CRM-specific event logging.
 
 #### `create_task()`
 
-Creates a task node with a generated code and project sequence number, links it to a project, assigns an owner, sets the initial `task_status` assertion to `"backlog"`, and records a `task_created` event. Auto-sets `classification: "internal"` when teams are provided.
+Creates a task node with a generated code and project sequence number, links it to a project, assigns an owner, records a `task_created` event, and sets the initial `task_status` assertion to `"backlog"`. The initial assertion carries provenance: its `source_event_id` is the caller-supplied `p_source_event_id` when given, otherwise the `task_created` event. Auto-sets `classification: "internal"` when teams are provided.
 
 #### `advance_task_status()`
 

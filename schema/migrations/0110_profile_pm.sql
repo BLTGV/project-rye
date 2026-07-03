@@ -10,7 +10,8 @@ CREATE OR REPLACE FUNCTION create_task(
     p_properties jsonb DEFAULT '{}',
     p_teams text[] DEFAULT '{}',
     p_regarding_ids uuid[] DEFAULT '{}',
-    p_regarding_roles text[] DEFAULT '{}'
+    p_regarding_roles text[] DEFAULT '{}',
+    p_source_event_id uuid DEFAULT NULL
 ) RETURNS uuid
 SET search_path = rye, pg_catalog, public
 AS $$
@@ -20,6 +21,7 @@ DECLARE
     v_project_seq int;
     i int;
     v_regarding_count int;
+    v_event_id uuid;
 BEGIN
     v_code := generate_crm_code('TSK');
 
@@ -57,8 +59,24 @@ BEGIN
     )
     RETURNING id INTO v_task_id;
 
-    INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence)
-    VALUES ('task_status', 'default', v_task_id, '{"status": "backlog"}', 1.0);
+    v_event_id := record_event(
+        p_event_type        := 'task_created',
+        p_summary           := format('Created %s: %s', v_code, p_title),
+        p_properties        := jsonb_build_object('task_code', v_code, 'project_id', p_project_id),
+        p_participant_ids   := ARRAY[v_task_id],
+        p_participant_roles := ARRAY['subject']
+    );
+
+    -- Initial status assertion is anchored to the caller's source event when
+    -- provided, otherwise to the creation event, so provenance is never NULL
+    PERFORM record_assertion(
+        p_assertion_type := 'task_status',
+        p_assertion_key := 'default',
+        p_subject_node_id := v_task_id,
+        p_claim := '{"status": "backlog"}'::jsonb,
+        p_source_event_id := coalesce(p_source_event_id, v_event_id),
+        p_confidence := 1.0
+    );
 
     IF p_project_id IS NOT NULL THEN
         INSERT INTO edges (edge_type, source_id, target_id, properties)
@@ -85,14 +103,6 @@ BEGIN
         );
     END LOOP;
 
-    PERFORM record_event(
-        p_event_type        := 'task_created',
-        p_summary           := format('Created %s: %s', v_code, p_title),
-        p_properties        := jsonb_build_object('task_code', v_code, 'project_id', p_project_id),
-        p_participant_ids   := ARRAY[v_task_id],
-        p_participant_roles := ARRAY['subject']
-    );
-
     RETURN v_task_id;
 END;
 $$ LANGUAGE plpgsql;
@@ -114,7 +124,7 @@ DECLARE
 BEGIN
     SELECT id, claim->>'status'
     INTO v_old_assertion_id, v_old_status
-    FROM current_assertions
+    FROM current_valid_assertions
     WHERE subject_node_id = p_task_id
       AND assertion_type = 'task_status'
       AND assertion_key = 'default'
@@ -139,34 +149,19 @@ BEGIN
         p_actor             := p_actor
     );
 
-    IF v_old_assertion_id IS NULL THEN
-        INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, source_event_id, confidence)
-        VALUES (
-            'task_status',
-            'default',
-            p_task_id,
-            jsonb_build_object('status', p_new_status, 'reason', p_reason),
-            v_event_id,
-            1.0
-        )
-        RETURNING id INTO v_new_assertion_id;
-
-        RETURN v_new_assertion_id;
-    END IF;
-
-    v_new_assertion_id := supersede_assertion(
-        p_old_assertion_id := v_old_assertion_id,
-        p_new_assertion_type := 'task_status',
-        p_new_subject_node_id := p_task_id,
-        p_new_subject_edge_id := NULL,
-        p_new_claim := jsonb_build_object(
+    v_new_assertion_id := record_assertion(
+        p_assertion_type := 'task_status',
+        p_assertion_key := 'default',
+        p_subject_node_id := p_task_id,
+        p_claim := jsonb_build_object(
             'status', p_new_status,
             'moved_from', v_old_status,
             'reason', p_reason
         ),
-        p_new_assertion_key := 'default',
-        p_new_source_event_id := v_event_id,
-        p_new_confidence := 1.0
+        p_source_event_id := v_event_id,
+        p_confidence := 1.0,
+        p_mode := 'current',
+        p_attrs := jsonb_build_object('source', 'rye-project-management', 'status_change', true)
     );
 
     RETURN v_new_assertion_id;
@@ -361,14 +356,14 @@ SELECT
     ) AS blocker_count,
     t.created_at
 FROM nodes t
-LEFT JOIN current_assertions stg
+LEFT JOIN current_valid_assertions stg
     ON stg.subject_node_id = t.id
    AND stg.assertion_type = 'task_status'
    AND stg.assertion_key = 'default'
-LEFT JOIN current_assertions est
+LEFT JOIN current_valid_assertions est
     ON est.subject_node_id = t.id
    AND est.assertion_type = 'estimate'
-LEFT JOIN current_assertions prg
+LEFT JOIN current_valid_assertions prg
     ON prg.subject_node_id = t.id
    AND prg.assertion_type = 'progress'
 LEFT JOIN LATERAL (
@@ -378,7 +373,8 @@ LEFT JOIN LATERAL (
     WHERE e.source_id = t.id
       AND e.edge_type = 'assigned_to'
       AND e.properties->>'role' = 'owner'
-      AND e.effective_to IS NULL
+      AND (e.effective_from IS NULL OR e.effective_from <= now())
+      AND (e.effective_to IS NULL OR e.effective_to > now())
       AND e.archived_at IS NULL
     LIMIT 1
 ) owner ON true
@@ -389,7 +385,8 @@ LEFT JOIN LATERAL (
     WHERE e.source_id = t.id
       AND e.edge_type = 'assigned_to'
       AND e.properties->>'role' = 'reviewer'
-      AND e.effective_to IS NULL
+      AND (e.effective_from IS NULL OR e.effective_from <= now())
+      AND (e.effective_to IS NULL OR e.effective_to > now())
       AND e.archived_at IS NULL
     LIMIT 1
 ) reviewer ON true

@@ -7,7 +7,8 @@ CREATE OR REPLACE FUNCTION create_opportunity(
     p_pipeline_code text,
     p_assigned_to_id uuid,
     p_properties jsonb DEFAULT '{}',
-    p_teams text[] DEFAULT '{}'
+    p_teams text[] DEFAULT '{}',
+    p_source_event_id uuid DEFAULT NULL
 ) RETURNS uuid
 SET search_path = rye, pg_catalog, public
 AS $$
@@ -16,6 +17,7 @@ DECLARE
     v_code text;
     v_pipeline_id uuid;
     v_default_stage text;
+    v_event_id uuid;
 BEGIN
     v_code := generate_crm_code('OPP');
 
@@ -46,13 +48,28 @@ BEGIN
     )
     RETURNING id INTO v_opp_id;
 
-    INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence)
-    VALUES (
-        'deal_stage',
-        'default',
-        v_opp_id,
-        jsonb_build_object('stage', v_default_stage, 'pipeline', p_pipeline_code),
-        1.0
+    -- Record creation event (parallel to create_task's task_created)
+    v_event_id := record_event(
+        p_event_type        := 'opportunity_created',
+        p_summary           := format('Created %s: %s', v_code, p_name),
+        p_properties        := jsonb_build_object(
+            'opp_code', v_code,
+            'pipeline', p_pipeline_code,
+            'initial_stage', v_default_stage
+        ),
+        p_participant_ids   := ARRAY[v_opp_id],
+        p_participant_roles := ARRAY['subject']
+    );
+
+    -- Initial stage assertion is anchored to the caller's source event when
+    -- provided, otherwise to the creation event, so provenance is never NULL
+    PERFORM record_assertion(
+        p_assertion_type := 'deal_stage',
+        p_assertion_key := 'default',
+        p_subject_node_id := v_opp_id,
+        p_claim := jsonb_build_object('stage', v_default_stage, 'pipeline', p_pipeline_code),
+        p_source_event_id := coalesce(p_source_event_id, v_event_id),
+        p_confidence := 1.0
     );
 
     INSERT INTO edges (edge_type, source_id, target_id, properties)
@@ -67,19 +84,6 @@ BEGIN
         INSERT INTO edges (edge_type, source_id, target_id, properties, effective_from)
         VALUES ('assigned_to', v_opp_id, p_assigned_to_id, '{"role": "owner"}', now());
     END IF;
-
-    -- Record creation event (parallel to create_task's task_created)
-    PERFORM record_event(
-        p_event_type        := 'opportunity_created',
-        p_summary           := format('Created %s: %s', v_code, p_name),
-        p_properties        := jsonb_build_object(
-            'opp_code', v_code,
-            'pipeline', p_pipeline_code,
-            'initial_stage', v_default_stage
-        ),
-        p_participant_ids   := ARRAY[v_opp_id],
-        p_participant_roles := ARRAY['subject']
-    );
 
     RETURN v_opp_id;
 END;
@@ -102,7 +106,7 @@ DECLARE
 BEGIN
     SELECT id, claim->>'stage', claim->>'pipeline'
     INTO v_old_assertion_id, v_old_stage, v_pipeline
-    FROM current_assertions
+    FROM current_valid_assertions
     WHERE subject_node_id = p_opp_id
       AND assertion_type = 'deal_stage'
       AND assertion_key = 'default'
@@ -117,35 +121,20 @@ BEGIN
         p_actor             := p_actor
     );
 
-    IF v_old_assertion_id IS NULL THEN
-        INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, source_event_id, confidence)
-        VALUES (
-            'deal_stage',
-            'default',
-            p_opp_id,
-            jsonb_build_object('stage', p_new_stage, 'pipeline', v_pipeline, 'reason', p_reason),
-            v_event_id,
-            1.0
-        )
-        RETURNING id INTO v_new_assertion_id;
-
-        RETURN v_new_assertion_id;
-    END IF;
-
-    v_new_assertion_id := supersede_assertion(
-        p_old_assertion_id := v_old_assertion_id,
-        p_new_assertion_type := 'deal_stage',
-        p_new_subject_node_id := p_opp_id,
-        p_new_subject_edge_id := NULL,
-        p_new_claim := jsonb_build_object(
+    v_new_assertion_id := record_assertion(
+        p_assertion_type := 'deal_stage',
+        p_assertion_key := 'default',
+        p_subject_node_id := p_opp_id,
+        p_claim := jsonb_build_object(
             'stage', p_new_stage,
             'pipeline', coalesce(v_pipeline, 'unknown'),
             'moved_from', v_old_stage,
             'reason', p_reason
         ),
-        p_new_assertion_key := 'default',
-        p_new_source_event_id := v_event_id,
-        p_new_confidence := 1.0
+        p_source_event_id := v_event_id,
+        p_confidence := 1.0,
+        p_mode := 'current',
+        p_attrs := jsonb_build_object('source', 'rye-crm', 'stage_change', true)
     );
 
     RETURN v_new_assertion_id;
@@ -195,14 +184,14 @@ SELECT
     owner.id AS assigned_to_id,
     n.created_at
 FROM nodes n
-LEFT JOIN current_assertions stg
+LEFT JOIN current_valid_assertions stg
     ON stg.subject_node_id = n.id
    AND stg.assertion_type = 'deal_stage'
    AND stg.assertion_key = 'default'
-LEFT JOIN current_assertions val
+LEFT JOIN current_valid_assertions val
     ON val.subject_node_id = n.id
    AND val.assertion_type = 'deal_value'
-LEFT JOIN current_assertions wp
+LEFT JOIN current_valid_assertions wp
     ON wp.subject_node_id = n.id
    AND wp.assertion_type = 'win_probability'
 LEFT JOIN LATERAL (
@@ -223,7 +212,8 @@ LEFT JOIN LATERAL (
       AND own_e.edge_type = 'assigned_to'
       AND own_e.properties->>'role' = 'owner'
       AND own_e.archived_at IS NULL
-      AND own_e.effective_to IS NULL
+      AND (own_e.effective_from IS NULL OR own_e.effective_from <= now())
+      AND (own_e.effective_to IS NULL OR own_e.effective_to > now())
     ORDER BY own_e.effective_from DESC NULLS LAST
     LIMIT 1
 ) owner ON true
@@ -262,13 +252,14 @@ LEFT JOIN LATERAL (
     WHERE emp.target_id = n.id
       AND emp.edge_type = 'employs'
       AND emp.archived_at IS NULL
-      AND emp.effective_to IS NULL
+      AND (emp.effective_from IS NULL OR emp.effective_from <= now())
+      AND (emp.effective_to IS NULL OR emp.effective_to > now())
     LIMIT 1
 ) org ON true
-LEFT JOIN current_assertions ci
+LEFT JOIN current_valid_assertions ci
     ON ci.subject_node_id = n.id
    AND ci.assertion_type = 'contact_info'
-LEFT JOIN current_assertions sent
+LEFT JOIN current_valid_assertions sent
     ON sent.subject_node_id = n.id
    AND sent.assertion_type = 'sentiment'
 WHERE n.node_type = 'person'
