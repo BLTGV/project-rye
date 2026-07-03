@@ -1,0 +1,65 @@
+{
+  "agent_run": "fixture-fabrication-zero-context-001",
+  "candidates": [
+    {
+      "id": "cand-nf-001",
+      "oracle_ref": "nf-001",
+      "domain_key": "quote-pipeline",
+      "statement": "MetroFit Q-441 is won at $86,400 after signed PO.",
+      "current_or_future": "current",
+      "authority_ref": "person:mateo-ruiz",
+      "speech_act": "confirmed",
+      "confidence": 0.91
+    },
+    {
+      "id": "cand-nf-002",
+      "oracle_ref": "nf-002",
+      "domain_key": "engineering-review",
+      "statement": "MetroFit rev B drawings are approved for production.",
+      "current_or_future": "current",
+      "authority_ref": "person:avery-cho",
+      "speech_act": "confirmed",
+      "confidence": 0.9
+    },
+    {
+      "id": "cand-nf-003",
+      "oracle_ref": "nf-003",
+      "domain_key": "production-handoff",
+      "statement": "MetroFit traveler packet is complete and production starts 2026-06-12.",
+      "current_or_future": "current",
+      "authority_ref": "person:dana-fox",
+      "speech_act": "confirmed",
+      "confidence": 0.89
+    },
+    {
+      "id": "cand-nf-004",
+      "oracle_ref": "nf-004",
+      "domain_key": "qa-release",
+      "statement": "MetroFit QA hold was released after recoat on 2026-06-16.",
+      "current_or_future": "current",
+      "authority_ref": "person:lin-park",
+      "speech_act": "confirmed",
+      "confidence": 0.88
+    },
+    {
+      "id": "cand-nf-005",
+      "oracle_ref": "nf-005",
+      "domain_key": "fabrication-process",
+      "statement": "Quotes Master is superseded by traveler packet handoff for jobs won after 2026-06-10.",
+      "current_or_future": "superseded",
+      "authority_ref": "person:avery-cho",
+      "speech_act": "policy_set",
+      "confidence": 0.84
+    },
+    {
+      "id": "cand-nf-006",
+      "oracle_ref": "nf-006",
+      "domain_key": "quote-pipeline",
+      "statement": "Harbor Foods Q-455 is still pricing review and has no customer commitment.",
+      "current_or_future": "current",
+      "authority_ref": "person:mateo-ruiz",
+      "speech_act": "confirmed",
+      "confidence": 0.87
+    }
+  ]
+}

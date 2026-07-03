@@ -1,0 +1,55 @@
+{
+  "agent_run": "fixture-mineral-zero-context-001",
+  "candidates": [
+    {
+      "id": "cand-rm-001",
+      "oracle_ref": "rm-001",
+      "domain_key": "acquisition-pipeline",
+      "statement": "Iron Creek is ready to close with a target close date of 2026-06-28.",
+      "current_or_future": "current",
+      "authority_ref": "person:nora-quinn",
+      "speech_act": "confirmed",
+      "confidence": 0.9
+    },
+    {
+      "id": "cand-rm-002",
+      "oracle_ref": "rm-002",
+      "domain_key": "title-diligence",
+      "statement": "Iron Creek title cleared on 2026-06-24 after probate memo acceptance.",
+      "current_or_future": "current",
+      "authority_ref": "person:eli-hart",
+      "speech_act": "confirmed",
+      "confidence": 0.92
+    },
+    {
+      "id": "cand-rm-003",
+      "oracle_ref": "rm-003",
+      "domain_key": "closing-funding",
+      "statement": "Iron Creek funds are ready and wire instructions were verified by callback.",
+      "current_or_future": "current",
+      "authority_ref": "person:priya-shah",
+      "speech_act": "confirmed",
+      "confidence": 0.91
+    },
+    {
+      "id": "cand-rm-004",
+      "oracle_ref": "rm-004",
+      "domain_key": "acquisition-pipeline",
+      "statement": "Falcon Mesa is nurture, not active closing, pending the June check stub.",
+      "current_or_future": "current",
+      "authority_ref": "person:nora-quinn",
+      "speech_act": "confirmed",
+      "confidence": 0.85
+    },
+    {
+      "id": "cand-rm-005",
+      "oracle_ref": "rm-005",
+      "domain_key": "deal-process",
+      "statement": "Beginning 2026-07-15, new title exceptions should be entered in Title Queue before Slack discussion.",
+      "current_or_future": "future",
+      "authority_ref": "person:eli-hart",
+      "speech_act": "policy_set",
+      "confidence": 0.88
+    }
+  ]
+}

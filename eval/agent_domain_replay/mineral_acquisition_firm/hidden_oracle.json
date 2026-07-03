@@ -1,0 +1,60 @@
+{
+  "scenario_key": "mineral_acquisition_firm",
+  "organization": "Redtail Minerals",
+  "domains": [
+    "acquisition-pipeline",
+    "account-updates",
+    "title-diligence",
+    "closing-funding",
+    "deal-process"
+  ],
+  "authorities": [
+    { "domain_key": "acquisition-pipeline", "authority_ref": "person:nora-quinn", "claim_types": ["stage", "owner", "next_action"] },
+    { "domain_key": "account-updates", "authority_ref": "person:nora-quinn", "claim_types": ["seller", "account_health"] },
+    { "domain_key": "title-diligence", "authority_ref": "person:eli-hart", "claim_types": ["title_status", "curative_owner", "process"] },
+    { "domain_key": "closing-funding", "authority_ref": "person:priya-shah", "claim_types": ["funding_status", "wire_verification"] },
+    { "domain_key": "deal-process", "authority_ref": "person:eli-hart", "claim_types": ["title_exception_process"] }
+  ],
+  "expected_facts": [
+    {
+      "id": "rm-001",
+      "domain_key": "acquisition-pipeline",
+      "statement": "Iron Creek is ready to close with target close 2026-06-28.",
+      "current_or_future": "current",
+      "authority_ref": "person:nora-quinn",
+      "speech_act": "confirmed"
+    },
+    {
+      "id": "rm-002",
+      "domain_key": "title-diligence",
+      "statement": "Iron Creek title is clear for closing as of 2026-06-24.",
+      "current_or_future": "current",
+      "authority_ref": "person:eli-hart",
+      "speech_act": "confirmed"
+    },
+    {
+      "id": "rm-003",
+      "domain_key": "closing-funding",
+      "statement": "Iron Creek funds are ready and wire instructions were verified by callback.",
+      "current_or_future": "current",
+      "authority_ref": "person:priya-shah",
+      "speech_act": "confirmed"
+    },
+    {
+      "id": "rm-004",
+      "domain_key": "acquisition-pipeline",
+      "statement": "Falcon Mesa is in nurture and should not be treated as active closing.",
+      "current_or_future": "current",
+      "authority_ref": "person:nora-quinn",
+      "speech_act": "confirmed"
+    },
+    {
+      "id": "rm-005",
+      "domain_key": "deal-process",
+      "statement": "Starting 2026-07-15, new title exceptions must be logged in the Title Queue table before Slack discussion.",
+      "current_or_future": "future",
+      "authority_ref": "person:eli-hart",
+      "speech_act": "policy_set"
+    }
+  ]
+}

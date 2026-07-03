@@ -1,0 +1,60 @@
+{
+  "scenario_key": "service_operations_company",
+  "organization": "Beacon Field Services",
+  "domains": [
+    "account-health",
+    "support-operations",
+    "implementation-projects",
+    "billing-risk",
+    "systems-adoption"
+  ],
+  "authorities": [
+    { "domain_key": "account-health", "authority_ref": "person:simone-bell", "claim_types": ["account_status", "customer_commitment"] },
+    { "domain_key": "support-operations", "authority_ref": "person:jae-lin", "claim_types": ["support_status", "incident_resolution"] },
+    { "domain_key": "implementation-projects", "authority_ref": "person:omar-velez", "claim_types": ["milestone", "delivery_status"] },
+    { "domain_key": "billing-risk", "authority_ref": "person:tess-morgan", "claim_types": ["invoice_hold", "billing_clearance"] },
+    { "domain_key": "systems-adoption", "authority_ref": "person:simone-bell", "claim_types": ["crm_pm_process"] }
+  ],
+  "expected_facts": [
+    {
+      "id": "bf-001",
+      "domain_key": "account-health",
+      "statement": "Greenridge Clinics account health is green going into the 2026-06-24 portal pilot.",
+      "current_or_future": "current",
+      "authority_ref": "person:simone-bell",
+      "speech_act": "confirmed"
+    },
+    {
+      "id": "bf-002",
+      "domain_key": "support-operations",
+      "statement": "Greenridge ticket S-778 is resolved and no longer blocks portal pilot.",
+      "current_or_future": "current",
+      "authority_ref": "person:jae-lin",
+      "speech_act": "confirmed"
+    },
+    {
+      "id": "bf-003",
+      "domain_key": "billing-risk",
+      "statement": "Greenridge invoice INV-2044 billing hold is released after PO correction.",
+      "current_or_future": "current",
+      "authority_ref": "person:tess-morgan",
+      "speech_act": "confirmed"
+    },
+    {
+      "id": "bf-004",
+      "domain_key": "implementation-projects",
+      "statement": "Greenridge portal pilot starts 2026-06-24 and training is planned for 2026-06-27.",
+      "current_or_future": "future",
+      "authority_ref": "person:omar-velez",
+      "speech_act": "confirmed"
+    },
+    {
+      "id": "bf-005",
+      "domain_key": "systems-adoption",
+      "statement": "Starting 2026-08-01, CRM account stage and PM milestone changes should be made in Rye dashboards as record of work.",
+      "current_or_future": "future",
+      "authority_ref": "person:simone-bell",
+      "speech_act": "policy_set"
+    }
+  ]
+}

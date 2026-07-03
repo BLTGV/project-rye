@@ -1,0 +1,11 @@
+{
+  "reviewer_run": "fixture-mineral-sme-001",
+  "reviewer_role": "SME answering only from source packet and candidate list",
+  "decisions": [
+    { "candidate_id": "cand-rm-001", "decision": "accept", "reason": "Nora and tracker agree on ready-to-close stage and close date." },
+    { "candidate_id": "cand-rm-002", "decision": "accept", "reason": "Eli is title authority and explicitly confirmed title clear." },
+    { "candidate_id": "cand-rm-003", "decision": "accept", "reason": "Priya is finance authority and confirmed funds ready plus wire callback." },
+    { "candidate_id": "cand-rm-004", "decision": "accept", "reason": "Nora explicitly said Falcon Mesa is nurture, not active closing." },
+    { "candidate_id": "cand-rm-005", "decision": "accept_as_future", "reason": "The process change starts on 2026-07-15 and must not replace the current process early." }
+  ]
+}

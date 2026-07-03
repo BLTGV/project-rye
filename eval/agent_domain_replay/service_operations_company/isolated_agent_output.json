@@ -1,0 +1,55 @@
+{
+  "agent_run": "fixture-service-zero-context-001",
+  "candidates": [
+    {
+      "id": "cand-bf-001",
+      "oracle_ref": "bf-001",
+      "domain_key": "account-health",
+      "statement": "Greenridge account health is green ahead of the 2026-06-24 portal pilot.",
+      "current_or_future": "current",
+      "authority_ref": "person:simone-bell",
+      "speech_act": "confirmed",
+      "confidence": 0.9
+    },
+    {
+      "id": "cand-bf-002",
+      "oracle_ref": "bf-002",
+      "domain_key": "support-operations",
+      "statement": "Ticket S-778 is resolved and is not an open support blocker.",
+      "current_or_future": "current",
+      "authority_ref": "person:jae-lin",
+      "speech_act": "confirmed",
+      "confidence": 0.88
+    },
+    {
+      "id": "cand-bf-003",
+      "oracle_ref": "bf-003",
+      "domain_key": "billing-risk",
+      "statement": "Invoice INV-2044 billing hold is released after PO correction.",
+      "current_or_future": "current",
+      "authority_ref": "person:tess-morgan",
+      "speech_act": "confirmed",
+      "confidence": 0.9
+    },
+    {
+      "id": "cand-bf-004",
+      "oracle_ref": "bf-004",
+      "domain_key": "implementation-projects",
+      "statement": "Greenridge portal pilot is scheduled for 2026-06-24 and training for 2026-06-27.",
+      "current_or_future": "future",
+      "authority_ref": "person:omar-velez",
+      "speech_act": "confirmed",
+      "confidence": 0.86
+    },
+    {
+      "id": "cand-bf-005",
+      "oracle_ref": "bf-005",
+      "domain_key": "systems-adoption",
+      "statement": "Starting 2026-08-01, Rye dashboards become the record of work for CRM stage and PM milestone changes.",
+      "current_or_future": "future",
+      "authority_ref": "person:simone-bell",
+      "speech_act": "policy_set",
+      "confidence": 0.87
+    }
+  ]
+}

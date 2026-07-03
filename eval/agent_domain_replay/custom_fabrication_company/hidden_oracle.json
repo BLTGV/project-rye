@@ -1,0 +1,68 @@
+{
+  "scenario_key": "custom_fabrication_company",
+  "organization": "Northstar Fabrication",
+  "domains": [
+    "quote-pipeline",
+    "engineering-review",
+    "production-handoff",
+    "qa-release",
+    "fabrication-process"
+  ],
+  "authorities": [
+    { "domain_key": "quote-pipeline", "authority_ref": "person:mateo-ruiz", "claim_types": ["quote_stage", "customer_commitment"] },
+    { "domain_key": "engineering-review", "authority_ref": "person:avery-cho", "claim_types": ["drawing_status", "engineering_risk"] },
+    { "domain_key": "production-handoff", "authority_ref": "person:dana-fox", "claim_types": ["production_start", "plant_owner"] },
+    { "domain_key": "qa-release", "authority_ref": "person:lin-park", "claim_types": ["qa_hold", "qa_release"] },
+    { "domain_key": "fabrication-process", "authority_ref": "person:avery-cho", "claim_types": ["handoff_process"] }
+  ],
+  "expected_facts": [
+    {
+      "id": "nf-001",
+      "domain_key": "quote-pipeline",
+      "statement": "MetroFit quote Q-441 is won at $86,400 after signed PO on 2026-05-22.",
+      "current_or_future": "current",
+      "authority_ref": "person:mateo-ruiz",
+      "speech_act": "confirmed"
+    },
+    {
+      "id": "nf-002",
+      "domain_key": "engineering-review",
+      "statement": "MetroFit drawings rev B are approved for production.",
+      "current_or_future": "current",
+      "authority_ref": "person:avery-cho",
+      "speech_act": "confirmed"
+    },
+    {
+      "id": "nf-003",
+      "domain_key": "production-handoff",
+      "statement": "MetroFit traveler packet is complete and production start is 2026-06-12.",
+      "current_or_future": "current",
+      "authority_ref": "person:dana-fox",
+      "speech_act": "confirmed"
+    },
+    {
+      "id": "nf-004",
+      "domain_key": "qa-release",
+      "statement": "MetroFit QA hold was released on 2026-06-16 after recoat.",
+      "current_or_future": "current",
+      "authority_ref": "person:lin-park",
+      "speech_act": "confirmed"
+    },
+    {
+      "id": "nf-005",
+      "domain_key": "fabrication-process",
+      "statement": "Quotes Master spreadsheet handoff is superseded for new won jobs after 2026-06-10.",
+      "current_or_future": "superseded",
+      "authority_ref": "person:avery-cho",
+      "speech_act": "policy_set"
+    },
+    {
+      "id": "nf-006",
+      "domain_key": "quote-pipeline",
+      "statement": "Harbor Foods Q-455 remains in pricing review with no customer commitment.",
+      "current_or_future": "current",
+      "authority_ref": "person:mateo-ruiz",
+      "speech_act": "confirmed"
+    }
+  ]
+}

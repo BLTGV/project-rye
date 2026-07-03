@@ -1,0 +1,12 @@
+{
+  "reviewer_run": "fixture-fabrication-sme-001",
+  "reviewer_role": "SME answering only from source packet and candidate list",
+  "decisions": [
+    { "candidate_id": "cand-nf-001", "decision": "accept", "reason": "Mateo is sales authority and signed PO changes Q-441 to won." },
+    { "candidate_id": "cand-nf-002", "decision": "accept", "reason": "Avery explicitly approved drawings rev B." },
+    { "candidate_id": "cand-nf-003", "decision": "accept", "reason": "Dana controls production handoff and named the traveler complete." },
+    { "candidate_id": "cand-nf-004", "decision": "accept", "reason": "Lin controls QA release and explicitly released the hold." },
+    { "candidate_id": "cand-nf-005", "decision": "accept_as_superseded_process", "reason": "The source says old spreadsheet handoff ends after 2026-06-10." },
+    { "candidate_id": "cand-nf-006", "decision": "accept", "reason": "Mateo says no customer commitment for Harbor Foods." }
+  ]
+}

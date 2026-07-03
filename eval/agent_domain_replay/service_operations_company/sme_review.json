@@ -1,0 +1,11 @@
+{
+  "reviewer_run": "fixture-service-sme-001",
+  "reviewer_role": "SME answering only from source packet and candidate list",
+  "decisions": [
+    { "candidate_id": "cand-bf-001", "decision": "accept", "reason": "Simone owns account health and confirms green status." },
+    { "candidate_id": "cand-bf-002", "decision": "accept", "reason": "Jae owns support status and resolved S-778." },
+    { "candidate_id": "cand-bf-003", "decision": "accept", "reason": "Tess owns billing hold status and released it." },
+    { "candidate_id": "cand-bf-004", "decision": "accept_as_future", "reason": "Milestones are scheduled future work owned by Omar." },
+    { "candidate_id": "cand-bf-005", "decision": "accept_as_future_process", "reason": "The CRM/PM process change starts 2026-08-01." }
+  ]
+}
