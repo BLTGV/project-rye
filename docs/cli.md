@@ -120,6 +120,52 @@ Select a specific scope by UUID or scope key:
 This calls `rye_agent_context(scope_id)`. If exactly one scope is active, Rye
 selects it automatically. If multiple scopes are active, pass `--scope`.
 
+## Agent Administration
+
+Create an agent identity and grant it a bounded capability:
+
+```bash
+./scripts/rye agents create \
+  --key crm-planning-agent \
+  --label "CRM Planning Agent" \
+  --runtime codex \
+  --scope-ref crm-operations
+
+./scripts/rye agents grant \
+  --key crm-planning-agent \
+  --capability rye.authoritative.promote \
+  --domain crm \
+  --scope-ref crm-operations
+```
+
+Issue and revoke transport credentials:
+
+```bash
+./scripts/rye agents issue-token \
+  --key crm-planning-agent \
+  --label "Local runtime" \
+  --expires-at <iso-time>
+
+./scripts/rye agents revoke-token --token-id <uuid>
+```
+
+The plaintext token is returned once. Rye stores only its SHA-256 hash. Pass
+tokens to agent runtimes through secure input or environment variables, not
+process arguments.
+
+List registered agents and inspect the agent audit trail:
+
+```bash
+./scripts/rye agents list
+./scripts/rye agents list --json
+./scripts/rye agents audit --limit 50
+./scripts/rye agents audit --json
+```
+
+`rye agents ...` is the existing administrative command tree. It manages agent
+identities, grants, and credentials. The proposed singular `rye agent ...`
+tree is for scoped runtime reads and writes performed by one agent.
+
 ## Source Commands
 
 Review known source accounts and containers:

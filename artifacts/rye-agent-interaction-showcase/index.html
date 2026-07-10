@@ -648,7 +648,7 @@
           { type: "agent", who: "CRM planning agent", text: "Done. A current read still returns <strong>discovery</strong>. An as-of read after the cutover returns <strong>proposal</strong>." }
         ],
         trace: [
-          { phase: "Direct authority", call: "user instruction + scoped agent capability", does: "The deal lead’s explicit request authorizes this narrow action. The system executes once and preserves who asked." },
+          { phase: "Direct authority", call: "user instruction + trusted session context", does: "The trusted caller establishes Rye session context. The deal lead’s explicit request authorizes this narrow action, and the system preserves who asked." },
           { phase: "Schedule", call: "schedule_deal_stage_change()", does: "Records stage_change_scheduled, a future-effective deal_stage assertion, and a current-visible deal_stage_plan." },
           { phase: "Preserve window", call: "record_assertion(... p_effective_at)", does: "Closes the current assertion at the cutover instead of making the future stage true early." },
           { phase: "Answer now", call: "current_valid_assertions", does: "Returns discovery before 13 July and includes the plan as an intention, not the deal stage." },

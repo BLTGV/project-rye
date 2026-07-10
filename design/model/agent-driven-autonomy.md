@@ -178,7 +178,9 @@ Use one deliberate command tree:
   auditing agents.
 - `rye agent ...` is the scoped runtime interface for one authenticated agent.
 - the existing `rye context` command remains a compatibility alias for
-  `rye agent context --trusted`; it is not a separate context contract
+  `rye agent context --trusted`; it is not a separate context contract. The
+  alias must preserve the existing `--scope` and `--json` flags, global
+  connection, schema, and quiet options, output shape, and exit behavior.
 
 Proposed runtime commands:
 
