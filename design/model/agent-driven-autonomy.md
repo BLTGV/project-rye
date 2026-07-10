@@ -548,6 +548,59 @@ CLI, API, and MCP expose the same semantic operations:
 Each response separates accepted knowledge, plans, pending candidates,
 evidence, and history. External wrappers do not expose raw SQL.
 
+## Vocabulary Contract
+
+Internal vocabulary is canonical. Plain language is a presentation register at
+the human boundary, not a second vocabulary.
+
+- Schema names, function names, API fields, reason codes, and audit records
+  use only internal vocabulary. Nothing durable is stored in plain language.
+- When an agent addresses a non-technical person — chat, review requests,
+  reports, exception explanations — it renders internal concepts through one
+  canonical lexicon and accepts plain-language instructions by mapping them
+  back to internal operations.
+- Plain rendering never replaces the precise record. A decision shown as
+  "asking a person: only a sales manager can decide this" carries its reason
+  codes with it, available on request.
+- The lexicon is data, versioned in the repository, and included in the agent
+  context pack so every wrapper renders the same terms. A translation change
+  lands once, in the lexicon, not in four surfaces.
+- Scopes may localize plain terms (a team that says "deal" instead of
+  "opportunity") through the existing scope convention registry. Internal
+  names never localize.
+
+Starter lexicon:
+
+| Internal | Plain register |
+|---|---|
+| observation, source item | something Rye remembered; evidence |
+| candidate | suggestion |
+| promotion | acceptance |
+| assertion | accepted fact |
+| promotion policy, autonomy rule | rule; the rulebook |
+| decision `allow` | act on it |
+| decision `review` | ask a person |
+| decision `deny` | refuse |
+| dispute | open disagreement |
+| supersession | replaced by a newer fact |
+| effective time | when it is true |
+| knowledge domain | area of the business |
+| capability | permission |
+| speech act | how it was said (reported, proposed, decided) |
+| promotion evaluator | the checkpoint |
+| observed process | how work actually flows |
+| authoritative process | the official process |
+| divergence | difference between practice and policy |
+| source identity | a confirmed account of a real person |
+
+Conformance for this contract:
+
+- every reason code shipped to an interface has a plain rendering; an
+  unmapped code is a test failure, not a fallback string
+- plain-language instructions round-trip to the same internal operation across
+  CLI, API, and MCP wrappers
+- audit records contain no plain-register strings
+
 ## Out Of Scope Follow-Ups
 
 The following findings remain important but are intentionally separate:
