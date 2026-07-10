@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://projectrye.dev/schemas/rye.observed_process_transition.claim.v1.json",
+  "title": "Rye observed process transition assertion claim",
+  "description": "Descriptive claim that a process transition was observed to occur. Shares process_key and transition vocabulary with rye.process_transition_policy.claim.v1 so observed and authoritative lineages can be compared mechanically. This claim never binds the promotion evaluator.",
+  "type": "object",
+  "required": [
+    "schema_type",
+    "schema_version",
+    "process_key",
+    "from_state",
+    "to_state",
+    "window_start",
+    "window_end",
+    "occurrence_count",
+    "evidence_basis"
+  ],
+  "properties": {
+    "schema_type": { "const": "rye.observed_process_transition.claim.v1" },
+    "schema_version": { "const": 1 },
+    "process_key": { "type": "string", "minLength": 1 },
+    "from_state": { "type": "string", "minLength": 1 },
+    "to_state": { "type": "string", "minLength": 1 },
+    "window_start": { "type": "string", "format": "date-time" },
+    "window_end": { "type": "string", "format": "date-time" },
+    "occurrence_count": { "type": "integer", "minimum": 1 },
+    "initiator_refs": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "decider_refs": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "evidence_basis": {
+      "enum": ["assertion_history", "domain_cdc", "source_extraction", "mixed"]
+    },
+    "sample_event_ids": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "notes": { "type": "string" }
+  },
+  "additionalProperties": true
+}

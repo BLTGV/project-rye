@@ -45,7 +45,8 @@
       "improvement_cycle",
       "convention_registry",
       "process_definition",
-      "process_transition_policy"
+      "process_transition_policy",
+      "observed_process_transition"
     ],
     "event_types": ["process_transition_evaluated", "process_exception_approved"],
     "artifact_types": []

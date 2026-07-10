@@ -31,11 +31,25 @@ was active at the candidate's requested effective time.
 |---|---|---|---|---|
 | `process_definition` | stable process node | `default` | `../schemas/process_definition_claim.schema.json` | Supersede when states or their meaning change. |
 | `process_transition_policy` | stable process node | `transition:<transition_key>` | `../schemas/process_transition_policy_claim.schema.json` | Supersede the same transition key when requirements change. |
+| `observed_process_transition` | stable process node | `observed:<from_state>:<to_state>:<window_start>` | `../schemas/observed_process_transition_claim.schema.json` | Append per window; never superseded by authoritative claims. |
 | domain state, such as `deal_stage` | item moving through the process | `default` | domain-owned | Change only after the transition decision allows promotion. |
 
 Process and transition assertions use their effective windows. Evaluators must
 read the versions effective at the requested business time and retain those
 assertion IDs in the decision snapshot.
+
+### Observed versus authoritative stance
+
+`process_definition` and `process_transition_policy` are authoritative: they
+bind the promotion evaluator and require `policy_set` authority to change.
+`observed_process_transition` is descriptive: it records that behavior
+occurred, with evidence, and never binds the evaluator. The two stances share
+`process_key` and state vocabulary so divergence between them is a mechanical
+comparison. Observation may accumulate before any authoritative process
+exists, authoritative process may be fed before any observation exists, and
+neither lineage writes to the other. Discovery tooling may draft authoritative
+candidates from the observed lineage; activation still requires `policy_set`
+authority.
 
 ## Authority Contract
 
