@@ -352,6 +352,63 @@ Conversation can suggest a new procedure or policy. Record it as a `procedure`
 or `policy_change` candidate. Only an actor with applicable `policy_set`
 authority can promote or supersede the active process definition.
 
+## Observed And Authoritative Process
+
+Process knowledge exists in two stances that must coexist without merging:
+
+- **Observed** process describes how work actually flowed: which states
+  occurred, which transitions happened, who initiated and who decided them.
+  It is descriptive accepted knowledge with evidence. It makes no claim about
+  what is permitted.
+- **Authoritative** process prescribes how work must flow. Only it binds the
+  promotion evaluator. It is established by feeding structured sources such as
+  an org chart or process document, or by activating a proposed rule, and in
+  both cases only through an actor with applicable `policy_set` authority.
+
+Both stances use the same claim shapes and the same process and transition
+keys so they can be compared mechanically. They use distinct assertion types,
+for example `observed_process_definition` and
+`observed_process_transition`, so the evaluator cannot bind to the observed
+lineage by construction.
+
+Required properties:
+
+1. **Order independence.** Observation may begin before any authoritative
+   process exists, authoritative knowledge may be fed before any observation
+   exists, and either may arrive later. Neither writes to the other's lineage.
+2. **Observed knowledge accumulates under an unknown process.** Mined
+   descriptive claims promote under a lenient default policy because they
+   assert only that behavior occurred, with evidence. This makes an
+   unconfigured install queryable about actual behavior from day one.
+3. **Observed never becomes authoritative automatically.** Discovery emits
+   authoritative-process candidates from the observed lineage. Activation
+   requires `policy_set` authority. Drafts are presented as observed practice,
+   not recommended governance.
+4. **Fed knowledge is verifiable, not privileged.** An org chart or process
+   document enters through the deterministic source-of-truth path with source
+   provenance. Once active it is subject to the same divergence reporting as
+   any other authoritative claim, so a stale org chart is detectable rather
+   than silently trusted.
+5. **Both lineages are temporal.** An as-of query reconstructs what behavior
+   was believed and what the rules were at any past time, independently.
+
+### Divergence
+
+Divergence between the lineages is a derived read model, not an error state.
+For a window and process, classify:
+
+- observed transitions covered by active policy: routine
+- observed transitions absent from active policy: unmodeled transitions —
+  candidate noncompliance or evidence that the documented process is wrong
+- authorized transitions never observed: dead policy steps — process debt or
+  training gaps
+- observed deciders absent from active authority: authority divergence —
+  candidate noncompliance or a stale org chart
+
+A persistent divergence with acceptable outcomes is input for a
+`policy_change` candidate. A divergence report never mutates either lineage
+and never blocks operational writes by itself.
+
 ## Promotion Decision Contract
 
 Add an append-only promotion decision record containing:
@@ -427,7 +484,13 @@ never happened.
 
 Compliance uses the policy snapshot effective when the decision occurred.
 Applying today's process to an earlier decision is a separate retrospective
-analysis and must be labeled as such.
+analysis and must be labeled as such. When authoritative process is fed after
+observation has accumulated, the resulting backward-looking divergence report
+is exactly this labeled retrospective analysis, not a compliance verdict.
+
+Operational compliance additionally reports the divergence classes from
+Observed And Authoritative Process: unmodeled transitions, dead policy steps,
+and authority divergence.
 
 ## Explicit User Instructions
 
@@ -532,6 +595,11 @@ Add tests for:
 - Slack occurrence, edit, retrieval, and business-effective times remaining
   distinct
 - compliance distinguishing missing evidence from proven noncompliance
+- observed and authoritative process lineages accepted in either order without
+  cross-writes
+- the evaluator unable to bind an observed-process assertion as policy
+- divergence reporting unmodeled transitions, dead policy steps, and authority
+  divergence without mutating either lineage
 
 ## Delivery Sequence
 
