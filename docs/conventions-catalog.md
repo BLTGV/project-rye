@@ -16,6 +16,13 @@ Onboarding and plugin metadata add convention-owned infrastructure types:
 - **Assertion types:** `scope_status`, `scope_purpose`, `scope_boundary`, `scope_owner`, `expected_contexts`, `holding_context`, `unexpected_context_policy`, `blocked_contexts`, `retention_policy`, `evidence_policy`, `review_gate`, `agent_autonomy_policy`, `accepted_knowledge_policy`, `source_of_truth_policy`, `process_constraint`, `process_metric`, `improvement_cycle`, `convention_registry`, `plugin_policy_binding`
 - **Event types:** `onboarding_started`, `scope_policy_recorded`, `plugin_policy_bound`, `onboarding_completed`, `scope_revision_proposed`
 
+Governed process and conversation-source patterns add:
+
+- **Node types:** `source_identity`
+- **Edge types:** `identity_of`, `holds_role`
+- **Assertion types:** `source_identity_confirmation`, `process_definition`, `process_transition_policy`
+- **Event types:** `source_identity_confirmed`, `process_transition_evaluated`, `process_exception_approved`
+
 Run `SELECT rye_catalog()` to see which types are in use in a given instance.
 
 ## Onboarding Scope Convention
@@ -100,6 +107,56 @@ Use `record_improvement_cycle(...)` to store the cycle. The helper also records
 a `process_constraint` assertion for the current constraint. Logs and traces may
 support the metrics, but the durable assertion is the reviewed business
 knowledge about the process.
+
+## Governed Process Transition Pattern
+
+Use `process_definition` and `process_transition_policy` assertions when an
+agent must interpret state changes against an accepted process rather than
+copying every source statement into current state.
+
+- The stable process node may be a `pipeline`, `procedure`, or another
+  plugin-owned process type.
+- `process_definition` uses key `default` and records the states, initial state,
+  terminal states, and domain assertion type that holds accepted state.
+- `process_transition_policy` uses key `transition:<transition_key>` and records
+  allowed source states, target state, proposing and deciding authorities,
+  prerequisites, evidence, exception handling, impact, and reversibility.
+- Process assertions are temporal. Supersede them when the process changes.
+- An observed transition remains a candidate until active authority and process
+  conditions match.
+
+Use a confirmed temporal `holds_role` edge and `domain_authorities` to resolve
+whether a person may propose, decide, approve an exception, or set policy. Do
+not derive authority from titles or conversational behavior.
+
+The full contract and claim schemas live in:
+
+- `plugins/rye-org/patterns/governed-process-transition.md`
+- `plugins/rye-org/schemas/process_definition_claim.schema.json`
+- `plugins/rye-org/schemas/process_transition_policy_claim.schema.json`
+
+## Slack Conversation Evidence Pattern
+
+Slack is a source hierarchy and evidence stream:
+
+- workspace -> `source_account`
+- channel -> `source_container`
+- relevant message or thread -> `source_item`
+- workspace user -> `source_identity`
+
+Use a confirmed `identity_of` edge to map a stable provider identity to a
+person. Display names, channel membership, and message content are not identity
+or authority.
+
+Keep provider occurrence, edit, deletion, and retrieval times distinct. A
+candidate's business-effective time and date quality are separate semantic
+interpretations. Conversation may propose operational state, procedures, and
+authority changes, but all use the normal candidate and promotion lifecycle.
+
+The full contract and message schema live in:
+
+- `plugins/rye-source-context/patterns/slack-conversation-evidence.md`
+- `plugins/rye-source-context/schemas/slack_conversation_source_item.schema.json`
 
 ## Pattern Library Convention
 

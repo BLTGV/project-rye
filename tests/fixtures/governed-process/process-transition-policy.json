@@ -1,0 +1,19 @@
+{
+  "schema_type": "rye.process_transition_policy.claim.v1",
+  "schema_version": 1,
+  "process_key": "standard-sales",
+  "transition_key": "proposal-to-closed-lost",
+  "from_states": ["proposal", "negotiation"],
+  "to_state": "closed_lost",
+  "authority": {
+    "may_propose": ["role:salesperson"],
+    "may_decide": ["role:sales_manager"],
+    "may_approve_exception": ["role:sales_director"],
+    "may_reopen": ["role:sales_manager"]
+  },
+  "required_evidence": ["loss_reason"],
+  "required_prior_steps": [],
+  "exception_policy": "review",
+  "impact": "high",
+  "reversible": true
+}

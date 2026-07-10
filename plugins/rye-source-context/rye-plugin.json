@@ -1,16 +1,16 @@
 {
   "id": "rye-source-context",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "label": "Source Context",
   "description": "Connector-neutral source accounts, containers, items, retrieval channels, expected contexts, and confirmation policy.",
   "dependencies": [],
   "supersedes": [],
   "conflicts": [],
   "contributes": {
-    "node_types": ["source_account", "source_container", "source_item", "retrieval_channel", "intake_run", "review_context"],
-    "edge_types": ["contains_item", "retrieved_via", "observed_in_run", "reviewed_under", "expected_by_profile"],
-    "assertion_types": ["source_purpose", "source_context_confirmation", "classification_rationale", "expected_contexts", "holding_context", "unexpected_context_policy", "blocked_contexts", "source_of_truth_policy"],
-    "event_types": ["source_context_record_observed", "source_context_confirmed", "source_context_intake_started", "source_context_intake_completed"],
+    "node_types": ["source_account", "source_container", "source_item", "source_identity", "retrieval_channel", "intake_run", "review_context"],
+    "edge_types": ["contains_item", "identity_of", "retrieved_via", "observed_in_run", "reviewed_under", "expected_by_profile"],
+    "assertion_types": ["source_purpose", "source_context_confirmation", "source_identity_confirmation", "classification_rationale", "expected_contexts", "holding_context", "unexpected_context_policy", "blocked_contexts", "source_of_truth_policy"],
+    "event_types": ["source_context_record_observed", "source_context_confirmed", "source_identity_confirmed", "source_context_intake_started", "source_context_intake_completed"],
     "artifact_types": ["source_context_record", "source_item_raw"]
   },
   "capabilities": [
@@ -43,7 +43,8 @@
       "Which records should be retained as evidence, collapsed, counted, or excluded?"
     ],
     "evidence_questions": [
-      "What original link, thread, file, row, or transcript reference is needed for review?"
+      "What original link, thread, file, row, or transcript reference is needed for review?",
+      "Which provider identity produced the item, and is its mapping to a person confirmed?"
     ],
     "default_policies": [
       {
@@ -57,14 +58,18 @@
     ],
     "never_infer_defaults": [
       "Source metadata is provenance, not business truth.",
-      "Channel, folder, mailbox, or account membership does not imply semantic business relationships."
+      "Channel, folder, mailbox, or account membership does not imply semantic business relationships.",
+      "A display name, channel role, message statement, or connector identity does not establish a person mapping or business authority."
     ],
     "agent_autonomy_rules": []
   },
   "validation": {
     "candidate_validators": [],
     "promotion_validators": [],
-    "conformance_tests": ["tests/conformance/13_onboarding_scope_plugins.sql"]
+    "conformance_tests": [
+      "tests/conformance/13_onboarding_scope_plugins.sql",
+      "tests/conformance/25_governed_process_contracts.sh"
+    ]
   },
   "admin": {
     "detail_tabs": [],

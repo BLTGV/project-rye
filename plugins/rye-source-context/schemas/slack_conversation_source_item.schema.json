@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://projectrye.dev/schemas/rye.source_context.slack_source_item.properties.v1.json",
+  "title": "Rye Slack conversation source item properties",
+  "type": "object",
+  "required": [
+    "schema_type",
+    "schema_version",
+    "provider",
+    "team_id",
+    "channel_id",
+    "message_id",
+    "speaker_source_identity_ref",
+    "occurred_at",
+    "retrieved_at",
+    "lifecycle_state"
+  ],
+  "properties": {
+    "schema_type": { "const": "rye.source_context.slack_source_item.properties.v1" },
+    "schema_version": { "const": 1 },
+    "provider": { "const": "slack" },
+    "team_id": { "type": "string", "minLength": 1 },
+    "channel_id": { "type": "string", "minLength": 1 },
+    "message_id": { "type": "string", "minLength": 1 },
+    "thread_id": { "type": ["string", "null"] },
+    "reply_to_message_id": { "type": ["string", "null"] },
+    "speaker_source_identity_ref": { "type": "string", "minLength": 1 },
+    "occurred_at": { "type": "string", "format": "date-time" },
+    "edited_at": { "type": ["string", "null"], "format": "date-time" },
+    "deleted_at": { "type": ["string", "null"], "format": "date-time" },
+    "retrieved_at": { "type": "string", "format": "date-time" },
+    "lifecycle_state": { "enum": ["active", "edited", "deleted"] },
+    "external_url": { "type": "string", "format": "uri" },
+    "content_hash": { "type": "string" }
+  },
+  "additionalProperties": true
+}

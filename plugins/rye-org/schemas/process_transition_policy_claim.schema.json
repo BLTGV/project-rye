@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://projectrye.dev/schemas/rye.process_transition_policy.claim.v1.json",
+  "title": "Rye process transition policy assertion claim",
+  "type": "object",
+  "required": [
+    "schema_type",
+    "schema_version",
+    "process_key",
+    "transition_key",
+    "from_states",
+    "to_state",
+    "authority",
+    "required_evidence",
+    "required_prior_steps",
+    "exception_policy",
+    "impact",
+    "reversible"
+  ],
+  "properties": {
+    "schema_type": { "const": "rye.process_transition_policy.claim.v1" },
+    "schema_version": { "const": 1 },
+    "process_key": { "type": "string", "minLength": 1 },
+    "transition_key": { "type": "string", "minLength": 1 },
+    "from_states": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "to_state": { "type": "string", "minLength": 1 },
+    "authority": {
+      "type": "object",
+      "required": ["may_propose", "may_decide", "may_approve_exception", "may_reopen"],
+      "properties": {
+        "may_propose": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "may_decide": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+        "may_approve_exception": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "may_reopen": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+      },
+      "additionalProperties": false
+    },
+    "required_evidence": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "required_prior_steps": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "exception_policy": { "enum": ["never", "review"] },
+    "impact": { "enum": ["low", "medium", "high"] },
+    "reversible": { "type": "boolean" },
+    "notes": { "type": "string" }
+  },
+  "additionalProperties": true
+}

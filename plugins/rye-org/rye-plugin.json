@@ -1,6 +1,6 @@
 {
   "id": "rye-org",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "label": "Organization Model",
   "description": "People, systems, departments, mission, vision, goals, related organizations, policies, and procedures.",
   "dependencies": [],
@@ -29,7 +29,8 @@
       "uses_system",
       "supports_goal",
       "related_to_org",
-      "governed_by_policy"
+      "governed_by_policy",
+      "holds_role"
     ],
     "assertion_types": [
       "person_role",
@@ -42,9 +43,11 @@
       "process_constraint",
       "process_metric",
       "improvement_cycle",
-      "convention_registry"
+      "convention_registry",
+      "process_definition",
+      "process_transition_policy"
     ],
-    "event_types": [],
+    "event_types": ["process_transition_evaluated", "process_exception_approved"],
     "artifact_types": []
   },
   "capabilities": [
@@ -80,14 +83,18 @@
     "evidence_questions": [],
     "default_policies": [],
     "never_infer_defaults": [
-      "Do not infer employment, department membership, responsibility, or policy ownership from source membership alone."
+      "Do not infer employment, department membership, responsibility, or policy ownership from source membership alone.",
+      "Do not infer authority or process policy from job titles, message frequency, confident wording, or repeated behavior."
     ],
     "agent_autonomy_rules": []
   },
   "validation": {
     "candidate_validators": [],
     "promotion_validators": [],
-    "conformance_tests": ["tests/conformance/13_onboarding_scope_plugins.sql"]
+    "conformance_tests": [
+      "tests/conformance/13_onboarding_scope_plugins.sql",
+      "tests/conformance/25_governed_process_contracts.sh"
+    ]
   },
   "admin": {
     "detail_tabs": [],

@@ -1,0 +1,18 @@
+{
+  "schema_type": "rye.source_context.slack_source_item.properties.v1",
+  "schema_version": 1,
+  "provider": "slack",
+  "team_id": "T001",
+  "channel_id": "C-DEALS",
+  "message_id": "1720611000.000100",
+  "thread_id": null,
+  "reply_to_message_id": null,
+  "speaker_source_identity_ref": "slack:team:T001:user:U-SALES-1",
+  "occurred_at": "2026-07-10T13:30:00Z",
+  "edited_at": null,
+  "deleted_at": null,
+  "retrieved_at": "2026-07-10T13:30:08Z",
+  "lifecycle_state": "active",
+  "external_url": "https://example.slack.com/archives/C-DEALS/p1720611000000100",
+  "content_hash": "sha256:example"
+}

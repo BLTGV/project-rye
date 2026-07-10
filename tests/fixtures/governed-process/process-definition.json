@@ -1,0 +1,9 @@
+{
+  "schema_type": "rye.process_definition.claim.v1",
+  "schema_version": 1,
+  "process_key": "standard-sales",
+  "state_assertion_type": "deal_stage",
+  "states": ["discovery", "proposal", "negotiation", "closed_won", "closed_lost"],
+  "initial_state": "discovery",
+  "terminal_states": ["closed_won", "closed_lost"]
+}
