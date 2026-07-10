@@ -1,827 +1,615 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="description" content="A schema-backed walkthrough of how people work with agents that read from and write to Project Rye." />
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='30' fill='%23173c31'/%3E%3Cpath d='M31 46V18m0 10c-7-1-11-5-12-10 7 1 11 4 12 10Zm1 8c7-1 11-5 12-10-7 1-11 4-12 10Z' fill='none' stroke='%23f0c875' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
-  <title>Rye × Agents — agent-driven temporal knowledge</title>
-  <style>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="description" content="An executive briefing on how Rye accumulates organizational knowledge: summary, benefits, the high-level flow, then the technical weeds." />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='30' fill='%23173c31'/%3E%3Cpath d='M31 46V18m0 10c-7-1-11-5-12-10 7 1 11 4 12 10Zm1 8c7-1 11-5 12-10-7 1-11 4-12 10Z' fill='none' stroke='%23f0c875' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
+<title>Rye — How Organizational Knowledge Accumulates</title>
+<style>
+  :root {
+    --paper: #faf6ef;
+    --paper-2: #f1ebdf;
+    --ink: #221c14;
+    --ink-soft: #5c5344;
+    --line: #d8cfbe;
+    --accent: #9a5b16;
+    --accent-soft: #f3e2c8;
+    --good: #3e6b42;
+    --good-soft: #e2ecdd;
+    --hold: #8a6d1f;
+    --hold-soft: #f3ecd2;
+    --stop: #8c3b2e;
+    --stop-soft: #f2dfd8;
+    --display: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+    --body: "Avenir Next", Avenir, "Segoe UI", Frutiger, "Helvetica Neue", Helvetica, sans-serif;
+    --mono: "SF Mono", "Cascadia Code", Consolas, Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
     :root {
-      --ink: #173c31;
-      --ink-2: #315a4f;
-      --paper: #f3efe4;
-      --paper-2: #fbf8f0;
-      --card: rgba(255, 253, 247, 0.88);
-      --line: rgba(23, 60, 49, 0.16);
-      --line-strong: rgba(23, 60, 49, 0.28);
-      --rye: #d99b3d;
-      --rye-2: #f0c875;
-      --sage: #9eb7a6;
-      --mint: #dce8df;
-      --coral: #c9674e;
-      --red: #9f3a33;
-      --blue: #366f7c;
-      --shadow: 0 24px 80px rgba(28, 55, 46, 0.1);
-      --radius: 24px;
-      --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-      --sans: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      --serif: Iowan Old Style, Palatino Linotype, Book Antiqua, Georgia, serif;
+      --paper: #191511;
+      --paper-2: #221d17;
+      --ink: #ece4d4;
+      --ink-soft: #a89b85;
+      --line: #3b332a;
+      --accent: #d99a4e;
+      --accent-soft: #33270f;
+      --good: #8fbc8a;
+      --good-soft: #1f2a1c;
+      --hold: #cbb35e;
+      --hold-soft: #2b2512;
+      --stop: #d98d7d;
+      --stop-soft: #2e1b16;
     }
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--body);
+    font-size: 17px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+  .sheet { max-width: 880px; margin: 0 auto; padding: 0 24px 96px; }
 
-    * { box-sizing: border-box; }
-    html { scroll-behavior: smooth; }
-    body {
-      margin: 0;
-      color: var(--ink);
-      background:
-        radial-gradient(circle at 90% 4%, rgba(217,155,61,.20), transparent 25rem),
-        radial-gradient(circle at 5% 30%, rgba(158,183,166,.20), transparent 27rem),
-        var(--paper);
-      font-family: var(--sans);
-      line-height: 1.5;
-      overflow-x: hidden;
-    }
-    body::before {
-      content: "";
-      position: fixed;
-      inset: 0;
-      pointer-events: none;
-      opacity: .22;
-      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.12'/%3E%3C/svg%3E");
-      z-index: 20;
-      mix-blend-mode: multiply;
-    }
+  /* ---------- masthead ---------- */
+  header.masthead {
+    padding: 56px 0 40px;
+    border-bottom: 3px double var(--line);
+  }
+  .eyebrow {
+    font-size: 12px; letter-spacing: .22em; text-transform: uppercase;
+    color: var(--accent); font-weight: 600; margin-bottom: 18px;
+  }
+  h1 {
+    font-family: var(--display);
+    font-size: clamp(34px, 6vw, 54px);
+    line-height: 1.08; font-weight: 500; letter-spacing: -.01em;
+    max-width: 18ch;
+  }
+  .standfirst {
+    margin-top: 22px; max-width: 62ch;
+    font-size: 19px; line-height: 1.6; color: var(--ink-soft);
+  }
+  nav.toc {
+    margin-top: 34px; display: flex; flex-wrap: wrap; gap: 10px 26px;
+    font-size: 13.5px; letter-spacing: .04em;
+  }
+  nav.toc a { color: var(--ink); text-decoration: none; border-bottom: 1px solid var(--line); padding-bottom: 2px; }
+  nav.toc a:hover { color: var(--accent); border-color: var(--accent); }
+  nav.toc .n { color: var(--accent); font-weight: 600; margin-right: 6px; }
 
-    button, a { font: inherit; }
-    button { color: inherit; }
-    a { color: inherit; }
-    code { font-family: var(--mono); }
+  /* ---------- sections ---------- */
+  section { padding-top: 64px; }
+  .kicker {
+    display: flex; align-items: baseline; gap: 14px; margin-bottom: 22px;
+  }
+  .kicker .num {
+    font-family: var(--display); font-size: 15px; color: var(--accent);
+    border: 1px solid var(--accent); border-radius: 999px;
+    width: 34px; height: 34px; display: inline-flex; align-items: center; justify-content: center;
+    flex: none; transform: translateY(4px);
+  }
+  h2 {
+    font-family: var(--display); font-weight: 500;
+    font-size: clamp(26px, 4vw, 34px); line-height: 1.15;
+  }
+  h3 { font-family: var(--display); font-weight: 500; font-size: 21px; margin: 34px 0 10px; }
+  p { max-width: 68ch; }
+  p + p { margin-top: 14px; }
+  .lede { font-size: 18.5px; }
+  em { font-style: italic; }
+  strong { font-weight: 600; }
 
-    .shell { width: min(1180px, calc(100% - 40px)); margin: 0 auto; }
-    .site-header {
-      position: sticky;
-      top: 0;
-      z-index: 15;
-      background: rgba(243,239,228,.78);
-      backdrop-filter: blur(18px);
-      border-bottom: 1px solid transparent;
-      transition: border-color .2s ease;
-    }
-    .site-header.scrolled { border-color: var(--line); }
-    .nav { min-height: 72px; display: flex; align-items: center; justify-content: space-between; gap: 24px; }
-    .brand { display: flex; align-items: center; gap: 12px; text-decoration: none; font-weight: 800; letter-spacing: -.03em; }
-    .brand-mark {
-      width: 34px; height: 34px; border-radius: 50% 50% 48% 52%; position: relative;
-      background: var(--ink); box-shadow: inset 0 0 0 7px rgba(255,255,255,.07);
-    }
-    .brand-mark::before, .brand-mark::after {
-      content: ""; position: absolute; width: 6px; height: 13px; border: 2px solid var(--rye-2);
-      border-left: 0; border-bottom: 0; border-radius: 80% 10%; transform: rotate(32deg);
-    }
-    .brand-mark::before { left: 9px; top: 7px; }
-    .brand-mark::after { left: 17px; top: 12px; transform: scaleX(-1) rotate(34deg); }
-    .nav-links { display: flex; align-items: center; gap: 24px; font-size: 13px; font-weight: 700; }
-    .nav-links a { text-decoration: none; opacity: .7; }
-    .nav-links a:hover { opacity: 1; }
-    .hero { padding: 88px 0 78px; position: relative; }
-    .eyebrow { display: flex; align-items: center; gap: 10px; text-transform: uppercase; letter-spacing: .14em; font-size: 11px; font-weight: 900; color: var(--ink-2); }
-    .eyebrow::before { content: ""; width: 24px; height: 2px; background: var(--rye); }
-    .hero h1 { font-family: var(--serif); font-size: clamp(54px, 8vw, 104px); line-height: .92; letter-spacing: -.065em; font-weight: 600; max-width: 960px; margin: 24px 0 28px; }
-    .hero h1 em { color: var(--rye); font-weight: 500; }
-    .hero-lede { display: grid; grid-template-columns: 1.1fr .9fr; gap: 80px; align-items: end; }
-    .hero-lede p { margin: 0; max-width: 650px; font-size: clamp(19px, 2.2vw, 27px); letter-spacing: -.025em; color: var(--ink-2); }
-    .hero-note { border-left: 1px solid var(--line-strong); padding-left: 22px; font-size: 13px; color: var(--ink-2); }
-    .hero-note strong { display: block; color: var(--ink); margin-bottom: 5px; }
+  .pull {
+    margin: 30px 0; padding: 18px 22px;
+    border-left: 3px solid var(--accent);
+    background: var(--accent-soft);
+    font-family: var(--display); font-size: 19px; line-height: 1.5;
+    max-width: 60ch;
+  }
 
-    .hero-map {
-      margin-top: 64px; border: 1px solid var(--line-strong); border-radius: 32px; min-height: 245px; background: rgba(255,253,247,.64);
-      box-shadow: var(--shadow); display: grid; grid-template-columns: .8fr 56px 1fr 56px 1.1fr; gap: 8px; align-items: center; padding: 32px;
-    }
-    .map-box { height: 172px; border-radius: 22px; padding: 22px; position: relative; overflow: hidden; }
-    .map-box.user { background: var(--mint); }
-    .map-box.agent { background: var(--ink); color: white; }
-    .map-box.rye { background: #e9d29e; }
-    .map-kicker { font-size: 10px; font-weight: 900; text-transform: uppercase; letter-spacing: .12em; opacity: .7; }
-    .map-title { font-family: var(--serif); font-size: 25px; line-height: 1.05; margin: 12px 0 9px; letter-spacing: -.03em; }
-    .map-copy { font-size: 12px; opacity: .76; max-width: 250px; }
-    .map-tags { display: flex; flex-wrap: wrap; gap: 6px; position: absolute; left: 20px; bottom: 18px; }
-    .map-tag { font: 700 10px var(--mono); padding: 5px 8px; border-radius: 999px; border: 1px solid currentColor; opacity: .78; }
-    .map-arrow { display: flex; align-items: center; justify-content: center; opacity: .55; }
-    .map-arrow::before { content: ""; width: 28px; height: 1px; background: var(--ink); }
-    .map-arrow::after { content: ""; width: 6px; height: 6px; border-top: 1px solid var(--ink); border-right: 1px solid var(--ink); transform: rotate(45deg); margin-left: -6px; }
+  /* ---------- benefit cards ---------- */
+  .benefits {
+    margin-top: 30px;
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px;
+  }
+  .benefit {
+    border: 1px solid var(--line); background: var(--paper-2);
+    border-radius: 10px; padding: 18px 18px 16px;
+  }
+  .benefit h4 { font-family: var(--display); font-weight: 500; font-size: 17.5px; margin-bottom: 8px; }
+  .benefit p { font-size: 14.5px; line-height: 1.55; color: var(--ink-soft); }
 
-    section { padding: 90px 0; }
-    .section-head { display: grid; grid-template-columns: .9fr 1.1fr; gap: 80px; margin-bottom: 44px; align-items: end; }
-    .section-head h2 { font-family: var(--serif); font-size: clamp(39px, 5vw, 64px); line-height: .98; letter-spacing: -.05em; margin: 12px 0 0; font-weight: 600; }
-    .section-head p { margin: 0; color: var(--ink-2); font-size: 17px; max-width: 560px; }
+  /* ---------- diagrams ---------- */
+  figure { margin: 34px 0 8px; }
+  figure svg { width: 100%; height: auto; display: block; }
+  figcaption {
+    font-size: 13px; color: var(--ink-soft); margin-top: 10px;
+    letter-spacing: .02em; max-width: 70ch;
+  }
+  .svg-label { font-family: var(--body); font-weight: 600; }
+  .svg-sub { font-family: var(--body); }
 
-    .decision-panel { display: grid; grid-template-columns: .92fr 1.08fr; gap: 18px; }
-    .decision-card, .policy-card { border: 1px solid var(--line-strong); border-radius: 26px; background: var(--card); padding: 26px; }
-    .decision-card h3, .policy-card h3 { margin: 0 0 5px; font-family: var(--serif); font-size: 28px; letter-spacing: -.04em; }
-    .decision-card > p, .policy-card > p { margin: 0 0 22px; color: var(--ink-2); font-size: 12px; }
-    .decision-outcomes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
-    .decision-outcome { border: 1px solid var(--line); border-radius: 16px; padding: 14px; min-height: 138px; }
-    .decision-outcome.allow { background: var(--mint); }
-    .decision-outcome.review { background: #ead8ac; }
-    .decision-outcome.deny { background: #ead2c9; }
-    .decision-outcome strong { display: block; margin: 18px 0 7px; font-size: 13px; text-transform: uppercase; }
-    .decision-outcome span { display: block; font-size: 10px; color: var(--ink-2); }
-    .default-note { margin-top: 12px; border-radius: 14px; padding: 12px 14px; background: #ece8dc; font-size: 11px; color: var(--ink-2); }
-    .default-note strong { color: var(--ink); }
-    .policy-code { background: var(--ink); color: #f3f0e5; border-radius: 17px; padding: 18px; font: 10px/1.8 var(--mono); }
-    .policy-code .key { color: var(--rye-2); }
-    .policy-code .value { color: #b9d2c4; }
-    .policy-outcome { margin-top: 12px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-    .policy-outcome div { border-radius: 13px; padding: 11px; border: 1px solid var(--line); font-size: 10px; font-weight: 800; }
-    .policy-outcome div:first-child { background: var(--mint); }
-    .policy-outcome div:last-child { background: #ead2c9; }
+  /* ---------- steps ---------- */
+  ol.steps { margin: 24px 0 0; padding-left: 0; list-style: none; counter-reset: step; }
+  ol.steps li {
+    counter-increment: step; position: relative;
+    padding: 0 0 22px 56px; max-width: 66ch;
+  }
+  ol.steps li::before {
+    content: counter(step);
+    position: absolute; left: 0; top: 1px;
+    width: 34px; height: 34px; border-radius: 999px;
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--display); font-size: 16px; color: var(--accent);
+    border: 1px solid var(--accent);
+  }
+  ol.steps li:not(:last-child)::after {
+    content: ""; position: absolute; left: 17px; top: 40px; bottom: 4px;
+    width: 1px; background: var(--line);
+  }
+  ol.steps b { font-weight: 600; }
 
-    .stories { background: var(--ink); color: #f9f5e9; position: relative; }
-    .stories::before { content: ""; position: absolute; inset: 0; background: linear-gradient(120deg, rgba(217,155,61,.11), transparent 34%), radial-gradient(circle at 92% 14%, rgba(158,183,166,.14), transparent 26rem); }
-    .stories .shell { position: relative; z-index: 1; }
-    .stories .section-head p, .stories .eyebrow { color: #c7d6ce; }
-    .story-tabs { display: flex; gap: 8px; overflow-x: auto; padding: 4px 0 18px; scrollbar-width: none; }
-    .story-tab {
-      flex: 0 0 auto; border: 1px solid rgba(255,255,255,.18); color: #eaf0eb; background: transparent; border-radius: 999px;
-      padding: 11px 16px; cursor: pointer; font-weight: 800; font-size: 12px; transition: .2s ease;
-    }
-    .story-tab:hover { border-color: rgba(255,255,255,.45); transform: translateY(-1px); }
-    .story-tab.active { background: var(--rye-2); color: var(--ink); border-color: var(--rye-2); }
-    .story-stage { margin-top: 12px; border: 1px solid rgba(255,255,255,.16); border-radius: 30px; overflow: hidden; background: #f8f5ed; color: var(--ink); box-shadow: 0 30px 90px rgba(0,0,0,.22); }
-    .story-top { padding: 25px 30px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; align-items: center; gap: 22px; background: rgba(255,255,255,.55); }
-    .story-title-wrap { display: flex; align-items: center; gap: 16px; }
-    .story-index { width: 42px; height: 42px; border-radius: 14px; display: grid; place-items: center; background: var(--ink); color: white; font: 800 13px var(--mono); }
-    .story-title { font-family: var(--serif); font-size: 25px; line-height: 1.05; letter-spacing: -.03em; }
-    .story-meta { margin-top: 4px; font-size: 11px; text-transform: uppercase; letter-spacing: .12em; font-weight: 800; color: var(--ink-2); }
-    .story-actions { display: flex; align-items: center; gap: 9px; }
-    .run-button, .detail-button, .review-button {
-      border: 0; border-radius: 999px; padding: 10px 15px; cursor: pointer; font-size: 12px; font-weight: 900; transition: .2s ease;
-    }
-    .run-button { background: var(--ink); color: white; }
-    .run-button:hover { background: var(--ink-2); transform: translateY(-1px); }
-    .detail-button { background: var(--mint); color: var(--ink); }
-    .story-body { display: grid; grid-template-columns: .92fr 1.08fr; min-height: 610px; }
-    .conversation { padding: 30px; border-right: 1px solid var(--line); background: #f4f0e7; }
-    .pane-label { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; font-size: 10px; font-weight: 900; text-transform: uppercase; letter-spacing: .14em; color: var(--ink-2); }
-    .live-dot { display: inline-flex; align-items: center; gap: 7px; }
-    .live-dot::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: #56a56d; box-shadow: 0 0 0 4px rgba(86,165,109,.14); }
-    .message { display: flex; gap: 10px; margin: 0 0 17px; opacity: 1; transition: .3s ease; }
-    .message.pending { opacity: .26; transform: translateY(4px); }
-    .message-avatar { width: 30px; height: 30px; border-radius: 10px; flex: 0 0 auto; display: grid; place-items: center; font-size: 10px; font-weight: 900; }
-    .message.user .message-avatar { background: #d9c89e; }
-    .message.agent .message-avatar { background: var(--ink); color: white; }
-    .message.system .message-avatar { background: var(--rye); color: var(--ink); }
-    .bubble { padding: 12px 14px; border-radius: 5px 16px 16px 16px; background: rgba(255,255,255,.82); border: 1px solid var(--line); font-size: 13px; flex: 1; }
-    .message.user .bubble { background: var(--mint); }
-    .message.system .bubble { border-style: dashed; }
-    .speaker { font-size: 10px; font-weight: 900; text-transform: uppercase; letter-spacing: .1em; color: var(--ink-2); margin-bottom: 5px; }
-    .bubble strong { color: var(--ink); }
-    .review-card { margin-top: 12px; padding: 12px; border-radius: 12px; background: var(--paper-2); border: 1px solid var(--line); }
-    .review-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-    .review-status { display: inline-flex; align-items: center; gap: 6px; font-size: 10px; font-weight: 900; text-transform: uppercase; letter-spacing: .08em; color: var(--coral); }
-    .review-status::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
-    .review-card.policy .review-status { color: #2f7950; }
-    .review-card.accepted .review-status { color: #2f7950; }
-    .review-button { background: var(--ink); color: white; padding: 7px 11px; }
-    .review-card.accepted .review-button { background: #2f7950; pointer-events: none; }
-    .review-evidence { margin-top: 9px; font: 10px/1.5 var(--mono); color: var(--ink-2); }
+  /* ---------- weeds ---------- */
+  .weeds { font-size: 15.5px; }
+  .weeds p, .weeds li { max-width: 74ch; }
+  .table-wrap { overflow-x: auto; margin: 18px 0 6px; }
+  table { border-collapse: collapse; width: 100%; min-width: 560px; font-size: 14px; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-soft); }
+  code {
+    font-family: var(--mono); font-size: .86em;
+    background: var(--paper-2); border: 1px solid var(--line);
+    border-radius: 4px; padding: 1px 5px;
+  }
+  .verdict { font-family: var(--mono); font-size: 12.5px; font-weight: 600; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
+  .v-allow { color: var(--good); background: var(--good-soft); }
+  .v-review { color: var(--hold); background: var(--hold-soft); }
+  .v-deny { color: var(--stop); background: var(--stop-soft); }
+  ul.plain { padding-left: 20px; margin: 12px 0; }
+  ul.plain li + li { margin-top: 6px; }
 
-    .trace { padding: 30px; background: rgba(255,255,255,.68); }
-    .trace-list { position: relative; }
-    .trace-list::before { content: ""; position: absolute; top: 16px; bottom: 16px; left: 13px; width: 1px; background: var(--line-strong); }
-    .trace-step { position: relative; padding: 0 0 24px 42px; opacity: .7; transition: .25s ease; }
-    .trace-step:last-child { padding-bottom: 10px; }
-    .trace-step.active, .trace-step.complete { opacity: 1; }
-    .trace-dot { position: absolute; left: 4px; top: 3px; width: 19px; height: 19px; border-radius: 50%; background: var(--paper-2); border: 2px solid var(--sage); z-index: 1; transition: .25s ease; }
-    .trace-step.active .trace-dot { background: var(--rye-2); border-color: var(--rye); box-shadow: 0 0 0 5px rgba(217,155,61,.15); }
-    .trace-step.complete .trace-dot { background: var(--ink); border-color: var(--ink); }
-    .trace-phase { font-size: 10px; text-transform: uppercase; letter-spacing: .12em; font-weight: 900; color: var(--ink-2); }
-    .trace-call { display: inline-block; margin: 5px 0 6px; padding: 4px 7px; background: #edf0e8; color: #21483c; border-radius: 5px; font: 700 11px var(--mono); word-break: break-word; }
-    .trace-does { font-size: 12px; color: var(--ink-2); max-width: 530px; }
-    .delta-strip { margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--line); display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
-    .delta { background: #f1eee4; border: 1px solid var(--line); border-radius: 13px; padding: 10px; }
-    .delta-value { font-family: var(--serif); font-size: 23px; letter-spacing: -.03em; }
-    .delta-label { font: 700 9px var(--mono); text-transform: uppercase; color: var(--ink-2); }
-    .contract-proof { display: none; margin-top: 20px; border-radius: 16px; overflow: hidden; border: 1px solid var(--line); }
-    .contract-proof.open { display: block; }
-    .proof-head { background: var(--ink); color: white; padding: 9px 12px; font: 800 10px var(--mono); display: flex; justify-content: space-between; }
-    .proof-body { background: #f6f2e8; }
-    .proof-row { display: grid; grid-template-columns: .72fr 1.28fr; border-top: 1px solid var(--line); }
-    .proof-row:first-child { border-top: 0; }
-    .proof-row span { padding: 9px 12px; font-size: 11px; }
-    .proof-row span:first-child { font-family: var(--mono); color: var(--ink-2); border-right: 1px solid var(--line); }
+  details {
+    border: 1px solid var(--line); border-radius: 10px;
+    background: var(--paper-2); margin: 14px 0; padding: 0 18px;
+  }
+  details summary {
+    cursor: pointer; padding: 14px 0; font-weight: 600; font-size: 15px;
+    list-style: none; display: flex; align-items: center; gap: 10px;
+  }
+  details summary::-webkit-details-marker { display: none; }
+  details summary::before { content: "+"; color: var(--accent); font-family: var(--mono); font-size: 16px; }
+  details[open] summary::before { content: "–"; }
+  details .body { padding: 2px 0 18px; }
+  .exchange { border-left: 2px solid var(--line); padding-left: 14px; margin: 10px 0; }
+  .exchange .who { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-soft); }
+  .exchange p { font-size: 14.5px; margin: 2px 0 12px; }
 
-    .model-grid { display: grid; grid-template-columns: 1.15fr .85fr; gap: 28px; }
-    .core-card { border: 1px solid var(--line-strong); border-radius: 30px; padding: 28px; background: var(--card); box-shadow: var(--shadow); }
-    .core-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 22px; margin-bottom: 26px; }
-    .core-head h3 { margin: 0; font-family: var(--serif); font-size: 30px; letter-spacing: -.04em; }
-    .core-head p { max-width: 300px; margin: 0; font-size: 12px; color: var(--ink-2); }
-    .schema-lanes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
-    .schema-table { min-height: 128px; padding: 16px; border-radius: 17px; background: #ece8dc; border: 1px solid var(--line); transition: .2s ease; }
-    .schema-table:hover { transform: translateY(-3px); border-color: var(--line-strong); }
-    .schema-table:nth-child(1), .schema-table:nth-child(2) { background: var(--mint); }
-    .schema-table:nth-child(3), .schema-table:nth-child(4) { background: #e7d9bc; }
-    .schema-table:nth-child(5), .schema-table:nth-child(6) { background: #e6e1d4; }
-    .schema-name { font: 800 12px var(--mono); }
-    .schema-role { font-size: 11px; color: var(--ink-2); margin-top: 8px; }
-    .schema-rule { display: inline-block; margin-top: 13px; padding: 4px 7px; border-radius: 999px; border: 1px solid var(--line-strong); font: 700 8px var(--mono); text-transform: uppercase; }
-    .guard-stack { display: grid; gap: 10px; }
-    .guard { border: 1px solid var(--line-strong); padding: 17px; border-radius: 17px; background: rgba(255,255,255,.5); }
-    .guard-top { display: flex; align-items: center; gap: 10px; }
-    .guard-icon { width: 28px; height: 28px; border-radius: 9px; background: var(--ink); color: white; display: grid; place-items: center; font-size: 12px; }
-    .guard h4 { margin: 0; font-size: 13px; }
-    .guard p { margin: 7px 0 0 38px; color: var(--ink-2); font-size: 11px; }
-
-    .simplicity { background: #e9d6a9; }
-    .simplicity-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
-    .simple-card { min-height: 285px; border-radius: 23px; padding: 22px; border: 1px solid var(--line-strong); background: rgba(255,253,247,.75); display: flex; flex-direction: column; }
-    .simple-icon { width: 42px; height: 42px; border-radius: 13px; display: grid; place-items: center; background: var(--ink); color: white; font: 900 13px var(--mono); }
-    .simple-card h3 { font-family: var(--serif); font-size: 28px; letter-spacing: -.04em; margin: 27px 0 8px; }
-    .simple-card p { margin: 0; font-size: 12px; color: var(--ink-2); }
-    .simple-proof { margin-top: auto; padding-top: 18px; font: 9px/1.7 var(--mono); color: var(--ink-2); border-top: 1px solid var(--line); }
-    .simple-proof strong { color: var(--ink); }
-
-    .trust { background: #e8dfcd; }
-    .trust-grid { display: grid; grid-template-columns: .95fr 1.05fr; gap: 24px; }
-    .trust-card { border: 1px solid var(--line-strong); border-radius: 26px; padding: 26px; background: rgba(255,253,247,.7); }
-    .trust-card h3 { font-family: var(--serif); font-size: 28px; letter-spacing: -.035em; margin: 0 0 6px; }
-    .trust-card > p { margin: 0 0 22px; color: var(--ink-2); font-size: 13px; }
-    .code-block { background: var(--ink); color: #f2f1e8; border-radius: 17px; padding: 18px; overflow-x: auto; font: 11px/1.75 var(--mono); }
-    .code-block .comment { color: #93aa9e; }
-    .capabilities { display: grid; gap: 9px; }
-    .capability { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 14px; border-bottom: 1px solid var(--line); padding: 10px 0; }
-    .capability:last-child { border-bottom: 0; }
-    .capability code { font-size: 11px; font-weight: 800; }
-    .capability span { font-size: 10px; padding: 5px 8px; background: var(--mint); border-radius: 999px; font-weight: 800; }
-    .boundary { margin-top: 24px; display: grid; grid-template-columns: 1fr 42px 1fr 42px 1fr; align-items: stretch; }
-    .boundary-box { border: 1px solid var(--line-strong); border-radius: 18px; padding: 17px; background: rgba(255,255,255,.48); }
-    .boundary-box strong { display: block; font-size: 12px; margin-bottom: 4px; }
-    .boundary-box span { display: block; font-size: 10px; color: var(--ink-2); }
-    .boundary-arrow { align-self: center; height: 1px; background: var(--ink); position: relative; }
-    .boundary-arrow::after { content: ""; position: absolute; right: 0; top: -3px; width: 6px; height: 6px; border-top: 1px solid var(--ink); border-right: 1px solid var(--ink); transform: rotate(45deg); }
-    .access-paths { margin-top: 24px; display: grid; gap: 13px; }
-    .access-label { font: 900 9px var(--mono); text-transform: uppercase; letter-spacing: .11em; color: var(--ink-2); }
-    .access-paths .boundary { margin-top: 7px; }
-
-    .gaps .section-head { margin-bottom: 30px; }
-    .gap-summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 18px; }
-    .gap-stat { padding: 19px; border-radius: 18px; background: rgba(255,255,255,.55); border: 1px solid var(--line); }
-    .gap-stat strong { display: block; font-family: var(--serif); font-size: 30px; }
-    .gap-stat span { font-size: 10px; text-transform: uppercase; letter-spacing: .12em; font-weight: 900; color: var(--ink-2); }
-    .gap-list { display: grid; gap: 12px; }
-    .gap-card { display: grid; grid-template-columns: 84px 1fr 210px; gap: 22px; align-items: start; border: 1px solid var(--line-strong); border-radius: 21px; padding: 22px; background: var(--card); }
-    .gap-priority { width: 55px; height: 55px; border-radius: 16px; display: grid; place-items: center; color: white; background: var(--red); font: 900 13px var(--mono); }
-    .gap-card.p1 .gap-priority { background: var(--coral); }
-    .gap-card.p2 .gap-priority { background: var(--blue); }
-    .gap-card h3 { margin: 0 0 5px; font-size: 16px; letter-spacing: -.02em; }
-    .gap-card p { margin: 0; color: var(--ink-2); font-size: 12px; }
-    .gap-evidence { border-left: 1px solid var(--line); padding-left: 18px; font: 10px/1.55 var(--mono); color: var(--ink-2); }
-    .gap-evidence strong { display: block; color: var(--ink); margin-bottom: 3px; }
-
-    .closing { padding: 96px 0 112px; }
-    .closing-card { background: var(--ink); color: white; border-radius: 34px; padding: 52px; display: grid; grid-template-columns: 1fr .8fr; gap: 60px; align-items: end; position: relative; overflow: hidden; }
-    .closing-card::after { content: ""; position: absolute; width: 380px; height: 380px; border: 1px solid rgba(255,255,255,.1); border-radius: 50%; right: -110px; top: -150px; box-shadow: 0 0 0 55px rgba(255,255,255,.025), 0 0 0 110px rgba(255,255,255,.02); }
-    .closing h2 { font-family: var(--serif); font-size: clamp(40px, 5vw, 64px); line-height: .96; letter-spacing: -.05em; margin: 0; position: relative; z-index: 1; }
-    .closing p { margin: 0; color: #c3d4cb; font-size: 15px; position: relative; z-index: 1; }
-    .footer-note { margin-top: 28px; display: flex; justify-content: space-between; gap: 30px; font: 10px/1.6 var(--mono); color: var(--ink-2); }
-    .footer-note div:last-child { text-align: right; }
-
-    @media (max-width: 960px) {
-      .hero-lede, .section-head, .model-grid, .trust-grid, .closing-card, .decision-panel { grid-template-columns: 1fr; gap: 26px; }
-      .hero-map { grid-template-columns: 1fr; }
-      .hero-map .map-arrow { height: 30px; transform: rotate(90deg); }
-      .map-box { height: 150px; }
-      .story-body { grid-template-columns: 1fr; }
-      .conversation { border-right: 0; border-bottom: 1px solid var(--line); }
-      .decision-outcomes, .simplicity-grid { grid-template-columns: 1fr 1fr; }
-      .gap-card { grid-template-columns: 64px 1fr; }
-      .gap-evidence { grid-column: 2; border-left: 0; padding: 0; }
-    }
-    @media (max-width: 680px) {
-      .shell { width: min(100% - 24px, 1180px); }
-      .nav-links a { display: none; }
-      .hero { padding-top: 58px; }
-      .hero h1 { font-size: clamp(48px, 16vw, 72px); }
-      .hero-lede p { font-size: 20px; }
-      .hero-map { padding: 14px; border-radius: 24px; }
-      section { padding: 68px 0; }
-      .story-top { align-items: flex-start; flex-direction: column; }
-      .story-body, .conversation, .trace { min-width: 0; }
-      .conversation, .trace { padding: 20px; }
-      .delta-strip { grid-template-columns: repeat(2, 1fr); }
-      .schema-lanes { grid-template-columns: 1fr 1fr; }
-      .decision-outcomes, .simplicity-grid { grid-template-columns: 1fr; }
-      .boundary { grid-template-columns: 1fr; gap: 8px; }
-      .boundary-arrow { height: 24px; width: 1px; justify-self: center; }
-      .boundary-arrow::after { transform: rotate(135deg); right: -3px; top: 17px; }
-      .gap-summary { grid-template-columns: 1fr; }
-      .gap-card { grid-template-columns: 1fr; }
-      .gap-evidence { grid-column: 1; }
-      .closing-card { padding: 32px 25px; }
-      .footer-note { flex-direction: column; }
-      .footer-note div:last-child { text-align: left; }
-    }
-    @media (prefers-reduced-motion: reduce) {
-      *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
-    }
-  </style>
+  footer {
+    margin-top: 80px; padding-top: 22px; border-top: 3px double var(--line);
+    font-size: 13px; color: var(--ink-soft);
+    display: flex; flex-wrap: wrap; gap: 8px 28px; justify-content: space-between;
+  }
+  @media (max-width: 560px) {
+    body { font-size: 16px; }
+    ol.steps li { padding-left: 46px; }
+  }
+</style>
 </head>
 <body>
-  <header class="site-header" id="header">
-    <div class="shell nav">
-      <a class="brand" href="#top" aria-label="Rye agent showcase home">
-        <span class="brand-mark" aria-hidden="true"></span>
-        <span>Rye × Agents</span>
-      </a>
-      <nav class="nav-links" aria-label="Page navigation">
-        <a href="#vision">Vision</a>
-        <a href="#stories">Use cases</a>
-        <a href="#model">Data model</a>
-        <a href="#gaps">Gaps</a>
-      </nav>
+<div class="sheet">
+
+<header class="masthead">
+  <div class="eyebrow">Rye · Briefing · July 2026</div>
+  <h1>A memory for the business that keeps itself current.</h1>
+  <p class="standfirst">
+    Rye gives an organization one durable, searchable memory of what it knows —
+    fed by the conversations, meetings, documents, and systems it already uses,
+    and kept up to date by AI agents working inside boundaries people approve.
+    This briefing starts with the summary and ends in the weeds. Read as far
+    as your role requires.
+  </p>
+  <nav class="toc" aria-label="Contents">
+    <a href="#summary"><span class="n">01</span>Executive summary</a>
+    <a href="#benefits"><span class="n">02</span>What the business gets</a>
+    <a href="#how"><span class="n">03</span>How knowledge accumulates</a>
+    <a href="#start"><span class="n">04</span>Start anywhere</a>
+    <a href="#weeds"><span class="n">05</span>Under the hood</a>
+  </nav>
+</header>
+
+<!-- ============================ 01 ============================ -->
+<section id="summary">
+  <div class="kicker"><span class="num">01</span><h2>Executive summary</h2></div>
+  <p class="lede">
+    Most of what a company knows lives in people's heads and scattered apps.
+    When someone leaves, or a decision from last quarter needs explaining,
+    that knowledge is expensive to reconstruct — and sometimes gone.
+  </p>
+  <p>
+    Rye is organizational memory as infrastructure. It sits beside the systems
+    you already run, preserves what happened as <strong>evidence</strong>, and
+    records what the organization currently believes as <strong>accepted
+    knowledge</strong> — with the full paper trail connecting the two. AI
+    agents do the routine upkeep: noticing changes, filing updates, keeping
+    the picture current. People stay in charge of what counts as true.
+  </p>
+  <p>
+    The operating rule is simple: <strong>people approve the boundaries once;
+    agents work inside them; anything unusual comes back to a person.</strong>
+    No approval fatigue, and no agent ever expands its own authority.
+  </p>
+  <p>
+    <strong>Where this stands:</strong> the memory itself — evidence, accepted
+    facts, history, disputes — works today. The boundary engine that lets
+    agents act alone on routine items is specified in this proposal and
+    sequenced for delivery.
+  </p>
+</section>
+
+<!-- ============================ 02 ============================ -->
+<section id="benefits">
+  <div class="kicker"><span class="num">02</span><h2>What the business gets</h2></div>
+  <div class="benefits">
+    <div class="benefit"><h4>Nothing walks out the door</h4>
+      <p>What departing employees knew — who owns what, why a decision was made, where a deal stood — stays in the memory and stays answerable.</p></div>
+    <div class="benefit"><h4>Answers with receipts</h4>
+      <p>Every accepted fact traces back to who said it, where, and when. No more "I think someone mentioned it in a meeting."</p></div>
+    <div class="benefit"><h4>Routine upkeep, zero meetings</h4>
+      <p>Status changes, follow-up tasks, and record updates happen automatically when they match rules a person approved.</p></div>
+    <div class="benefit"><h4>People judge the exceptions</h4>
+      <p>New, sensitive, or conflicting items queue for quick human review — judgment where it matters, not clicks on everything.</p></div>
+    <div class="benefit"><h4>Works with what you have</h4>
+      <p>Plain PostgreSQL alongside your existing applications. No rip-and-replace, no new system of record to migrate into.</p></div>
+    <div class="benefit"><h4>See how work really flows</h4>
+      <p>Compare actual practice against official process — for compliance, and for finding improvements. Fairly: a missing record is treated as missing evidence, never as proof of wrongdoing.</p></div>
+    <div class="benefit"><h4>Ask about any point in time</h4>
+      <p>History is never overwritten. "What did we believe in March, and why?" is a query, not an archaeology project.</p></div>
+    <div class="benefit"><h4>Disagreement is preserved</h4>
+      <p>When two credible sources conflict, both claims stay visible until someone with authority resolves them — the memory never silently picks a side.</p></div>
+  </div>
+</section>
+
+<!-- ============================ 03 ============================ -->
+<section id="how">
+  <div class="kicker"><span class="num">03</span><h2>How knowledge accumulates</h2></div>
+  <p class="lede">
+    Six moves, in a loop. The essential idea: what people <em>say</em> and what
+    the organization <em>accepts as true</em> are kept separate, with a
+    deliberate checkpoint between them.
+  </p>
+
+  <figure aria-label="Flow diagram: listen, remember, suggest, check, accept, learn">
+    <svg viewBox="0 0 900 330" xmlns="http://www.w3.org/2000/svg" role="img">
+      <!-- lane 1: main flow -->
+      <g stroke="var(--line)" stroke-width="1.5" fill="var(--paper-2)">
+        <rect x="10"  y="40" width="150" height="76" rx="10"/>
+        <rect x="205" y="40" width="150" height="76" rx="10"/>
+        <rect x="400" y="40" width="150" height="76" rx="10"/>
+        <rect x="595" y="28" width="120" height="100" rx="52" stroke="var(--accent)" stroke-width="2"/>
+        <rect x="760" y="40" width="130" height="76" rx="10" stroke="var(--good)" stroke-width="2"/>
+      </g>
+      <!-- arrows -->
+      <g stroke="var(--ink-soft)" stroke-width="1.6" fill="none" marker-end="url(#arr)">
+        <path d="M160 78 h40"/>
+        <path d="M355 78 h40"/>
+        <path d="M550 78 h40"/>
+        <path d="M715 60 q30 0 42 12"/>
+      </g>
+      <defs>
+        <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="var(--ink-soft)"/>
+        </marker>
+        <marker id="arrh" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="var(--hold)"/>
+        </marker>
+        <marker id="arrs" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="var(--stop)"/>
+        </marker>
+      </defs>
+      <!-- labels lane 1 -->
+      <g fill="var(--ink)" text-anchor="middle" class="svg-label" font-size="16">
+        <text x="85"  y="72">Listen</text>
+        <text x="280" y="72">Remember</text>
+        <text x="475" y="72">Suggest</text>
+        <text x="655" y="72" fill="var(--accent)">Check</text>
+        <text x="825" y="72" fill="var(--good)">Accept</text>
+      </g>
+      <g fill="var(--ink-soft)" text-anchor="middle" class="svg-sub" font-size="12.5">
+        <text x="85"  y="97">chats · meetings · docs · apps</text>
+        <text x="280" y="97">kept as evidence</text>
+        <text x="475" y="97">"this deal looks lost"</text>
+        <text x="655" y="97">the rulebook</text>
+        <text x="825" y="97">with paper trail</text>
+      </g>
+      <!-- check outcomes -->
+      <g stroke-width="1.6" fill="none">
+        <path d="M655 128 v30" stroke="var(--hold)" marker-end="url(#arrh)"/>
+        <path d="M615 122 q-40 45 -110 52" stroke="var(--stop)" marker-end="url(#arrs)"/>
+      </g>
+      <g stroke="var(--line)" stroke-width="1.5">
+        <rect x="575" y="166" width="160" height="58" rx="10" fill="var(--hold-soft)"/>
+        <rect x="360" y="166" width="150" height="58" rx="10" fill="var(--stop-soft)"/>
+      </g>
+      <g text-anchor="middle" class="svg-label" font-size="14.5">
+        <text x="655" y="190" fill="var(--hold)">Ask a person</text>
+        <text x="435" y="190" fill="var(--stop)">Refuse</text>
+      </g>
+      <g fill="var(--ink-soft)" text-anchor="middle" class="svg-sub" font-size="12">
+        <text x="655" y="209">new · sensitive · conflicting</text>
+        <text x="435" y="209">outside its permissions</text>
+      </g>
+      <!-- learn loop -->
+      <path d="M735 195 q120 0 120 -74" stroke="var(--ink-soft)" stroke-width="1.4" stroke-dasharray="5 5" fill="none" marker-end="url(#arr)"/>
+      <path d="M655 224 v50 q0 14 -14 14 H100 q-14 0 -14 -14 V140" stroke="var(--ink-soft)" stroke-width="1.4" stroke-dasharray="5 5" fill="none" marker-end="url(#arr)"/>
+      <g fill="var(--ink-soft)" class="svg-sub" font-size="12.5">
+        <text x="240" y="256">Learn: repeated human approvals become a drafted rule —</text>
+        <text x="240" y="274">a person switches it on, and next time the answer is automatic.</text>
+      </g>
+    </svg>
+    <figcaption>
+      The accumulation loop. Evidence flows left to right; every suggestion
+      passes one checkpoint with three possible outcomes. Human decisions at
+      the checkpoint teach the rulebook — but only a person can activate what
+      it learns.
+    </figcaption>
+  </figure>
+
+  <ol class="steps">
+    <li><b>Listen.</b> Rye watches the sources you connect — team chat, meeting
+      transcripts, email, documents, and the databases behind your existing
+      apps. Nothing is asked of the people doing the work.</li>
+    <li><b>Remember.</b> Everything relevant is preserved as evidence: who said
+      it, where, and when. Evidence is memory of what happened — it is
+      <em>not yet</em> treated as fact.</li>
+    <li><b>Suggest.</b> An agent reads the evidence and proposes what it means:
+      "this deal sounds lost," "Niko agreed to update the safety doc by
+      Friday," "this invoice contact has changed."</li>
+    <li><b>Check.</b> Every suggestion passes through the rulebook, which knows
+      three answers: <em>act on it</em>, <em>ask a person</em>, or
+      <em>refuse</em>. The rulebook weighs who spoke, what role they held at
+      the time, what the official process allows, and how solid the evidence
+      is.</li>
+    <li><b>Accept.</b> Approved knowledge joins the memory with its full paper
+      trail — the evidence, the rule that allowed it, the person or agent that
+      acted — and with effective dates, so plans and history stay distinct
+      from today's truth.</li>
+    <li><b>Learn.</b> When people approve the same kind of suggestion again and
+      again, Rye drafts a rule from those decisions and shows its track record.
+      A person reviews and switches it on. Review shrinks to the exceptions.</li>
+  </ol>
+
+  <div class="pull">
+    A confident voice is not authority. Job titles, channel names, and
+    forceful wording never change the memory by themselves — the rulebook
+    checks who actually holds the pen, on that topic, on that day.
+  </div>
+</section>
+
+<!-- ============================ 04 ============================ -->
+<section id="start">
+  <div class="kicker"><span class="num">04</span><h2>Start anywhere</h2></div>
+  <p class="lede">
+    Companies don't have their process written down — or they do, and reality
+    drifted. Rye accepts both, in any order, and puts the difference to work.
+  </p>
+
+  <figure aria-label="Diagram: three independent starting points feeding one memory">
+    <svg viewBox="0 0 900 300" xmlns="http://www.w3.org/2000/svg" role="img">
+      <g stroke="var(--line)" stroke-width="1.5" fill="var(--paper-2)">
+        <rect x="20"  y="30" width="255" height="112" rx="10"/>
+        <rect x="322" y="30" width="255" height="112" rx="10"/>
+        <rect x="625" y="30" width="255" height="112" rx="10"/>
+      </g>
+      <g fill="var(--accent)" class="svg-sub" font-size="11.5" font-weight="600" letter-spacing="2">
+        <text x="40" y="56">WATCH</text>
+        <text x="342" y="56">FEED</text>
+        <text x="645" y="56">COMPARE</text>
+      </g>
+      <g fill="var(--ink)" class="svg-label" font-size="15.5">
+        <text x="40" y="80">How work actually flows</text>
+        <text x="342" y="80">The official picture</text>
+        <text x="645" y="80">Reality vs. rulebook</text>
+      </g>
+      <g fill="var(--ink-soft)" class="svg-sub" font-size="12.5">
+        <text x="40" y="102">Learned by observing day-to-day</text>
+        <text x="40" y="120">activity. No setup required.</text>
+        <text x="342" y="102">Org charts and process docs,</text>
+        <text x="342" y="120">loaded on day one or year two.</text>
+        <text x="645" y="102">Skipped steps, unused rules,</text>
+        <text x="645" y="120">stale org charts — surfaced.</text>
+      </g>
+      <!-- converge arrows -->
+      <g stroke="var(--ink-soft)" stroke-width="1.6" fill="none" marker-end="url(#arr2)">
+        <path d="M147 142 q0 60 233 76"/>
+        <path d="M450 142 v70"/>
+        <path d="M752 142 q0 60 -233 76"/>
+      </g>
+      <defs>
+        <marker id="arr2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="var(--ink-soft)"/>
+        </marker>
+      </defs>
+      <rect x="330" y="218" width="240" height="58" rx="29" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2"/>
+      <text x="450" y="243" text-anchor="middle" fill="var(--accent)" class="svg-label" font-size="15.5">One shared memory</text>
+      <text x="450" y="262" text-anchor="middle" fill="var(--ink-soft)" class="svg-sub" font-size="12">separate ledgers, never merged silently</text>
+    </svg>
+    <figcaption>
+      Three independent on-ramps. Each works alone; together they make the
+      difference between practice and policy visible — and useful.
+    </figcaption>
+  </figure>
+
+  <h3>Start empty — value on day one</h3>
+  <p>
+    Connect sources and do nothing else. Everything is remembered, every
+    suggestion asks first, and within days you can ask questions no single
+    app could answer: <em>how do deals actually move? who really decides?</em>
+    Rye drafts a picture of your working process from what it observes.
+  </p>
+
+  <h3>Feed the official picture — whenever it exists</h3>
+  <p>
+    Load the org chart; import the process documents. They become the rulebook
+    directly — no observation period required. Fed knowledge isn't privileged,
+    though: it's checked against reality like everything else, so a stale org
+    chart gets flagged rather than silently trusted.
+  </p>
+
+  <h3>Compare — where compliance and improvement live</h3>
+  <p>
+    Once both pictures exist, their differences become a standing report, not
+    an audit project: steps skipped in practice (a compliance question), rules
+    nobody uses (process debt), decisions made by people the chart doesn't
+    authorize (a stale chart — or a real problem). Each difference becomes a
+    suggestion: fix the behavior, or fix the rule. Deciding which is —
+    deliberately — a human call.
+  </p>
+
+  <div class="pull">
+    These three modes work independently, together, or in any order over time.
+    Knowledge accumulated before the rules existed is never lost; rules fed
+    before any observation still enforce from day zero.
+  </div>
+</section>
+
+<!-- ============================ 05 ============================ -->
+<section id="weeds" class="weeds">
+  <div class="kicker"><span class="num">05</span><h2>Under the hood</h2></div>
+  <p class="lede">
+    For the reader who wants the mechanism. Full contracts live in
+    <code>design/model/agent-driven-autonomy.md</code> and the plugin pattern
+    documents; this is the shape of it.
+  </p>
+
+  <h3>One decision, three answers</h3>
+  <p>
+    Every proposed accepted write — by any agent, through any interface —
+    receives exactly one recorded decision, with durable reason codes and a
+    snapshot of the policy that produced it:
+  </p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Situation</th><th>Decision</th></tr></thead>
+      <tbody>
+        <tr><td>Complete match with an active, human-approved policy</td><td><span class="verdict v-allow">allow</span></td></tr>
+        <tr><td>No applicable policy (the day-one default for semantic claims)</td><td><span class="verdict v-review">review</span></td></tr>
+        <tr><td>Speaker may propose but not decide this transition</td><td><span class="verdict v-review">review</span></td></tr>
+        <tr><td>Unresolved identity, missing evidence or prerequisite</td><td><span class="verdict v-review">review</span></td></tr>
+        <tr><td>Contradicts an accepted claim</td><td><span class="verdict v-review">review</span> via dispute</td></tr>
+        <tr><td>Missing capability or ungranted domain; non-overridable rule</td><td><span class="verdict v-deny">deny</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Authority is data, resolved in time</h3>
+  <p>
+    <code>verified source identity → person → role held at that time → domain
+    authority → permitted claim and speech act</code>. Speech acts
+    (<em>reported, proposed, approved, decided, policy_set</em>) replace any
+    numeric rank: a salesperson may <em>propose</em> closing a deal; a manager
+    must <em>decide</em> it; only a process owner may <em>set policy</em>.
+    Role membership and delegation are temporal edges, evaluated at the
+    moment the claim is about — not at ingestion time.
+  </p>
+
+  <h3>Observed and authoritative process, side by side</h3>
+  <p>
+    Process knowledge keeps two stances with shared keys and distinct
+    assertion types: <code>observed_process_transition</code> (descriptive —
+    what happened, with evidence) and <code>process_definition</code> /
+    <code>process_transition_policy</code> (normative — what's permitted, set
+    only by <code>policy_set</code> authority). The evaluator can only bind
+    the normative lineage, by construction. Divergence between them is a
+    derived view — <em>unmodeled transitions, dead policy steps, authority
+    divergence</em> — feeding compliance reporting and
+    <code>policy_change</code> candidates. Neither lineage ever writes to the
+    other, which is what makes the three on-ramps in §04 order-independent.
+  </p>
+
+  <h3>Three ways in, one contract</h3>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Path</th><th>Who</th><th>Enforcement</th></tr></thead>
+      <tbody>
+        <tr><td>Trusted SQL</td><td>Operator-controlled agents on the database</td><td>Session context, lifecycle helpers, audit — inside the trust boundary</td></tr>
+        <tr><td>Scoped DB / CLI</td><td>Agents with restricted credentials</td><td>Transport role blocks table access; token-checked functions enforce capability, domain, and policy</td></tr>
+        <tr><td>Secure API / MCP</td><td>External runtimes</td><td>Bearer tokens, allowlisted routes, the same policy-checked functions</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>
+    All three converge on the same SQL contract; a behavior change lands once,
+    in the database, not in three wrappers. Database roles never decide
+    business authority — they only prevent bypassing the function surface.
+  </p>
+
+  <h3>The memory itself</h3>
+  <ul class="plain">
+    <li>Six domain-neutral core tables: entities, relationships, events, participants, time-versioned assertions, artifacts. Everything domain-specific is conventions and plugins, not schema.</li>
+    <li>Accepted facts are append-only and superseded, never edited — "as of" queries reconstruct any past belief and the rules in force at that moment.</li>
+    <li>Conflicting claims coexist as disputes until an authority resolves them; the losing claim remains part of history.</li>
+    <li>Compliance findings distinguish <em>noncompliant</em> from <em>missing evidence</em>; absence of a Slack message is never proof a step didn't happen.</li>
+  </ul>
+
+  <h3>Worked examples</h3>
+  <details>
+    <summary>The deal that wasn't dead — proposal, refusal, decision</summary>
+    <div class="body">
+      <div class="exchange">
+        <div class="who">Jordan · salesperson, in Slack</div>
+        <p>"Aurora is dead. We should close it out."</p>
+        <div class="who">Rye</div>
+        <p>Preserves the message as evidence; files a <em>closed-lost</em> suggestion.
+        The rulebook answers <span class="verdict v-review">review</span>: Jordan may propose
+        this transition but not decide it, and the required loss reason is missing.
+        The accepted deal stage does not change.</p>
+        <div class="who">Maya · sales manager, next morning</div>
+        <p>"It's not dead — procurement moved the decision to next week."</p>
+        <div class="who">Rye</div>
+        <p>Maya's role and <em>decided</em> speech act match the active transition
+        policy. The suggestion is rejected, the deal stays open, and the whole
+        exchange — including Jordan's message — remains in the memory as history.</p>
+      </div>
     </div>
-  </header>
-
-  <main id="top">
-    <section class="hero">
-      <div class="shell">
-        <div class="eyebrow">Agent-driven temporal knowledge</div>
-        <h1>Agents do the work. Rye keeps it <em>grounded.</em></h1>
-        <div class="hero-lede">
-          <p>Deploy one PostgreSQL schema. Let agents read, act, learn, and escalate. Modify behavior through policy and conventions. Consume knowledge from SQL, API, MCP, or the applications people already use.</p>
-          <div class="hero-note">
-            <strong>Agent-driven does not mean agent-unbounded.</strong>
-            Humans define the autonomy envelope once. Agents operate inside it. New, sensitive, contradictory, or out-of-policy cases return for judgment.
-          </div>
-        </div>
-
-        <div class="hero-map" aria-label="User to agent to Rye interaction flow">
-          <div class="map-box user">
-            <div class="map-kicker">01 · Human surface</div>
-            <div class="map-title">State outcomes.<br />Set guardrails.</div>
-            <div class="map-copy">Work through chat, Slack, email, domain apps, or an exception queue.</div>
-            <div class="map-tags"><span class="map-tag">purpose</span><span class="map-tag">authority</span></div>
-          </div>
-          <div class="map-arrow" aria-hidden="true"></div>
-          <div class="map-box agent">
-            <div class="map-kicker">02 · Agent boundary</div>
-            <div class="map-title">Read, act, learn.<br />Escalate exceptions.</div>
-            <div class="map-copy">Use scoped API/MCP externally and lifecycle-safe SQL helpers locally.</div>
-            <div class="map-tags"><span class="map-tag">policy</span><span class="map-tag">process</span><span class="map-tag">evidence</span></div>
-          </div>
-          <div class="map-arrow" aria-hidden="true"></div>
-          <div class="map-box rye">
-            <div class="map-kicker">03 · PostgreSQL contract</div>
-            <div class="map-title">Policy + provenance +<br />temporal truth.</div>
-            <div class="map-copy">Keep what happened, what is true, why it is trusted, and what becomes true later.</div>
-            <div class="map-tags"><span class="map-tag">inspectable</span><span class="map-tag">adaptable</span></div>
-          </div>
-        </div>
+  </details>
+  <details>
+    <summary>The stale org chart — divergence doing its job</summary>
+    <div class="body">
+      <div class="exchange">
+        <div class="who">Observed</div>
+        <p>For two months, Priya has been approving discount exceptions.</p>
+        <div class="who">Authoritative</div>
+        <p>The fed org chart says Maya holds that authority.</p>
+        <div class="who">Rye</div>
+        <p>Reports an <em>authority divergence</em> — not a violation. It drafts two
+        candidate fixes: update the chart (Priya took over in May), or flag the
+        practice (Priya shouldn't be approving these). A person with authority
+        over the org model picks one; either way the memory records why.</p>
       </div>
-    </section>
+    </div>
+  </details>
 
-    <section id="vision">
-      <div class="shell">
-        <div class="section-head">
-          <div>
-            <div class="eyebrow">The operating vision</div>
-            <h2>One decision. Three outcomes.</h2>
-          </div>
-          <p>Evidence, explicit instructions, temporal authority, active process, accepted prior state, confidence, and conflict state are inputs. Every proposed accepted write ends in <strong>allow</strong>, <strong>review</strong>, or <strong>deny</strong>.</p>
-        </div>
-        <div class="decision-panel">
-          <div class="decision-card">
-            <h3>The complete decision contract</h3>
-            <p>Observation may be preserved first. Promotion then has one bounded result.</p>
-            <div class="decision-outcomes">
-              <div class="decision-outcome allow"><strong>Allow</strong><span>Complete the write and preserve the policy decision.</span></div>
-              <div class="decision-outcome review"><strong>Review</strong><span>Keep the candidate. Ask only for the missing judgment.</span></div>
-              <div class="decision-outcome deny"><strong>Deny</strong><span>Write no accepted knowledge. Record the reason.</span></div>
-            </div>
-            <div class="default-note"><strong>No policy on day one?</strong> A scoped semantic promotion returns <code>review</code>. Trusted local helpers continue to work as they do today.</div>
-          </div>
-          <div class="policy-card">
-            <h3>A narrow rule, not broad trust</h3>
-            <p>Example autonomy policy for account operations.</p>
-            <div class="policy-code"><span class="key">WHEN</span> domain = <span class="value">account-updates</span><br /><span class="key">AND</span> claim = <span class="value">account_review_date</span><br /><span class="key">AND</span> authority = <span class="value">account_owner</span><br /><span class="key">AND</span> speech_act = <span class="value">confirmed</span><br /><span class="key">AND</span> evidence_ref = <span class="value">present</span><br /><span class="key">THEN</span> <span class="value">promote + audit</span></div>
-            <div class="policy-outcome"><div>✓ All conditions match<br /><code>allow</code></div><div>! Anything incomplete<br /><code>review</code></div></div>
-          </div>
-        </div>
-      </div>
-    </section>
+  <h3>Honest status</h3>
+  <p>
+    Implemented today: the core memory (entities, events, assertions,
+    disputes, temporal reads), agent identities and capabilities, candidate
+    workflow, admin/agent route separation, and the governed-process claim
+    contracts. Proposed and sequenced: the policy evaluator, domain
+    membership, the scoped runtime CLI, discovery tooling, and the divergence
+    read model. This document describes the target; the design docs carry the
+    delivery order.
+  </p>
+</section>
 
-    <section class="stories" id="stories">
-      <div class="shell">
-        <div class="section-head">
-          <div>
-            <div class="eyebrow">Five interactions through one decision</div>
-            <h2>Same contract. Different access paths.</h2>
-          </div>
-          <p>Secure API/MCP, scoped direct database, and trusted SQL all converge on the same Rye lifecycle and policy helpers.</p>
-        </div>
-        <div class="story-tabs" id="storyTabs" role="tablist" aria-label="Use case selector"></div>
-        <div class="story-stage" aria-live="polite">
-          <div class="story-top">
-            <div class="story-title-wrap">
-              <div class="story-index" id="storyIndex">01</div>
-              <div>
-                <div class="story-title" id="storyTitle"></div>
-                <div class="story-meta" id="storyMeta"></div>
-              </div>
-            </div>
-            <div class="story-actions">
-              <button class="detail-button" id="detailButton" type="button">Show contract</button>
-              <button class="run-button" id="runButton" type="button">▶ Replay interaction</button>
-            </div>
-          </div>
-          <div class="story-body">
-            <div class="conversation">
-              <div class="pane-label"><span>Conversation</span><span class="live-dot">Simulated</span></div>
-              <div id="messages"></div>
-            </div>
-            <div class="trace">
-              <div class="pane-label"><span>Rye execution trace</span><span id="traceSurface"></span></div>
-              <div class="trace-list" id="traceList"></div>
-              <div class="delta-strip" id="deltaStrip"></div>
-              <div class="contract-proof" id="contractProof">
-                <div class="proof-head"><span>IMPLEMENTATION REFERENCES</span><span>current repository</span></div>
-                <div class="proof-body" id="proofBody"></div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
+<footer>
+  <span>Rye · agent-driven knowledge proposal</span>
+  <span>Static review artifact — no live database, no private data</span>
+</footer>
 
-    <section id="model">
-      <div class="shell">
-        <div class="section-head">
-          <div>
-            <div class="eyebrow">What persists</div>
-            <h2>Six tables keep the story coherent.</h2>
-          </div>
-          <p>Rye does not replace operational applications. It overlays them with shared identity, relationships, activity, temporal assertions, and evidence.</p>
-        </div>
-        <div class="model-grid">
-          <div class="core-card">
-            <div class="core-head">
-              <h3>Core data model</h3>
-              <p>Domain-specific meaning stays in open type strings and JSONB—not new columns on the core tables.</p>
-            </div>
-            <div class="schema-lanes">
-              <div class="schema-table"><div class="schema-name">nodes</div><div class="schema-role">People, orgs, tasks, opportunities, parcels, source items, candidates.</div><span class="schema-rule">identity</span></div>
-              <div class="schema-table"><div class="schema-name">edges</div><div class="schema-role">Directed and temporal relationships, including provenance links.</div><span class="schema-rule">graph</span></div>
-              <div class="schema-table"><div class="schema-name">events</div><div class="schema-role">Immutable activity: meetings, changes, queries, promotions, disputes.</div><span class="schema-rule">append-only</span></div>
-              <div class="schema-table"><div class="schema-name">event_participants</div><div class="schema-role">Who or what took part—and the visibility anchor for events.</div><span class="schema-rule">atomic helper</span></div>
-              <div class="schema-table"><div class="schema-name">assertions</div><div class="schema-role">Current, historical, disputed, and future-effective claims.</div><span class="schema-rule">immutable claim</span></div>
-              <div class="schema-table"><div class="schema-name">artifacts</div><div class="schema-role">Extracts and document references, optionally deduplicated by hash.</div><span class="schema-rule">evidence</span></div>
-            </div>
-          </div>
-          <div class="core-card">
-            <div class="core-head">
-              <h3>Agent guardrails</h3>
-            </div>
-            <div class="guard-stack">
-              <div class="guard"><div class="guard-top"><div class="guard-icon">↗</div><h4>Domain-scoped capability grants</h4></div><p><code>agent_identities</code>, tokens, grants, authority records, and channel subscriptions limit external agents.</p></div>
-              <div class="guard"><div class="guard-top"><div class="guard-icon">≠</div><h4>Candidate before authority</h4></div><p>Collectors can propose without gaining permission to promote accepted organizational knowledge.</p></div>
-              <div class="guard"><div class="guard-top"><div class="guard-icon">⏱</div><h4>Current is not future</h4></div><p><code>current_valid_assertions</code> answers now; <code>assertions_as_of()</code> reconstructs another time.</p></div>
-              <div class="guard"><div class="guard-top"><div class="guard-icon">◉</div><h4>Process and authority are temporal</h4></div><p>Every decision preserves the prior state, process version, authority path, evidence, and reasons that applied at the time.</p></div>
-              <div class="guard"><div class="guard-top"><div class="guard-icon">⇄</div><h4>Operational systems stay authoritative</h4></div><p><code>link_record()</code> and <code>track_table()</code> connect domain rows without making those systems point back to Rye.</p></div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section class="simplicity" id="simple">
-      <div class="shell">
-        <div class="section-head">
-          <div>
-            <div class="eyebrow">Simple at every edge</div>
-            <h2>Deploy, use, modify, and consume without adopting a framework.</h2>
-          </div>
-          <p>Rye’s product advantage is not another agent application. It is a portable knowledge contract that agents and existing applications can share.</p>
-        </div>
-        <div class="simplicity-grid">
-          <article class="simple-card"><div class="simple-icon">01</div><h3>Deploy</h3><p>Install one SQL schema beside existing PostgreSQL tables. Start locally, move to a managed database later, and add CRM or PM profiles only when needed.</p><div class="simple-proof"><strong>Actual path</strong><br />curl projectrye.dev/onboard | sh<br />PostgreSQL 15+ · no runtime · no ORM</div></article>
-          <article class="simple-card"><div class="simple-icon">02</div><h3>Use</h3><p>People ask for outcomes through the tools they already inhabit. Agents may use trusted SQL, a rigid direct-database CLI, or secure API/MCP—and surface only the exceptions.</p><div class="simple-proof"><strong>Actual surfaces</strong><br />trusted SQL · CLI · admin UI<br />secure API/MCP · domain applications</div></article>
-          <article class="simple-card"><div class="simple-icon">03</div><h3>Modify</h3><p>Add vocabulary with type strings and JSONB. Change behavior with scope policies, authority records, plugins, and conventions before considering core schema changes.</p><div class="simple-proof"><strong>Actual extension points</strong><br />node_type · edge_type · assertion_type<br />scope policies · plugins · profiles</div></article>
-          <article class="simple-card"><div class="simple-icon">04</div><h3>Consume</h3><p>Read the same temporal knowledge from compact agent helpers, SQL views, as-of functions, APIs, MCP tools, or a domain-specific experience.</p><div class="simple-proof"><strong>Actual contract</strong><br />agent_node_summary() · current_valid_assertions<br />assertions_as_of() · context packs</div></article>
-        </div>
-      </div>
-    </section>
-
-    <section class="trust" id="trust">
-      <div class="shell">
-        <div class="section-head">
-          <div>
-            <div class="eyebrow">Autonomy is configured</div>
-            <h2>Authority is data—not a prompt convention.</h2>
-          </div>
-          <p>Capabilities answer “may this agent attempt the verb?” Domain authorities, accepted process, prior state, and claim policies should answer “may this interpretation become accepted knowledge without review?”</p>
-        </div>
-        <div class="trust-grid">
-          <div class="trust-card">
-            <h3>Provision a sales intake agent</h3>
-            <p>Actual CLI commands from <code>scripts/rye</code>.</p>
-            <div class="code-block"><span class="comment"># Identity</span><br />./scripts/rye agents create \<br />&nbsp;&nbsp;--key sales-intake \<br />&nbsp;&nbsp;--label "Sales Intake Agent"<br /><br /><span class="comment"># Narrow verbs, one domain</span><br />./scripts/rye agents grant --key sales-intake \<br />&nbsp;&nbsp;--capability rye.context.read \<br />&nbsp;&nbsp;--domain account-updates<br /><br />./scripts/rye agents grant --key sales-intake \<br />&nbsp;&nbsp;--capability rye.candidate.create \<br />&nbsp;&nbsp;--domain account-updates<br /><br /><span class="comment"># One-time-visible token</span><br />./scripts/rye agents issue-token --key sales-intake</div>
-          </div>
-          <div class="trust-card">
-            <h3>Compose an autonomy envelope</h3>
-            <p>Collectors, operators, reviewers, and policy-driven agents can carry different responsibility.</p>
-            <div class="capabilities">
-              <div class="capability"><code>rye.context.read</code><span>orient</span></div>
-              <div class="capability"><code>rye.observation.create</code><span>preserve raw signal</span></div>
-              <div class="capability"><code>rye.candidate.create</code><span>propose</span></div>
-              <div class="capability"><code>rye.review.read</code><span>inspect queue</span></div>
-              <div class="capability"><code>rye.candidate.adjudicate</code><span>accept / reject</span></div>
-              <div class="capability"><code>rye.authoritative.promote</code><span>policy or review gate</span></div>
-              <div class="capability"><code>rye.audit.read</code><span>review decisions</span></div>
-            </div>
-            <div class="access-paths" aria-label="Supported agent access paths">
-              <div><div class="access-label">External or untrusted</div><div class="boundary"><div class="boundary-box"><strong>Agent runtime</strong><span>Rye token</span></div><div class="boundary-arrow"></div><div class="boundary-box"><strong>Secure API / MCP</strong><span>capability + domain checks</span></div><div class="boundary-arrow"></div><div class="boundary-box"><strong>Rye helpers</strong><span>policy + lifecycle</span></div></div></div>
-              <div><div class="access-label">Scoped direct database</div><div class="boundary"><div class="boundary-box"><strong>DB agent</strong><span>restricted credential + token</span></div><div class="boundary-arrow"></div><div class="boundary-box"><strong>Rigid Rye CLI</strong><span>parameterized commands</span></div><div class="boundary-arrow"></div><div class="boundary-box"><strong>Agent functions</strong><span>no raw table access</span></div></div></div>
-              <div><div class="access-label">Trusted direct database</div><div class="boundary"><div class="boundary-box"><strong>Trusted agent</strong><span>operator-controlled credential</span></div><div class="boundary-arrow"></div><div class="boundary-box"><strong>SQL helpers</strong><span>session context + audit</span></div><div class="boundary-arrow"></div><div class="boundary-box"><strong>Rye core</strong><span>inside trust boundary</span></div></div></div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section class="gaps" id="gaps">
-      <div class="shell">
-        <div class="section-head">
-          <div>
-            <div class="eyebrow">Implementation review</div>
-            <h2>The agent-driven vision exposes seven concrete gaps.</h2>
-          </div>
-          <p>These are grounded in the current repository. The first two need security review; the central product gap is compiling policy into an automatic, explainable promotion decision.</p>
-        </div>
-        <div class="gap-summary">
-          <div class="gap-stat"><strong>2</strong><span>Security boundaries</span></div>
-          <div class="gap-stat"><strong>3</strong><span>Missing agent loops</span></div>
-          <div class="gap-stat"><strong>2</strong><span>Operations &amp; docs</span></div>
-        </div>
-        <div class="gap-list">
-          <article class="gap-card p0"><div class="gap-priority">P0</div><div><h3>Authenticated read routes are not consistently capability- or domain-scoped.</h3><p>When API auth is required, a bearer token is mandatory—but routes such as node search/detail, graph, events, disputes, dashboards, and workspaces call admin-scoped queries without a route-level domain capability check. Any valid agent token may be able to read beyond its grant.</p></div><div class="gap-evidence"><strong>Evidence</strong><code>admin/src/server/worker.ts</code><br /><code>admin/src/server/queries.ts</code><br />admin CTE sets <code>app.current_role=admin</code></div></article>
-          <article class="gap-card p0"><div class="gap-priority">P0</div><div><h3>CDC events can preserve full sensitive domain rows.</h3><p><code>capture_domain_change()</code> puts complete <code>old</code> and <code>new</code> row JSON into event properties. Field redaction is implemented for node properties, not event payloads, so node visibility can expose fields that would otherwise be redacted.</p></div><div class="gap-evidence"><strong>Evidence</strong><code>0005_function_fixes.sql</code><br /><code>0006_security_config.sql</code><br />redaction target: node JSONB</div></article>
-          <article class="gap-card p1"><div class="gap-priority">P1</div><div><h3>The secure MCP cannot yet answer ordinary entity questions.</h3><p><code>rye.get_context_pack</code> returns domains, authority, policies, and open candidates—but not accepted assertions, nodes, relationships, or recent events. The secure MCP does not expose the API's node knowledge endpoints, so “what changed on Acme?” is not yet an end-to-end secure-MCP workflow.</p></div><div class="gap-evidence"><strong>Evidence</strong><code>agent_get_context_pack()</code><br /><code>rye_api_mcp_server.mts</code><br />context ≠ accepted knowledge</div></article>
-          <article class="gap-card p1"><div class="gap-priority">P1</div><div><h3>Authority and process policy are recorded, but not compiled into the promotion decision.</h3><p>Rye stores domain authorities, claim policies, source-of-truth policy, procedures, and agent autonomy policy. The promotion API currently checks the broad <code>rye.authoritative.promote</code> capability, then calls the lifecycle helper. It does not evaluate temporal identity and role resolution, prior accepted state, transition policy, prerequisites, speech act, evidence, confidence, and risk as one explainable decision.</p></div><div class="gap-evidence"><strong>Needed</strong><code>evaluate_candidate_promotion()</code><br />allow · review · deny + reasons<br />policy + process snapshot<br /><strong>Evidence</strong> <code>0012</code> · <code>0013</code> · <code>0016</code> · <code>worker.ts</code></div></article>
-          <article class="gap-card p1"><div class="gap-priority">P1</div><div><h3>Reviewer capabilities exist, but reviewer MCP tools do not.</h3><p>The API implements candidate status changes, generic promotion, source-policy acceptance, and CRM/PM plan acceptance. The secure MCP only registers review-queue reads; a reviewer agent must fall back to REST, the admin UI, or trusted SQL to finish the loop.</p></div><div class="gap-evidence"><strong>Evidence</strong><code>worker.ts</code> promotion routes<br /><code>rye_api_mcp_server.mts</code><br />no adjudicate/promote tools</div></article>
-          <article class="gap-card p2"><div class="gap-priority">P2</div><div><h3>Profile read models can be stale after agent writes.</h3><p><code>opportunities_active</code>, <code>contacts_directory</code>, and <code>task_board</code> are materialized. Refresh is manual through <code>refresh_materialized_views()</code>, so a chat agent can write a new assertion and a workspace can still show the old state.</p></div><div class="gap-evidence"><strong>Evidence</strong><code>0100_profile_crm.sql</code><br /><code>0110_profile_pm.sql</code><br /><code>refresh_materialized_views()</code></div></article>
-          <article class="gap-card p2"><div class="gap-priority">P2</div><div><h3>Documentation trails the executable agent surface.</h3><p>The admin README still describes authentication as a stub, while token auth and capability enforcement are implemented. The data dictionary omits newer agent-domain security tables and key workflows from migrations 0009–0016.</p></div><div class="gap-evidence"><strong>Evidence</strong><code>admin/README.md</code><br /><code>docs/data-dictionary.md</code><br /><code>0016_agent_domain_security.sql</code></div></article>
-        </div>
-      </div>
-    </section>
-
-    <section class="closing">
-      <div class="shell">
-        <div class="closing-card">
-          <h2>Agent-driven by default.<br />Judgment only where it matters.</h2>
-          <p>Simple to deploy, use, modify, and consume. Inspectable enough to trust. Flexible enough to let autonomy grow one narrow policy at a time.</p>
-        </div>
-        <div class="footer-note">
-          <div>Project Rye · Open BLT<br />Static review artifact · No live database or private data</div>
-          <div>Grounding: schema/migrations/0001–0016, 0100–0123<br />skills/rye-agent-ops · source-context-intake · admin API · conformance tests</div>
-        </div>
-      </div>
-    </section>
-  </main>
-
-  <script>
-    const scenarios = [
-      {
-        tab: "Slack deal · review",
-        title: "A salesperson says the deal is dead; policy keeps it open",
-        meta: "Conversation evidence · temporal authority · process validation",
-        surface: "secure API/MCP · review → allow",
-        review: { policy: true, status: "Review · proposer cannot decide", action: "Inspect why", accepted: "Process trace verified", evidence: "accepted stage: proposal · candidate: closed_lost · authority.may_propose_not_decide · loss reason missing" },
-        messages: [
-          { type: "user", who: "Jordan · Salesperson", text: "Aurora is dead. We should close it out." },
-          { type: "agent", who: "Deal memory agent", text: "I preserved that as a <strong>closed_lost candidate</strong>, not accepted state. Jordan may propose this transition, but the active process requires a sales manager to decide and a loss reason to be present." },
-          { type: "system", who: "Rye decision", text: "<code>review</code>: authority.may_propose_not_decide · evidence.loss_reason_missing. Accepted deal stage remains <strong>proposal</strong>.", review: true },
-          { type: "user", who: "Maya · Sales manager", text: "It is not dead. Procurement moved the decision to next week; keep it in proposal." },
-          { type: "agent", who: "Deal memory agent", text: "Maya’s manager role and <code>decided</code> speech act match the process in effect today. The closure candidate is rejected, the next action is updated, and the full conversation remains evidence." }
-        ],
-        trace: [
-          { phase: "Preserve source", call: "source_account → source_container → source_item", does: "Stores stable Slack workspace, channel, message, thread, speaker, occurrence, edit, and retrieval references without treating the channel as authority." },
-          { phase: "Propose state", call: "agent_create_candidate(deal_stage = closed_lost)", does: "Records Jordan’s authority basis, speech act, confidence, date quality, and evidence refs. Accepted deal state is unchanged." },
-          { phase: "Resolve authority", call: "identity → person → temporal role → domain_authorities", does: "Finds that Jordan may propose deal-stage changes but may not decide this transition." },
-          { phase: "Validate process", call: "process_definition + process_transition_policy", does: "Evaluates proposal → closed_lost against the process version effective at the message time and reports the missing manager decision and loss reason." },
-          { phase: "Apply manager decision", call: "evaluate + reject candidate + preserve state", does: "Maya’s active manager authority matches. Rye keeps proposal accepted, records the decision snapshot, and retains Jordan’s message as history rather than overwriting it." }
-        ],
-        delta: [["+2", "source items"], ["+2", "candidates"], ["+2", "decisions"], ["+0", "stage changes"], ["1", "process trace"]],
-        proof: [["Implemented", "Slack-shaped source account/container/item · candidate authority basis · speech act · evidence · temporal assertions"], ["Proposed", "identity/role resolver · process transition contract · policy snapshot · compliance view"], ["Invariant", "conversation never changes accepted state without authority and process evaluation"]]
-      },
-      {
-        tab: "API/MCP · allow",
-        title: "A familiar Slack signal is promoted by policy",
-        meta: "External agent · policy match · automatic promotion",
-        surface: "secure API/MCP · allow",
-        review: { policy: true, status: "Policy match · auto-promoted", action: "Inspect why", accepted: "Policy trace verified", evidence: "authority: account_owner · speech act: confirmed · evidence: present · confidence 0.84" },
-        messages: [
-          { type: "user", who: "Maya · CSM", text: "Priya confirmed Acme’s security review moved to <strong>14 August</strong>. Capture it and keep the account current." },
-          { type: "agent", who: "Account operations agent", text: "This matches the approved autonomy rule for confirmed review dates from the account owner. I’ll preserve the Slack evidence and update accepted knowledge automatically." },
-          { type: "system", who: "Rye policy trace", text: "Auto-promoted: account_review_date = 14 August 2026. Authority, claim type, scope, speech act, evidence, and confidence matched.", review: true },
-          { type: "agent", who: "Account operations agent", text: "Done—no approval click required. The assertion carries its candidate and source references. A missing condition would have routed this to review." }
-        ],
-        trace: [
-          { phase: "Orient", call: "rye.get_context_pack → agent_get_context_pack()", does: "Returns only subscribed domains, authority rules, claim policies, and open candidates for slack:#sales." },
-          { phase: "Observe", call: "rye.submit_observation → agent_submit_observation()", does: "Creates a source_item plus an immutable agent_observation_submitted event and allowed action-log row." },
-          { phase: "Propose", call: "rye.propose_candidate_fact → agent_create_candidate()", does: "Creates a knowledge_candidate, proposed candidate_status assertion, evidence metadata, and idempotency record." },
-          { phase: "Policy gate · vision", call: "domain_authorities + domain_claim_policies", does: "Target path compiles authority, claim type, speech act, evidence, confidence, and risk into allow, review, or deny. The current API still needs this combined evaluator." },
-          { phase: "Auto-accept", call: "promote_candidate_to_assertion()", does: "A policy-authorized agent writes through record_assertion(), preserving candidate_id, source_refs, history, and the decision trace." }
-        ],
-        delta: [["+2", "nodes"], ["+1", "edge"], ["+5", "events"], ["+3", "assertions"], ["+7", "audit rows"]],
-        proof: [["Implemented", "scoped context · observations · candidates · capability-gated API promotion · provenance"], ["Policy data", "domain_authorities · domain_claim_policies · source_of_truth_policy · agent_autonomy_policy"], ["Vision gap", "one promotion-policy evaluator that returns allow · review · deny with reasons"]]
-      },
-      {
-        tab: "Scoped CLI · allow",
-        title: "A direct-database agent stays inside the function boundary",
-        meta: "Restricted DB credential · Rye token · rigid CLI",
-        surface: "scoped database · allow",
-        review: { policy: true, status: "Policy decision · allow", action: "Inspect decision", accepted: "Decision trace verified", evidence: "domain: project-delivery · authority: project owner · evidence: call/8821" },
-        messages: [
-          { type: "user", who: "Niko · Project owner", text: "The Northstar call confirmed we owe a revised DPA by Friday. Record the follow-up task." },
-          { type: "agent", who: "Scoped database agent", text: "I’m connected with the restricted Rye transport credential. The CLI can call token-authenticated agent functions, but it cannot read or mutate core tables directly." },
-          { type: "system", who: "Rye decision", text: "<code>allow</code>: granted domain, project-owner authority, confirmed obligation, and evidence reference all matched.", review: true },
-          { type: "agent", who: "Scoped database agent", text: "Task created with candidate and source provenance. The CLI, API, and MCP use the same database promotion helper." }
-        ],
-        trace: [
-          { phase: "Orient", call: "./scripts/rye agent context --domain project-delivery", does: "Uses the new scoped runtime tree. The existing rye context command remains a compatibility alias for trusted mode." },
-          { phase: "Observe", call: "./scripts/rye agent observe --input observation.json", does: "The CLI sends a parameterized call to the same token-authenticated observation helper used by the gateway." },
-          { phase: "Propose", call: "./scripts/rye agent propose --input candidate.json", does: "Creates a task candidate with evidence and an idempotency key; no raw INSERT is available to this credential." },
-          { phase: "Decide", call: "./scripts/rye agent evaluate --candidate <uuid>", does: "Returns allow, review, or deny with durable reason codes. No matching policy would return review." },
-          { phase: "Promote", call: "./scripts/rye agent promote --candidate <uuid>", does: "Calls the atomic policy-aware task promotion helper and returns the existing result on retry." }
-        ],
-        delta: [["+3", "nodes"], ["+2", "edges"], ["+5", "events"], ["+3", "assertions"], ["+1", "decision"]],
-        proof: [["Implemented", "agent identities · tokens · capabilities · observations · candidates · task promotion"], ["Proposed", "restricted transport role · rye agent runtime CLI · atomic policy-aware promotion"], ["Boundary", "database roles limit transport access; Rye policy data decides business authority"]]
-      },
-      {
-        tab: "Trusted SQL · allow",
-        title: "A planned deal stage is visible before it is true",
-        meta: "Trusted direct database · explicit user instruction · temporal assertion",
-        surface: "trusted SQL · allow",
-        review: { policy: true, status: "Direct user authority", action: "Inspect schedule", accepted: "Schedule verified", evidence: "opportunity OPP-2607-0042 · instructed by deal lead Maya" },
-        messages: [
-          { type: "user", who: "Maya · Deal lead", text: "Move Aurora to proposal next Monday—but until then, answer that it is still in discovery." },
-          { type: "agent", who: "CRM planning agent", text: "Your explicit instruction is the authorization; I will not ask you to approve it again. <strong>Today: discovery.</strong> Plan visible today: proposal on 13 July." },
-          { type: "system", who: "Rye schedule", text: "Scheduled deal_stage = proposal at 2026-07-13T00:00:00Z. Kept deal_stage_plan current and inspectable now.", review: true },
-          { type: "agent", who: "CRM planning agent", text: "Done. A current read still returns <strong>discovery</strong>. An as-of read after the cutover returns <strong>proposal</strong>." }
-        ],
-        trace: [
-          { phase: "Direct authority", call: "user instruction + trusted session context", does: "The trusted caller establishes Rye session context. The deal lead’s explicit request authorizes this narrow action, and the system preserves who asked." },
-          { phase: "Schedule", call: "schedule_deal_stage_change()", does: "Records stage_change_scheduled, a future-effective deal_stage assertion, and a current-visible deal_stage_plan." },
-          { phase: "Preserve window", call: "record_assertion(... p_effective_at)", does: "Closes the current assertion at the cutover instead of making the future stage true early." },
-          { phase: "Answer now", call: "current_valid_assertions", does: "Returns discovery before 13 July and includes the plan as an intention, not the deal stage." },
-          { phase: "Answer future", call: "assertions_as_of('2026-07-14')", does: "Returns exactly one deal_stage assertion: proposal." }
-        ],
-        delta: [["+0", "nodes"], ["+0", "edges"], ["+1", "event"], ["+2", "assertions"], ["1", "closed window"]],
-        proof: [["Helper", "0120_profile_crm_future_scheduling.sql · schedule_deal_stage_change()"], ["Views", "current_valid_assertions · assertions_as_of(timestamptz)"], ["Tests", "tests/conformance/19_profile_future_scheduling.sql"]]
-      },
-      {
-        tab: "Exception · review",
-        title: "Contradictory ownership survives until a person resolves it",
-        meta: "Contradiction · dispute path · human judgment",
-        surface: "trusted SQL · review",
-        review: { status: "Active dispute", action: "Accept 1/8 claim", accepted: "Resolved · 1/8", evidence: "county filing 2024-0892 · title examiner Alice" },
-        messages: [
-          { type: "user", who: "Alice · Title examiner", text: "Our model says the Smith Trust owns 1/4. The county filing says 1/8. Do not overwrite either claim." },
-          { type: "agent", who: "Title diligence agent", text: "I’ll contest the current ownership assertion and keep both active. The new claim will be keyed to its source and marked with dispute metadata." },
-          { type: "system", who: "Rye review", text: "Active dispute: ownership · 1/4 at confidence 1.0 vs 1/8 at confidence 0.7.", review: true },
-          { type: "agent", who: "Title diligence agent", text: "After your decision, the 1/8 claim is promoted to the default key, losing claims are superseded, and a <strong>dispute_resolved</strong> event records why." }
-        ],
-        trace: [
-          { phase: "Find current", call: "current_valid_assertions", does: "Reads the active ownership assertion without mutating the accepted claim." },
-          { phase: "Contest", call: "contest_assertion()", does: "Creates a competing assertion keyed contested:county_filing_2024_0892 and a dispute_raised event." },
-          { phase: "Surface", call: "active_disputes", does: "Shows both active claims only when dispute metadata identifies a real contradiction." },
-          { phase: "Human gate", call: "Alice confirms the county filing", does: "The person with review authority selects the winner and states the reason." },
-          { phase: "Resolve", call: "resolve_dispute()", does: "Supersedes losers, promotes the winner to key default, and records dispute_resolved." }
-        ],
-        delta: [["+0", "nodes"], ["+0", "edges"], ["+2", "events"], ["+2", "assertions"], ["1", "resolved dispute"]],
-        proof: [["Helpers", "0004_agent_capabilities.sql · contest_assertion() · resolve_dispute()"], ["View", "0008_active_disputes_fix.sql · active_disputes"], ["Tests", "tests/conformance/10_assertion_disputes.sql"]]
-      }
-    ];
-
-    let activeScenario = 0;
-    let runTimer = null;
-
-    const tabs = document.getElementById("storyTabs");
-    scenarios.forEach((scenario, index) => {
-      const button = document.createElement("button");
-      button.className = "story-tab";
-      button.type = "button";
-      button.role = "tab";
-      button.textContent = `${String(index + 1).padStart(2, "0")} · ${scenario.tab}`;
-      button.addEventListener("click", () => renderScenario(index));
-      tabs.appendChild(button);
-    });
-
-    function renderScenario(index) {
-      activeScenario = index;
-      clearInterval(runTimer);
-      const scenario = scenarios[index];
-      [...tabs.children].forEach((tab, i) => {
-        tab.classList.toggle("active", i === index);
-        tab.setAttribute("aria-selected", String(i === index));
-      });
-      document.getElementById("storyIndex").textContent = String(index + 1).padStart(2, "0");
-      document.getElementById("storyTitle").textContent = scenario.title;
-      document.getElementById("storyMeta").textContent = scenario.meta;
-      document.getElementById("traceSurface").textContent = scenario.surface;
-      document.getElementById("runButton").textContent = "▶ Replay interaction";
-
-      document.getElementById("messages").innerHTML = scenario.messages.map((message) => `
-        <div class="message ${message.type}" data-message>
-          <div class="message-avatar">${message.type === "user" ? "YOU" : message.type === "agent" ? "AI" : "RYE"}</div>
-          <div class="bubble">
-            <div class="speaker">${message.who}</div>
-            <div>${message.text}</div>
-            ${message.review ? `
-              <div class="review-card ${scenario.review.policy ? "policy" : ""}" id="reviewCard">
-                <div class="review-row">
-                  <span class="review-status" id="reviewStatus">${scenario.review.status}</span>
-                  <button class="review-button" id="reviewButton" type="button">${scenario.review.action}</button>
-                </div>
-                <div class="review-evidence">${scenario.review.evidence}</div>
-              </div>` : ""}
-          </div>
-        </div>`).join("");
-
-      document.getElementById("traceList").innerHTML = scenario.trace.map((step, i) => `
-        <div class="trace-step" data-trace>
-          <div class="trace-dot"></div>
-          <div class="trace-phase">${String(i + 1).padStart(2, "0")} · ${step.phase}</div>
-          <div class="trace-call">${step.call}</div>
-          <div class="trace-does">${step.does}</div>
-        </div>`).join("");
-
-      document.getElementById("deltaStrip").innerHTML = scenario.delta.map(([value, label]) => `
-        <div class="delta"><div class="delta-value">${value}</div><div class="delta-label">${label}</div></div>`).join("");
-
-      document.getElementById("proofBody").innerHTML = scenario.proof.map(([key, value]) => `
-        <div class="proof-row"><span>${key}</span><span>${value}</span></div>`).join("");
-
-      const reviewButton = document.getElementById("reviewButton");
-      if (reviewButton) reviewButton.addEventListener("click", acceptReview);
-      resetPlayback(false);
-    }
-
-    function acceptReview() {
-      const card = document.getElementById("reviewCard");
-      const status = document.getElementById("reviewStatus");
-      const button = document.getElementById("reviewButton");
-      card.classList.add("accepted");
-      status.textContent = scenarios[activeScenario].review.accepted;
-      button.textContent = "✓ Done";
-      document.querySelectorAll("[data-trace]").forEach(step => step.classList.add("complete"));
-      document.querySelectorAll("[data-message]").forEach(message => message.classList.remove("pending"));
-    }
-
-    function resetPlayback(dim = true) {
-      document.querySelectorAll("[data-trace]").forEach(step => step.classList.remove("active", "complete"));
-      document.querySelectorAll("[data-message]").forEach((message, i) => message.classList.toggle("pending", dim && i > 0));
-    }
-
-    function replay() {
-      clearInterval(runTimer);
-      resetPlayback(true);
-      const messages = [...document.querySelectorAll("[data-message]")];
-      const steps = [...document.querySelectorAll("[data-trace]")];
-      const sequence = [];
-      const max = Math.max(messages.length, steps.length);
-      for (let i = 0; i < max; i++) sequence.push(i);
-      let cursor = 0;
-      document.getElementById("runButton").textContent = "Replaying…";
-      const advance = () => {
-        const i = sequence[cursor];
-        if (messages[i]) messages[i].classList.remove("pending");
-        steps.forEach((step, stepIndex) => {
-          step.classList.toggle("active", stepIndex === i);
-          if (stepIndex < i) step.classList.add("complete");
-        });
-        cursor += 1;
-        if (cursor >= sequence.length) {
-          clearInterval(runTimer);
-          steps.forEach(step => { step.classList.remove("active"); step.classList.add("complete"); });
-          document.getElementById("runButton").textContent = "↻ Replay again";
-        }
-      };
-      advance();
-      runTimer = setInterval(advance, 720);
-    }
-
-    document.getElementById("runButton").addEventListener("click", replay);
-    document.getElementById("detailButton").addEventListener("click", () => {
-      const proof = document.getElementById("contractProof");
-      proof.classList.toggle("open");
-      document.getElementById("detailButton").textContent = proof.classList.contains("open") ? "Hide contract" : "Show contract";
-    });
-
-    window.addEventListener("scroll", () => document.getElementById("header").classList.toggle("scrolled", window.scrollY > 12), { passive: true });
-
-    renderScenario(0);
-  </script>
+</div>
 </body>
 </html>
