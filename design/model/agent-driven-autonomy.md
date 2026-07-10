@@ -1,193 +1,276 @@
-# Agent-Driven Autonomy
+# Rye — Agent Access and Promotion
 
 Status: proposed design direction
 
-## Objective
+## Scope
 
-Rye should let agents consume and populate organizational knowledge with as
-little recurring human coordination as the active policy safely allows.
+This document defines two related contracts:
 
-Humans define purpose, authority, boundaries, and exception policy. Agents act
-inside that envelope. New, sensitive, contradictory, or out-of-policy cases go
-to review. Repeated review outcomes can propose a narrower or broader autonomy
-rule, but an agent cannot activate its own authority.
+1. how trusted and scoped agents enter Rye
+2. how an agent interpretation becomes accepted knowledge
 
-The target experience is:
+It does not design CDC payload migration, change cursors, materialized-view
+freshness, or retention. Those are separate proposals with different migration
+and compatibility requirements.
 
-- simple to deploy beside an existing PostgreSQL application
-- natural to use through chat, connectors, domain applications, or an admin UI
-- flexible to modify through conventions, plugins, and temporal policy records
-- simple to consume through SQL helpers, a secure API, MCP tools, and change
-  feeds
+Rye core remains SQL. An API, MCP server, CLI, or admin UI is a replaceable
+wrapper over the database contract.
 
-Rye core remains SQL. The secure agent gateway and admin UI remain optional
-surfaces over that database contract.
+## Outcome
 
-## Operating Principle
+Rye should let agents complete routine work without requiring a human approval
+for every interpretation. Humans define authority and policy. Every proposed
+accepted write receives one decision:
 
-Review is a bootstrap and exception path, not a permanent tax on every agent
-interpretation.
+| Decision | Meaning |
+|---|---|
+| `allow` | The request matches active authority and policy. Complete the write and record why. |
+| `review` | The request may be valid, but policy, evidence, authority, or confidence is incomplete. Preserve a candidate for review. |
+| `deny` | The agent lacks capability, domain access, or an applicable scope. Record the denial without writing accepted knowledge. |
 
-The operating rule is:
+Observation is a pipeline stage, not an autonomy mode. An authorized user's
+explicit instruction is an authority input, not a separate decision type.
+Policy, evidence, classification, confidence, and conflict state are other
+inputs to the same `allow` / `review` / `deny` decision.
 
-> Humans approve the autonomy policy. Agents act within it. Exceptions return
-> for judgment.
+## Day-One Behavior
 
-This produces four autonomy modes.
+The default posture must be useful without silently granting autonomy.
 
-| Mode | Meaning | Default handling |
+### Fresh installs with no autonomy policies
+
+- Trusted local SQL keeps the existing Rye helper behavior.
+- A scoped agent may read only domains explicitly granted and populated for
+  scoped access.
+- A scoped agent with `rye.observation.create` may preserve an observation.
+- A scoped agent with `rye.candidate.create` may create a candidate.
+- A semantic promotion request with no matching policy returns `review`.
+- No matching policy never means automatic promotion.
+- Missing capability or an ungranted domain returns `deny`.
+- An authorized reviewer may still promote through the explicit review path.
+
+This makes an unconfigured local install usable while keeping scoped agent
+autonomy conservative.
+
+### Existing installations when the evaluator ships
+
+The migration does not change the behavior of existing trusted helpers such as
+`record_assertion()` or `promote_candidate_to_assertion()`.
+
+Roll out policy enforcement in three operational steps:
+
+1. Install domain membership, decision records, and policy-aware helpers.
+2. Evaluate existing promotions in audit-only comparisons without blocking the
+   trusted caller. Report what would have been allowed, reviewed, or denied.
+3. Opt specific domain and claim-type pairs into policy enforcement after their
+   authorities and source rules are confirmed.
+
+The existing helpers remain trusted administrative primitives. Scoped DB,
+API, MCP, and CLI agents use the policy-aware helper that evaluates and promotes
+atomically.
+
+## Core And Optional Footprints
+
+### Rye Core
+
+Rye Core contains the durable contract used by every access path:
+
+- agent identities, tokens, capabilities, and audit records
+- knowledge domains and authorities
+- node-domain membership
+- promotion policies and decision records
+- candidate creation and lifecycle helpers
+- policy-aware read, evaluation, and promotion functions
+
+These supporting objects are installed with Rye Core. A single-user trusted
+local installation does not have to configure domains or agent tokens until it
+enables scoped access.
+
+### Optional Agent Gateway
+
+The Agent Gateway provides HTTP and MCP wrappers over the same Rye Core
+functions. It owns no separate policy logic or durable authorization state.
+
+## Three Access Paths
+
+The access paths are deployment choices, not autonomy decisions.
+
+| Path | Intended caller | Enforcement |
 |---|---|---|
-| Observe | Preserve relevant source material or activity | Automatic, with provenance and retention policy |
-| Direct | An authorized user explicitly requests a scoped action | Execute once; do not ask the same person to approve it again |
-| Policy-driven | A familiar interpretation matches an active autonomy rule | Promote automatically and record the decision trace |
-| Exception | The case is novel, sensitive, contradictory, low-confidence, or out of scope | Create a candidate, dispute, or denial record for review |
+| Trusted SQL | Operator-controlled agent with trusted database credentials | Existing RLS, session context, lifecycle helpers, and audit; caller is inside the trust boundary |
+| Scoped DB | Agent with a restricted database credential and Rye token | Database privileges prevent table bypass; token-authenticated Rye functions enforce capability, domain, and promotion policy |
+| Secure API/MCP | External or untrusted runtime | Bearer token, payload limits, and the same policy-aware Rye functions used by scoped DB access |
 
-## Design Principles
+### Trusted SQL
 
-1. **Authority is data.** Prompts do not grant authority. Domain, source,
-   capability, speech act, classification, and effective-time policy do.
-2. **Semantic interpretation remains reviewable.** An LLM-derived
-   interpretation normally creates a candidate even when policy immediately
-   allows promotion. The candidate preserves the reasoning and evidence path.
-3. **Deterministic authoritative updates may take a shorter path.** A structured
-   source covered by an active source-of-truth policy may record an assertion
-   directly, but it still records the policy decision and source event.
-4. **Explicit instructions are not approved twice.** The system records the
-   authenticated instruction and verifies the speaker's authority before
-   executing it.
-5. **Exceptions teach; they do not silently expand authority.** Repeated review
-   outcomes can create an autonomy-rule candidate. A trusted administrator must
-   activate that rule.
-6. **Decisions are temporal.** Authority, policy, classification, and source
-   status are evaluated at the requested effective time.
-7. **Core tables stay domain-neutral.** Domain membership and policy use
-   supporting tables and assertions, not new columns on the six core tables.
+A trusted direct-database agent may query security-invoker views and call Rye
+helpers directly. It must:
 
-## Target Interaction Path
+- set Rye session context in every stateless call
+- use `current_valid_assertions` for current accepted knowledge
+- use lifecycle helpers for assertions, events, candidates, disputes, and
+  scheduling
+- use an attributable actor and log agent reads
+- treat raw table mutation outside the helper contract as an administrative
+  action
+
+This path is convenient, not an enforceable sandbox. An owner or administrative
+database credential can bypass a CLI. Deployments must classify that agent as
+trusted.
+
+### Scoped direct database
+
+Scoped DB access needs an enforceable database boundary. Provide a technical
+transport role, for example `rye_agent_runtime`, with:
+
+- `CONNECT` to the database
+- `USAGE` on the `rye` schema
+- `EXECUTE` on approved token-authenticated `agent_*` functions
+- no direct table privileges on Rye core or supporting tables
+- no execution rights on administrative helpers
+
+The transport role is not business authorization. Rye does not use
+`current_user`, `pg_has_role()`, or role membership to decide domain authority.
+Its purpose is to stop a scoped direct-database caller from bypassing the
+function surface.
+
+### Secure API and MCP
+
+External runtimes use the same agent functions through an optional gateway.
+Tool registration and route access follow the authenticated agent's
+capabilities. The gateway must not call broad admin queries on behalf of an
+agent token.
+
+## Relationship To The Existing Security Model
+
+`design/model/security.md` remains the source of truth for RLS, `access_grants`,
+classification, field redaction, and session context.
+
+The distinction is caller trust:
+
+- In trusted SQL and trusted applications, the application establishes session
+  variables before RLS-protected queries. This is the existing model.
+- In scoped DB access, caller-set session variables are not proof of agent
+  identity because the caller can set custom PostgreSQL settings.
+- The restricted transport role prevents direct table access. A
+  token-authenticated Rye function establishes the agent identity, checks Rye
+  policy data, performs the bounded operation, and records the action.
+- Database roles never determine business authority. Domain and claim authority
+  continue to come from Rye data.
+
+This adds a transport boundary for untrusted database callers without replacing
+the session-variable authorization model used by trusted callers.
+
+For transaction-mode poolers, each scoped function call authenticates the Rye
+token and performs the operation in one transaction. A later implementation may
+add a short-lived backend-bound agent session for dedicated connections, but a
+caller-set GUC alone is insufficient.
+
+Tokens must be passed through parameterized calls and must not appear in
+generated SQL, process arguments, audit payloads, or error messages.
+
+## CLI Command Tree
+
+Use one deliberate command tree:
+
+- `rye agents ...` remains the existing administrative interface for creating
+  identities, granting capabilities, issuing tokens, revoking tokens, and
+  auditing agents.
+- `rye agent ...` is the scoped runtime interface for one authenticated agent.
+- the existing `rye context` command remains a compatibility alias for
+  `rye agent context --trusted`; it is not a separate context contract
+
+Proposed runtime commands:
 
 ```text
-source or user request
-        |
-        v
-observation + evidence
-        |
-        v
-candidate or deterministic update
-        |
-        v
-promotion policy evaluator
-    |          |          |
-  allow      review      deny
-    |          |          |
-    v          v          v
-promotion   exception   audit + reason
-    |        queue
-    v          |
-temporal       +--> repeated outcome --> autonomy-rule candidate
-knowledge                                  |
-                                             +--> admin activation
+./scripts/rye agent context --domain account-updates --json
+./scripts/rye agent search --query Acme --domain account-updates --json
+./scripts/rye agent summary --node <uuid> --json
+./scripts/rye agent observe --input observation.json --idempotency-key <key>
+./scripts/rye agent propose --input candidate.json --idempotency-key <key>
+./scripts/rye agent evaluate --candidate <uuid> --json
+./scripts/rye agent promote --candidate <uuid> --input target.json --idempotency-key <key>
 ```
 
-## Existing Foundations
+The singular/plural distinction is intentional: `agents` administers the
+collection of agent identities; `agent` performs a scoped runtime operation.
 
-Rye already has most of the primitives required for this direction.
+CLI requirements:
 
-| Existing primitive | Contribution |
-|---|---|
-| `knowledge_domains` | Names a bounded business knowledge area |
-| `domain_authorities` | Records people, systems, teams, roles, and sources with claim authority |
-| `domain_claim_policies` | Records claim-specific candidate and authority expectations |
-| `agent_identities` and `agent_capability_grants` | Limit which verbs an external agent may attempt |
-| `agent_action_log` | Audits allowed and denied external-agent actions |
-| `agent_get_context_pack()` | Returns subscribed domains, authorities, policies, and open candidates |
-| `agent_submit_observation()` | Preserves raw observed source material without treating it as accepted knowledge |
-| `agent_create_candidate()` | Creates a scoped candidate with evidence and idempotency metadata |
-| Candidate promotion helpers | Promote candidates to assertions, tasks, and edges with provenance |
-| `record_assertion()` and as-of reads | Preserve current, historical, and future-effective knowledge |
-| Assertion dispute helpers | Preserve contradictory claims until a reviewer resolves them |
+- call the same SQL functions as API and MCP
+- use parameterized database calls
+- accept connection and token values through environment variables or secure
+  input, not process arguments
+- return stable JSON envelopes and meaningful nonzero exit codes
+- include decision reason codes
+- support dry-run evaluation
+- make every write idempotent
+- authenticate, authorize, write, and audit in one transaction where possible
 
-The missing contract is a single policy decision that combines those inputs
-before an accepted write.
+## Node-Domain Membership Contract
 
-## First-Class Domain Membership
+Scoped reads need a durable answer to:
 
-External-agent reads and policy evaluation require a durable answer to:
+> Which knowledge domains contain this node at the requested time?
 
-> Which knowledge domains contain this node?
+Add a supporting `node_domain_memberships` table. It does not add columns to a
+core table.
 
-Candidate JSON currently carries `domain_keys`, but ordinary nodes and promoted
-knowledge do not have a normalized membership contract. Add a supporting table:
+Required fields:
 
-```sql
-CREATE TABLE rye.node_domain_memberships (
-    id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    node_id         uuid NOT NULL REFERENCES rye.nodes(id),
-    domain_id       uuid NOT NULL REFERENCES rye.knowledge_domains(id),
-    scope_ref       text,
-    membership_kind text NOT NULL DEFAULT 'primary',
-    effective_at    timestamptz NOT NULL DEFAULT now(),
-    effective_to    timestamptz,
-    source_event_id uuid REFERENCES rye.events(id),
-    properties      jsonb NOT NULL DEFAULT '{}',
-    created_at      timestamptz NOT NULL DEFAULT now(),
-    CHECK (membership_kind IN ('primary', 'shared', 'derived', 'temporary')),
-    CHECK (effective_to IS NULL OR effective_to > effective_at)
-);
-```
+- membership id
+- node id and domain id
+- nullable scope reference, normalized consistently for constraints
+- effective start and end
+- membership source event
+- properties and creation time
 
-Membership rules:
+Required invariants:
 
-- Assertions inherit the domains of their subject node.
-- Edges are visible only when the caller can see both endpoints.
-- Events inherit visibility from their participants.
-- Artifacts inherit from their source and related nodes.
-- Candidate creation writes membership for the candidate node.
-- Promotion verifies that the target belongs to the requested domains.
-- Cross-domain sharing requires an explicit `shared` membership.
-- Labels, channel names, and connector metadata never create membership by
-  themselves.
+- no overlapping effective ranges for the same node, domain, and normalized
+  scope
+- at most one active membership for the same node, domain, and normalized scope
+- end time later than start time
+- membership kind, if retained, must not affect authorization unless its
+  semantics are defined by policy
 
-Backfill candidate membership from `target_payload.domain_keys`. Leave other
+Required indexes:
+
+- `(node_id, effective_at, effective_to)`
+- `(domain_id, effective_at, effective_to)`
+- a unique partial index for the active node/domain/normalized-scope key
+
+PostgreSQL 15 cannot enforce temporal non-overlap for scalar keys without either
+an exclusion constraint or a trigger. An exclusion constraint requires the
+additional `btree_gist` extension. The implementation proposal must choose and
+test one of these options before executable DDL is added. This overview does not
+present incomplete migration-ready DDL.
+
+Membership inheritance:
+
+- assertions inherit the domains of their subject node
+- edges require visibility to both endpoints
+- events inherit visibility from their participants
+- artifacts inherit from their source and related nodes
+- candidate creation records candidate membership
+- promotion verifies target membership
+- cross-domain sharing requires an explicit membership
+- labels, channel names, and connector metadata never create membership
+
+Backfill candidate membership from `target_payload.domain_keys`. Put other
 unclassified nodes in an admin worklist rather than inferring their domain.
 
-## Promotion Policy Decisions
+## Promotion Decision Contract
 
-Add an append-only decision table:
+Add an append-only promotion decision record containing:
 
-```sql
-CREATE TABLE rye.promotion_decisions (
-    id                 uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    candidate_id       uuid REFERENCES rye.nodes(id),
-    agent_id           uuid REFERENCES rye.agent_identities(id),
-    decision           text NOT NULL,
-    reason_codes       text[] NOT NULL DEFAULT '{}',
-    matched_policy_ids uuid[] NOT NULL DEFAULT '{}',
-    missing_conditions jsonb NOT NULL DEFAULT '[]',
-    request             jsonb NOT NULL,
-    policy_snapshot     jsonb NOT NULL,
-    decided_at          timestamptz NOT NULL DEFAULT now(),
-    effective_at        timestamptz NOT NULL DEFAULT now(),
-    expires_at          timestamptz,
-    CHECK (decision IN ('allow', 'review', 'deny'))
-);
-```
-
-Add a stable evaluator:
-
-```text
-evaluate_candidate_promotion(
-    agent_id,
-    candidate_id,
-    target_payload,
-    at_time
-) -> {
-    decision,
-    reason_codes,
-    matched_policy_ids,
-    missing_conditions,
-    decision_id
-}
-```
+- candidate and authenticated agent
+- decision: `allow`, `review`, or `deny`
+- durable reason codes
+- matched policy references and a policy snapshot
+- missing conditions
+- requested target
+- decision and effective times
 
 The evaluator considers:
 
@@ -205,402 +288,129 @@ The evaluator considers:
 - conflicting active assertions
 - policy effective dates
 
-Default outcomes:
+Default results:
 
-- missing scope or ungranted domain: `deny`
-- known domain with incomplete authority or evidence: `review`
+- missing capability or ungranted domain: `deny`
+- no applicable promotion policy: `review`
+- incomplete authority or evidence: `review`
 - contradiction: `review` through the dispute path
-- complete narrow policy match: `allow`
-
-Policy evaluation and promotion must happen in one transaction. The promotion
-event and accepted record store the decision id, policy snapshot, matched
-conditions, actor, and evidence references.
-
-Policy authoring records must themselves be temporal. Either add effective and
-supersession fields to compiled policy tables or compile those tables from
-temporal policy assertions. Do not overwrite policy history.
-
-## Explicit User Authority
-
-Add a helper that records an authenticated instruction before execution:
-
-```text
-record_agent_instruction(
-    user_id,
-    agent_id,
-    domain_keys,
-    target_ref,
-    requested_action,
-    requested_effective_at,
-    instruction_digest,
-    idempotency_key
-) -> event_id
-```
-
-The instruction can satisfy the authority condition when the user has the
-required domain role. The evaluator still returns `review` or `deny` when the
-target is ambiguous, the user lacks authority, the action crosses scope, or the
-request conflicts with active policy.
-
-## Atomic And Idempotent Promotion
-
-Candidate creation already supports idempotency. Promotion needs the same
-protection.
-
-```sql
-CREATE TABLE rye.candidate_promotions (
-    id                 uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    candidate_id       uuid NOT NULL REFERENCES rye.nodes(id),
-    promotion_key      text NOT NULL,
-    target_type        text NOT NULL,
-    target_id          uuid NOT NULL,
-    policy_decision_id uuid REFERENCES rye.promotion_decisions(id),
-    created_at         timestamptz NOT NULL DEFAULT now(),
-    UNIQUE (candidate_id, promotion_key)
-);
-```
-
-Promotion rules:
-
-- accept an idempotency key at the API boundary
-- lock the candidate during evaluation and promotion
-- reject accidental promotion of accepted, rejected, duplicate, or superseded
-  candidates
-- require an explicit multi-target policy when one candidate legitimately
-  produces more than one accepted result
-- record candidate status, promotion target, policy decision, and promotion
-  event atomically
-
-## Administrative And Agent API Separation
-
-Separate the current API into two data planes.
-
-### Administrative API
-
-- route prefix: `/api/admin/v1`
-- human authentication through Cloudflare Access, OAuth, or another verified
-  admin identity
-- may use the Rye admin database context
-- does not accept possession of a Rye agent token as administrative authority
-
-### Agent API
-
-- route prefix: `/api/agent/v1`
-- Rye agent token required
-- every route maps to a capability
-- every read and write is constrained by domain membership and scope
-- uses narrow SQL helpers instead of general admin queries
-
-Until domain-safe agent reads exist, agent tokens must receive `403` from
-administrative node, graph, event, dispute, dashboard, and workspace routes.
-
-## Direct Database And CLI Access
-
-The secure API is not the only supported agent path. Many coding agents,
-database agents, and local operators will have a PostgreSQL connection and
-should not need an HTTP service to use Rye.
-
-Support three explicit access modes.
-
-| Mode | Intended caller | Enforcement |
-|---|---|---|
-| Trusted SQL | Operator-controlled local agent with trusted database credentials | Session context, Rye helper conventions, and audit; the agent is inside the trusted boundary |
-| Scoped DB | Agent with a restricted database credential and Rye token | Database privileges plus token-authenticated Rye functions; no direct core-table access |
-| Secure API/MCP | External or untrusted runtime | Bearer token, API capability checks, domain-safe functions, and payload limits |
-
-### Trusted SQL mode
-
-A trusted direct-database agent may query security-invoker views and call Rye
-helpers directly. It must:
-
-- set Rye session context in every stateless call
-- use `current_valid_assertions` for current accepted knowledge
-- use lifecycle helpers for assertions, events, candidates, disputes, and
-  scheduling
-- record agent reads and writes with an attributable actor
-- treat raw table mutation outside the helper contract as an administrative
-  action
-
-This mode is convenient, not an enforceable sandbox. An agent with an owner or
-administrative database credential can bypass a CLI and cannot be constrained
-by prompt instructions. Deployments must classify that agent as trusted.
-
-### Scoped DB mode
-
-Scoped direct access needs an enforceable database boundary. Create one
-technical transport role, for example `rye_agent_runtime`, with:
-
-- `CONNECT` to the database
-- `USAGE` on the `rye` schema
-- `EXECUTE` only on the approved token-authenticated `agent_*` functions
-- no direct `SELECT`, `INSERT`, `UPDATE`, or `DELETE` grants on Rye core or
-  supporting tables
-- no execution rights on administrative helpers
-
-The transport role is not a business authorization model. Rye must not use
-`current_user`, `pg_has_role()`, or database-role membership to decide domain
-authority. Its purpose is only to prevent a direct-database caller from
-bypassing the token-authenticated function surface. Business authorization
-continues to use Rye identities, capabilities, domains, authorities, scopes,
-and policy decisions.
-
-Token-authenticated functions should not trust caller-set session variables as
-proof of identity. A custom PostgreSQL setting can be set by the caller. Use one
-of these patterns:
-
-1. Authenticate the Rye agent token inside each parameterized function call.
-2. Open a short-lived database-agent session through a `SECURITY DEFINER`
-   function, bind it to the active backend and an unguessable nonce, and require
-   that session in every subsequent helper call.
-
-For transaction-mode poolers and CLI commands, the first pattern is simpler.
-For a long-lived dedicated connection, the second can avoid repeated token
-verification. Both patterns must avoid placing plaintext tokens in generated
-SQL strings, logs, or error messages.
-
-### Rye CLI
-
-Provide a rigid CLI over the same database functions used by the API and MCP.
-The CLI does not reimplement policy locally.
-
-Suggested commands:
-
-```text
-./scripts/rye agent context --domain account-updates --json
-./scripts/rye agent search --query Acme --domain account-updates --json
-./scripts/rye agent summary --node <uuid> --json
-./scripts/rye agent observe --input observation.json --idempotency-key <key>
-./scripts/rye agent propose --input candidate.json --idempotency-key <key>
-./scripts/rye agent evaluate --candidate <uuid> --json
-./scripts/rye agent promote --candidate <uuid> --input target.json --idempotency-key <key>
-./scripts/rye agent changes --cursor <cursor> --json
-```
-
-CLI requirements:
-
-- use parameterized database calls rather than interpolated SQL
-- accept connection and Rye token values through environment variables or
-  secure input, not command-line arguments that appear in process listings
-- return stable JSON envelopes and meaningful nonzero exit codes
-- include policy reason codes for allow, review, and deny outcomes
-- support `--dry-run` for evaluation and policy simulation
-- make every write idempotent
-- perform token authentication, authorization, lifecycle write, and audit in
-  one database transaction where possible
-- expose the same semantic operation names as the API and MCP
-
-The API, MCP, CLI, and trusted SQL guidance all converge on the same database
-helpers. A behavior change belongs in that shared SQL contract, not in four
-different wrappers.
-
-## Safe CDC
-
-CDC currently preserves complete old and new row JSON. Add tracked-table
-configuration:
-
-```sql
-CREATE TABLE rye.tracked_table_config (
-    source_schema      text NOT NULL,
-    source_table       text NOT NULL,
-    payload_mode       text NOT NULL DEFAULT 'changed_fields',
-    included_columns   text[],
-    excluded_columns   text[] NOT NULL DEFAULT '{}',
-    classified_columns jsonb NOT NULL DEFAULT '{}',
-    max_value_bytes    integer NOT NULL DEFAULT 8192,
-    retention_class    text,
-    PRIMARY KEY (source_schema, source_table),
-    CHECK (payload_mode IN ('keys_only', 'changed_fields', 'full_snapshot'))
-);
-```
-
-Defaults:
-
-- store changed fields instead of full rows
-- exclude credentials, secrets, tokens, and large binary or text columns
-- redact classified values before writing the event
-- store hashes or changed markers when the value is not needed
-- use a restricted artifact for a full replay snapshot only when policy requires
-  it
-
-Field redaction must apply to event and artifact payloads, not only node JSONB.
-
-## Secure Consumption Surface
-
-The secure MCP and agent API should expose a complete bounded workflow.
-
-Read tools:
-
-- `rye.search_nodes`
-- `rye.get_node_summary`
-- `rye.get_node_knowledge`
-- `rye.get_changes`
-- `rye.get_assertions_as_of`
-- `rye.get_open_disputes`
-
-Write tools:
-
-- `rye.submit_observation`
-- `rye.propose_candidate`
-
-Policy and review tools, registered only with the matching capability:
-
-- `rye.evaluate_candidate`
-- `rye.set_candidate_status`
-- `rye.promote_candidate`
-- `rye.accept_source_policy`
-- `rye.accept_scheduled_change`
-
-Every response separates:
-
-- accepted current knowledge
-- current plans
-- pending candidates
-- evidence and provenance
-- historical or future-effective knowledge
-- freshness metadata
-
-External runtimes never receive raw SQL access through this surface.
-
-## Incremental Consumption
-
-Add a cursor-based helper over immutable events:
-
-```text
-agent_changes_since(
-    agent_id,
-    cursor,
-    domain_keys,
-    event_types,
-    limit
-) -> { changes, next_cursor }
-```
-
-Use stable `(recorded_at, id)` ordering. Enforce domain visibility, return
-affected node ids and compact summaries, and support replay after a consumer
-disconnects. Optional notifications, queues, or webhooks can wake consumers,
-but the event cursor remains the durable contract.
-
-## Simple Deployment And Operation
-
-Offer two explicit footprints.
-
-1. **Rye Core**
-   - PostgreSQL schema, migrations, verification, and conformance
-   - trusted local SQL helpers
-   - no required runtime, ORM, or framework
-2. **Rye Agent Gateway**
-   - optional secure API and MCP deployment
-   - agent identity, capability, domain, and promotion-policy enforcement
-   - deployable and replaceable independently of Rye Core
-
-Extend `scripts/rye doctor` to report:
-
-- PostgreSQL and extension compatibility
-- migration and profile status
-- RLS configuration
-- unsafe agent-accessible administrative routes
-- nodes without domain membership
-- source confirmations and candidate backlog
-- policy compilation failures
-- CDC tables using unsafe payload modes
-- active disputes
-- materialized-view freshness
-
-## Simple Modification
-
-Most changes should use existing extension points:
-
-- open node, edge, assertion, event, and artifact type conventions
-- JSONB properties for domain data
-- scope conventions for local vocabulary
-- temporal authority and autonomy policy
-- plugins for reusable domain behavior
-- profiles for optional read models and helpers
-
-Add a policy simulator that evaluates a proposed autonomy rule against prior
-reviewed candidates without activating the rule. Report how many prior cases
-would have been allowed, reviewed, or denied, including historical reviewer
-disagreements and classifications affected.
-
-The exception UI should offer two distinct actions:
-
-- approve this case
-- propose a rule for similar cases
-
-The second action creates a policy candidate. It does not immediately expand
-agent authority.
-
-## Freshness
-
-Profile materialized views need explicit freshness state:
-
-```text
-profile_read_model_state(
-    profile_key,
-    last_refreshed_at,
-    latest_source_change_at,
-    stale,
-    acceptable_staleness
-)
-```
-
-API and agent responses that use a materialized read model include this
-metadata. Small installations may prefer security-invoker views. Larger
-installations can use an optional refresher driven by the event feed.
+- complete active policy match: `allow`
+
+Policy records are temporal. A decision retains the policy snapshot used at the
+time so later policy changes do not rewrite why the action occurred.
+
+## Explicit User Instructions
+
+An authenticated user instruction is one authority input to the evaluator. The
+system records:
+
+- user and agent identity
+- requested operation and target
+- domain and effective time
+- a safe instruction digest
+- idempotency key
+
+The evaluator may return `allow` when the user has authority for the narrow
+action. It returns `review` or `deny` when the target is ambiguous, the user
+lacks authority, the request crosses scope, or active policy conflicts.
+
+The same authorized user is not asked to approve the same action twice.
+
+## Candidate And Promotion Lifecycle
+
+An LLM-derived semantic interpretation normally creates a candidate even when
+policy immediately returns `allow`. This preserves evidence and reasoning.
+
+A deterministic structured source covered by an active source-of-truth policy
+may use a shorter assertion path, but it still records the source event and
+promotion decision.
+
+Policy evaluation and promotion happen atomically. Add a durable promotion
+record with a unique candidate and promotion key. The helper:
+
+- locks the candidate
+- evaluates active policy
+- rejects invalid candidate statuses
+- returns an existing result for a repeated idempotency key
+- creates the target, status transition, event, decision reference, and audit
+  record in one transaction
+- requires an explicit policy when one candidate legitimately produces multiple
+  accepted targets
+
+The existing promotion helpers remain trusted primitives. Scoped callers use
+the policy-aware atomic helper.
+
+## Wrapper Contract
+
+CLI, API, and MCP expose the same semantic operations:
+
+- context and domain listing
+- bounded node search and summary
+- observation creation
+- candidate creation
+- candidate evaluation
+- candidate status and promotion, when capability permits
+- audit reads, when capability permits
+
+Each response separates accepted knowledge, plans, pending candidates,
+evidence, and history. External wrappers do not expose raw SQL.
+
+## Out Of Scope Follow-Ups
+
+The following findings remain important but are intentionally separate:
+
+- **CDC data protection.** Define a versioned migration for new payload shapes,
+  consumer compatibility, classification and read-time redaction of existing
+  immutable events, and safe defaults for newly tracked tables.
+- **Incremental consumption.** Define domain-safe event cursors, replay, and
+  optional wakeup mechanisms.
+- **Read-model freshness.** Define how materialized CRM and PM views report and
+  refresh freshness.
+- **Retention.** Define evidence and event retention without weakening the
+  append-only contract.
+
+These proposals should be reviewed independently from agent access and
+promotion.
 
 ## Conformance Requirements
 
 Add tests for:
 
-- no cross-domain discovery through search, graph, events, totals, errors, or
-  timing-visible response differences
-- agent tokens rejected from administrative routes
+- existing trusted helper behavior unchanged after migration
+- scoped semantic promotion with no policy returning `review`
+- missing capability or ungranted domain returning `deny`
+- explicit active policy returning `allow`
+- no cross-domain discovery through scoped search or summary
 - scoped database credentials unable to read or mutate Rye tables directly
-- trusted SQL and scoped DB modes documented and distinguishable in diagnostics
-- CLI commands producing the same allow, review, deny, and result envelopes as
-  the API and MCP
-- tokens absent from SQL logs, process listings, audit request payloads, and
-  errors
-- policy decisions for allow, review, and deny
-- temporal authority and policy evaluation
-- explicit user instruction without duplicate approval
+- trusted session-context RLS continuing to behave as documented
+- CLI, API, and MCP returning the same decision and reason envelope
+- tokens absent from SQL text, process arguments, audit payloads, and errors
+- no duplicate or conflicting active domain memberships
+- temporal membership overlap rejected
 - atomic retry-safe promotion
-- competing concurrent promotion attempts
-- candidate status transition restrictions
-- sensitive CDC fields absent from lower-privilege event and artifact reads
-- secure MCP tool registration by capability
-- context and knowledge reads bounded by domain and scope
-- cursor replay without missed or duplicate events
-- materialized-view freshness surfaced to consumers
+- competing concurrent promotion attempts producing one result
+- invalid candidate status transitions rejected
+- temporal authority and future-effective policy evaluation
+- explicit user instruction recorded without duplicate approval
 
 ## Delivery Sequence
 
-1. Close administrative routes to agent tokens.
-2. Define trusted SQL, scoped DB, and secure API/MCP access modes.
-3. Add the restricted direct-database transport role and token-authenticated
-   agent function surface.
-4. Add domain membership and domain-safe read helpers.
-5. Make CDC redaction safe by default.
-6. Add promotion decision and promotion idempotency records.
-7. Implement atomic policy evaluation and promotion.
-8. Add explicit-user-authority handling.
-9. Add the rigid Rye agent CLI over the shared SQL helpers.
-10. Complete secure MCP reads and review tools.
-11. Add cursor-based change consumption.
-12. Add policy simulation and exception grouping.
-13. Add freshness, health reporting, and updated documentation.
+1. Close broad administrative routes to agent tokens.
+2. Reconcile and document trusted SQL, scoped DB, and secure API/MCP paths.
+3. Add constrained node-domain membership and domain-safe reads.
+4. Add append-only promotion decisions and idempotent promotion records.
+5. Implement the atomic policy-aware promotion helper with audit-only migration
+   support.
+6. Add the `rye agent` CLI and make API/MCP call the same SQL helpers.
+7. Opt confirmed domain and claim policies into enforcement incrementally.
 
-## Success Measures
+## Non-Goals
 
-Measure:
+- Agents do not activate their own authority.
+- The transport database role does not become a business authorization model.
+- Trusted administrative helpers are not removed.
+- Local installations do not require an API gateway.
+- This proposal does not change CDC payloads or materialized views.
 
-- the share of routine work completed automatically
-- the reason every automatic action was allowed
-- automatic decisions later reversed
-- exceptions converted into reviewed policy proposals
-- accepted assertions with complete evidence, authority, and policy provenance
-- attempts to access or modify knowledge outside an agent's domain
-- time from installation to the first useful agent workflow
-
-The desired result is not maximum autonomy. It is the highest useful autonomy
-that remains bounded, inspectable, temporal, and simple to change.
+The desired result is not maximum autonomy. It is useful autonomy with a small,
+explainable decision contract and one database-enforced implementation.

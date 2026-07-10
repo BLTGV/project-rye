@@ -85,6 +85,7 @@ Supporting tables handle security, integration, and deduplication:
 - [Schema Reference](/docs/model/schema/) — Table definitions and DDL
 - [Functions Reference](/docs/model/functions/) — Utility functions and query patterns
 - [Security](/docs/model/security/) — RLS policies and field-level redaction
+- [Agent Access and Promotion](/docs/model/agent-driven-autonomy/) — Trusted and scoped agent access plus policy-aware promotion
 - [Integration](/docs/model/integration/) — Domain table overlay and change tracking
 - [CRM Conventions](/docs/layers/crm/) — Contact, opportunity, and pipeline conventions
 - [PM Conventions](/docs/layers/pm/) — Task, project, and sprint conventions

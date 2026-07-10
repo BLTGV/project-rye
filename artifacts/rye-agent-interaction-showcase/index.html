@@ -84,12 +84,6 @@
     .nav-links { display: flex; align-items: center; gap: 24px; font-size: 13px; font-weight: 700; }
     .nav-links a { text-decoration: none; opacity: .7; }
     .nav-links a:hover { opacity: 1; }
-    .mode-toggle {
-      display: flex; padding: 3px; border: 1px solid var(--line-strong); border-radius: 999px; background: rgba(255,255,255,.45);
-    }
-    .mode-toggle button { border: 0; background: transparent; padding: 7px 12px; border-radius: 999px; cursor: pointer; font-size: 12px; font-weight: 800; }
-    .mode-toggle button.active { background: var(--ink); color: white; }
-
     .hero { padding: 88px 0 78px; position: relative; }
     .eyebrow { display: flex; align-items: center; gap: 10px; text-transform: uppercase; letter-spacing: .14em; font-size: 11px; font-weight: 900; color: var(--ink-2); }
     .eyebrow::before { content: ""; width: 24px; height: 2px; background: var(--rye); }
@@ -122,26 +116,19 @@
     .section-head h2 { font-family: var(--serif); font-size: clamp(39px, 5vw, 64px); line-height: .98; letter-spacing: -.05em; margin: 12px 0 0; font-weight: 600; }
     .section-head p { margin: 0; color: var(--ink-2); font-size: 17px; max-width: 560px; }
 
-    .contract-strip { display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1px solid var(--line-strong); border-bottom: 1px solid var(--line-strong); }
-    .contract-item { padding: 28px 22px 30px; border-right: 1px solid var(--line); min-height: 170px; }
-    .contract-item:last-child { border-right: 0; }
-    .contract-number { font: 700 11px var(--mono); color: var(--coral); }
-    .contract-item h3 { margin: 28px 0 8px; font-family: var(--serif); font-size: 24px; letter-spacing: -.03em; }
-    .contract-item p { margin: 0; font-size: 13px; color: var(--ink-2); }
-
-    .autonomy-panel { margin-top: 28px; display: grid; grid-template-columns: 1fr .92fr; gap: 18px; }
-    .autonomy-ladder, .policy-card { border: 1px solid var(--line-strong); border-radius: 26px; background: var(--card); padding: 26px; }
-    .autonomy-ladder h3, .policy-card h3 { margin: 0 0 5px; font-family: var(--serif); font-size: 28px; letter-spacing: -.04em; }
-    .autonomy-ladder > p, .policy-card > p { margin: 0 0 22px; color: var(--ink-2); font-size: 12px; }
-    .autonomy-levels { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
-    .autonomy-level { border: 1px solid var(--line); border-radius: 16px; padding: 14px; min-height: 154px; background: #f1ede2; }
-    .autonomy-level:nth-child(1) { background: var(--mint); }
-    .autonomy-level:nth-child(2) { background: #d9e5dc; }
-    .autonomy-level:nth-child(3) { background: #ead8ac; }
-    .autonomy-level:nth-child(4) { background: #ead2c9; }
-    .level-num { font: 900 9px var(--mono); text-transform: uppercase; letter-spacing: .1em; color: var(--ink-2); }
-    .autonomy-level strong { display: block; margin: 20px 0 7px; font-size: 13px; }
-    .autonomy-level span { display: block; font-size: 10px; color: var(--ink-2); }
+    .decision-panel { display: grid; grid-template-columns: .92fr 1.08fr; gap: 18px; }
+    .decision-card, .policy-card { border: 1px solid var(--line-strong); border-radius: 26px; background: var(--card); padding: 26px; }
+    .decision-card h3, .policy-card h3 { margin: 0 0 5px; font-family: var(--serif); font-size: 28px; letter-spacing: -.04em; }
+    .decision-card > p, .policy-card > p { margin: 0 0 22px; color: var(--ink-2); font-size: 12px; }
+    .decision-outcomes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .decision-outcome { border: 1px solid var(--line); border-radius: 16px; padding: 14px; min-height: 138px; }
+    .decision-outcome.allow { background: var(--mint); }
+    .decision-outcome.review { background: #ead8ac; }
+    .decision-outcome.deny { background: #ead2c9; }
+    .decision-outcome strong { display: block; margin: 18px 0 7px; font-size: 13px; text-transform: uppercase; }
+    .decision-outcome span { display: block; font-size: 10px; color: var(--ink-2); }
+    .default-note { margin-top: 12px; border-radius: 14px; padding: 12px 14px; background: #ece8dc; font-size: 11px; color: var(--ink-2); }
+    .default-note strong { color: var(--ink); }
     .policy-code { background: var(--ink); color: #f3f0e5; border-radius: 17px; padding: 18px; font: 10px/1.8 var(--mono); }
     .policy-code .key { color: var(--rye-2); }
     .policy-code .value { color: #b9d2c4; }
@@ -217,7 +204,7 @@
     .delta-value { font-family: var(--serif); font-size: 23px; letter-spacing: -.03em; }
     .delta-label { font: 700 9px var(--mono); text-transform: uppercase; color: var(--ink-2); }
     .contract-proof { display: none; margin-top: 20px; border-radius: 16px; overflow: hidden; border: 1px solid var(--line); }
-    .contract-proof.open, body.technical .contract-proof { display: block; }
+    .contract-proof.open { display: block; }
     .proof-head { background: var(--ink); color: white; padding: 9px 12px; font: 800 10px var(--mono); display: flex; justify-content: space-between; }
     .proof-body { background: #f6f2e8; }
     .proof-row { display: grid; grid-template-columns: .72fr 1.28fr; border-top: 1px solid var(--line); }
@@ -300,42 +287,31 @@
     .footer-note { margin-top: 28px; display: flex; justify-content: space-between; gap: 30px; font: 10px/1.6 var(--mono); color: var(--ink-2); }
     .footer-note div:last-child { text-align: right; }
 
-    body.technical .human-only { display: none; }
-    .technical-only { display: none; }
-    body.technical .technical-only { display: initial; }
-    body.technical .trace-call { background: #dfe8e1; }
-
     @media (max-width: 960px) {
-      .hero-lede, .section-head, .model-grid, .trust-grid, .closing-card, .autonomy-panel { grid-template-columns: 1fr; gap: 26px; }
+      .hero-lede, .section-head, .model-grid, .trust-grid, .closing-card, .decision-panel { grid-template-columns: 1fr; gap: 26px; }
       .hero-map { grid-template-columns: 1fr; }
       .hero-map .map-arrow { height: 30px; transform: rotate(90deg); }
       .map-box { height: 150px; }
       .story-body { grid-template-columns: 1fr; }
       .conversation { border-right: 0; border-bottom: 1px solid var(--line); }
-      .contract-strip { grid-template-columns: 1fr 1fr; }
-      .contract-item:nth-child(2) { border-right: 0; }
-      .contract-item:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
-      .autonomy-levels, .simplicity-grid { grid-template-columns: 1fr 1fr; }
+      .decision-outcomes, .simplicity-grid { grid-template-columns: 1fr 1fr; }
       .gap-card { grid-template-columns: 64px 1fr; }
       .gap-evidence { grid-column: 2; border-left: 0; padding: 0; }
     }
     @media (max-width: 680px) {
       .shell { width: min(100% - 24px, 1180px); }
       .nav-links a { display: none; }
-      .mode-toggle button { padding: 7px 9px; }
       .hero { padding-top: 58px; }
       .hero h1 { font-size: clamp(48px, 16vw, 72px); }
       .hero-lede p { font-size: 20px; }
       .hero-map { padding: 14px; border-radius: 24px; }
       section { padding: 68px 0; }
-      .contract-strip { grid-template-columns: 1fr; }
-      .contract-item { border-right: 0; border-bottom: 1px solid var(--line); min-height: auto; }
       .story-top { align-items: flex-start; flex-direction: column; }
       .story-body, .conversation, .trace { min-width: 0; }
       .conversation, .trace { padding: 20px; }
       .delta-strip { grid-template-columns: repeat(2, 1fr); }
       .schema-lanes { grid-template-columns: 1fr 1fr; }
-      .autonomy-levels, .simplicity-grid { grid-template-columns: 1fr; }
+      .decision-outcomes, .simplicity-grid { grid-template-columns: 1fr; }
       .boundary { grid-template-columns: 1fr; gap: 8px; }
       .boundary-arrow { height: 24px; width: 1px; justify-self: center; }
       .boundary-arrow::after { transform: rotate(135deg); right: -3px; top: 17px; }
@@ -363,10 +339,6 @@
         <a href="#stories">Use cases</a>
         <a href="#model">Data model</a>
         <a href="#gaps">Gaps</a>
-        <div class="mode-toggle" aria-label="View mode">
-          <button id="humanMode" class="active" type="button">Human view</button>
-          <button id="contractMode" type="button">Contract view</button>
-        </div>
       </nav>
     </div>
   </header>
@@ -414,48 +386,26 @@
         <div class="section-head">
           <div>
             <div class="eyebrow">The operating vision</div>
-            <h2>Review is a bootstrap phase—not a permanent tax.</h2>
+            <h2>One decision. Three outcomes.</h2>
           </div>
-          <p>Humans approve the autonomy policy. Agents act inside it. Review teaches the system which patterns are safe to automate and remains the path for genuine exceptions.</p>
+          <p>Evidence, explicit instructions, authority, policy, confidence, and conflict state are inputs. Every proposed accepted write ends in <strong>allow</strong>, <strong>review</strong>, or <strong>deny</strong>.</p>
         </div>
-        <div class="contract-strip">
-          <article class="contract-item">
-            <div class="contract-number">01 / OBSERVE</div>
-            <h3>Capture automatically.</h3>
-            <p>Preserve relevant evidence and activity with provenance. Observation should not require a person to click “approve.”</p>
-          </article>
-          <article class="contract-item">
-            <div class="contract-number">02 / ACT</div>
-            <h3>Execute within policy.</h3>
-            <p>When authority, claim type, scope, evidence, and risk match an accepted rule, the agent completes the write.</p>
-          </article>
-          <article class="contract-item">
-            <div class="contract-number">03 / ESCALATE</div>
-            <h3>Ask on exception.</h3>
-            <p>Novel, sensitive, contradictory, low-confidence, or out-of-scope interpretations become candidates or disputes.</p>
-          </article>
-          <article class="contract-item">
-            <div class="contract-number">04 / ADAPT</div>
-            <h3>Turn repetition into policy.</h3>
-            <p>Repeated review outcomes propose a narrow autonomy rule. An administrator approves the rule once—not every matching case.</p>
-          </article>
-        </div>
-        <div class="autonomy-panel">
-          <div class="autonomy-ladder">
-            <h3>Four modes of agent autonomy</h3>
-            <p>The system chooses the lightest safe path for each interaction.</p>
-            <div class="autonomy-levels">
-              <div class="autonomy-level"><div class="level-num">Mode 0</div><strong>Observe</strong><span>Automatic evidence, events, artifacts, and audit.</span></div>
-              <div class="autonomy-level"><div class="level-num">Mode 1</div><strong>Direct</strong><span>The user’s explicit instruction is the approval. Do not ask twice.</span></div>
-              <div class="autonomy-level"><div class="level-num">Mode 2</div><strong>Policy-driven</strong><span>Auto-promote a familiar pattern inside a pre-approved envelope.</span></div>
-              <div class="autonomy-level"><div class="level-num">Mode 3</div><strong>Exception</strong><span>Escalate ambiguity, conflict, sensitivity, or policy drift.</span></div>
+        <div class="decision-panel">
+          <div class="decision-card">
+            <h3>The complete decision contract</h3>
+            <p>Observation may be preserved first. Promotion then has one bounded result.</p>
+            <div class="decision-outcomes">
+              <div class="decision-outcome allow"><strong>Allow</strong><span>Complete the write and preserve the policy decision.</span></div>
+              <div class="decision-outcome review"><strong>Review</strong><span>Keep the candidate. Ask only for the missing judgment.</span></div>
+              <div class="decision-outcome deny"><strong>Deny</strong><span>Write no accepted knowledge. Record the reason.</span></div>
             </div>
+            <div class="default-note"><strong>No policy on day one?</strong> A scoped semantic promotion returns <code>review</code>. Trusted local helpers continue to work as they do today.</div>
           </div>
           <div class="policy-card">
             <h3>A narrow rule, not broad trust</h3>
             <p>Example autonomy policy for account operations.</p>
             <div class="policy-code"><span class="key">WHEN</span> domain = <span class="value">account-updates</span><br /><span class="key">AND</span> claim = <span class="value">account_review_date</span><br /><span class="key">AND</span> authority = <span class="value">account_owner</span><br /><span class="key">AND</span> speech_act = <span class="value">confirmed</span><br /><span class="key">AND</span> evidence_ref = <span class="value">present</span><br /><span class="key">THEN</span> <span class="value">promote + audit</span></div>
-            <div class="policy-outcome"><div>✓ All conditions match<br />Agent acts</div><div>! Anything differs<br />Candidate review</div></div>
+            <div class="policy-outcome"><div>✓ All conditions match<br /><code>allow</code></div><div>! Anything incomplete<br /><code>review</code></div></div>
           </div>
         </div>
       </div>
@@ -465,10 +415,10 @@
       <div class="shell">
         <div class="section-head">
           <div>
-            <div class="eyebrow">Four autonomy modes in practice</div>
-            <h2>Agents act. Review catches the exceptions.</h2>
+            <div class="eyebrow">Four paths through one decision</div>
+            <h2>Same contract. Different access paths.</h2>
           </div>
-          <p>Some interactions execute automatically, some are directly authorized by the user, and some pause because judgment genuinely matters.</p>
+          <p>Secure API/MCP, scoped direct database, and trusted SQL all converge on the same Rye lifecycle and policy helpers.</p>
         </div>
         <div class="story-tabs" id="storyTabs" role="tablist" aria-label="Use case selector"></div>
         <div class="story-stage" aria-live="polite">
@@ -487,7 +437,7 @@
           </div>
           <div class="story-body">
             <div class="conversation">
-              <div class="pane-label"><span id="conversationLabel">Conversation</span><span class="live-dot">Simulated</span></div>
+              <div class="pane-label"><span>Conversation</span><span class="live-dot">Simulated</span></div>
               <div id="messages"></div>
             </div>
             <div class="trace">
@@ -495,7 +445,7 @@
               <div class="trace-list" id="traceList"></div>
               <div class="delta-strip" id="deltaStrip"></div>
               <div class="contract-proof" id="contractProof">
-                <div class="proof-head"><span>IMPLEMENTATION PROOF</span><span>repo snapshot · 2026-07-09</span></div>
+                <div class="proof-head"><span>IMPLEMENTATION REFERENCES</span><span>current repository</span></div>
                 <div class="proof-body" id="proofBody"></div>
               </div>
             </div>
@@ -642,10 +592,10 @@
   <script>
     const scenarios = [
       {
-        tab: "Account signal",
+        tab: "API/MCP · allow",
         title: "A familiar Slack signal is promoted by policy",
-        meta: "Customer success · policy-driven autonomy · automatic promotion",
-        surface: "external agent",
+        meta: "External agent · policy match · automatic promotion",
+        surface: "secure API/MCP · allow",
         review: { policy: true, status: "Policy match · auto-promoted", action: "Inspect why", accepted: "Policy trace verified", evidence: "authority: account_owner · speech act: confirmed · evidence: present · confidence 0.84" },
         messages: [
           { type: "user", who: "Maya · CSM", text: "Priya confirmed Acme’s security review moved to <strong>14 August</strong>. Capture it and keep the account current." },
@@ -664,32 +614,32 @@
         proof: [["Implemented", "scoped context · observations · candidates · capability-gated API promotion · provenance"], ["Policy data", "domain_authorities · domain_claim_policies · source_of_truth_policy · agent_autonomy_policy"], ["Vision gap", "one promotion-policy evaluator that returns allow · review · deny with reasons"]]
       },
       {
-        tab: "Meeting → work",
-        title: "A customer call produces evidence, not instant truth",
-        meta: "Meeting intelligence · source context · task promotion",
-        surface: "trusted intake",
-        review: { status: "2 proposed · 1 held", action: "Create task", accepted: "Task created", evidence: "fathom:call/8821 · content hash deduplicated" },
+        tab: "Scoped CLI · allow",
+        title: "A direct-database agent stays inside the function boundary",
+        meta: "Restricted DB credential · Rye token · rigid CLI",
+        surface: "scoped database · allow",
+        review: { policy: true, status: "Policy decision · allow", action: "Inspect decision", accepted: "Decision trace verified", evidence: "domain: project-delivery · authority: project owner · evidence: call/8821" },
         messages: [
-          { type: "user", who: "Niko · Product", text: "Turn today’s Northstar call into follow-up work. Keep anything uncertain out of the project plan." },
-          { type: "agent", who: "Meeting intake agent", text: "I found one explicit obligation, one possible date change, and one low-confidence product inference. The Fathom container still needs purpose confirmation, so I will not use its name as business context." },
-          { type: "system", who: "Rye review", text: "Task: send revised DPA by Friday. Fact: security review targets 14 August. Held: “Northstar prefers SSO-only onboarding.”", review: true },
-          { type: "agent", who: "Meeting intake agent", text: "The approved obligation is now a task with a <strong>promoted_to</strong> edge. The uncertain preference remains proposed and does not appear as accepted knowledge." }
+          { type: "user", who: "Niko · Project owner", text: "The Northstar call confirmed we owe a revised DPA by Friday. Record the follow-up task." },
+          { type: "agent", who: "Scoped database agent", text: "I’m connected with the restricted Rye transport credential. The CLI can call token-authenticated agent functions, but it cannot read or mutate core tables directly." },
+          { type: "system", who: "Rye decision", text: "<code>allow</code>: granted domain, project-owner authority, confirmed obligation, and evidence reference all matched.", review: true },
+          { type: "agent", who: "Scoped database agent", text: "Task created with candidate and source provenance. The CLI, API, and MCP use the same database promotion helper." }
         ],
         trace: [
-          { phase: "Preserve", call: "record_artifact(..., p_content_hash)", does: "Stores the transcript extract once and links it to its source event/node for replay and provenance." },
-          { phase: "Classify source", call: "rye.validate_source_context_update", does: "Treats the provider container as needs_confirmation; connector labels do not define organizational meaning." },
-          { phase: "Propose", call: "create_knowledge_candidate() × 3", does: "Creates task/fact/preference candidates with supported_by and derived_from edges to evidence and run context." },
-          { phase: "Review", call: "set_candidate_status()", does: "Moves selected candidates through proposed, needs_review, accepted, rejected, duplicate, or superseded states." },
-          { phase: "Accept task", call: "promote_candidate_to_task()", does: "Creates a task node, candidate provenance, promoted_to edge, promotion event, and accepted status." }
+          { phase: "Orient", call: "./scripts/rye agent context --domain project-delivery", does: "Uses the new scoped runtime tree. The existing rye context command remains a compatibility alias for trusted mode." },
+          { phase: "Observe", call: "./scripts/rye agent observe --input observation.json", does: "The CLI sends a parameterized call to the same token-authenticated observation helper used by the gateway." },
+          { phase: "Propose", call: "./scripts/rye agent propose --input candidate.json", does: "Creates a task candidate with evidence and an idempotency key; no raw INSERT is available to this credential." },
+          { phase: "Decide", call: "./scripts/rye agent evaluate --candidate <uuid>", does: "Returns allow, review, or deny with durable reason codes. No matching policy would return review." },
+          { phase: "Promote", call: "./scripts/rye agent promote --candidate <uuid>", does: "Calls the atomic policy-aware task promotion helper and returns the existing result on retry." }
         ],
-        delta: [["+4", "nodes"], ["+7", "edges"], ["+8", "events"], ["+5", "assertions"], ["+1", "artifact"]],
-        proof: [["Safety", "skills/rye-source-context-intake/SKILL.md · do not infer meaning from connector metadata"], ["Promotion", "0009_temporal_candidates.sql · promote_candidate_to_task()"], ["Dedup", "0004_agent_capabilities.sql · record_artifact(content_hash)"]]
+        delta: [["+3", "nodes"], ["+2", "edges"], ["+5", "events"], ["+3", "assertions"], ["+1", "decision"]],
+        proof: [["Implemented", "agent identities · tokens · capabilities · observations · candidates · task promotion"], ["Proposed", "restricted transport role · rye agent runtime CLI · atomic policy-aware promotion"], ["Boundary", "database roles limit transport access; Rye policy data decides business authority"]]
       },
       {
-        tab: "Future plan",
+        tab: "Trusted SQL · allow",
         title: "A planned deal stage is visible before it is true",
-        meta: "CRM · temporal assertions · as-of answers",
-        surface: "trusted planner",
+        meta: "Trusted direct database · explicit user instruction · temporal assertion",
+        surface: "trusted SQL · allow",
         review: { policy: true, status: "Direct user authority", action: "Inspect schedule", accepted: "Schedule verified", evidence: "opportunity OPP-2607-0042 · instructed by deal lead Maya" },
         messages: [
           { type: "user", who: "Maya · Deal lead", text: "Move Aurora to proposal next Monday—but until then, answer that it is still in discovery." },
@@ -708,10 +658,10 @@
         proof: [["Helper", "0120_profile_crm_future_scheduling.sql · schedule_deal_stage_change()"], ["Views", "current_valid_assertions · assertions_as_of(timestamptz)"], ["Tests", "tests/conformance/19_profile_future_scheduling.sql"]]
       },
       {
-        tab: "Disputed fact",
+        tab: "Exception · review",
         title: "Contradictory ownership survives until a person resolves it",
-        meta: "Mineral rights · assertion disputes · immutable history",
-        surface: "trusted diligence",
+        meta: "Contradiction · dispute path · human judgment",
+        surface: "trusted SQL · review",
         review: { status: "Active dispute", action: "Accept 1/8 claim", accepted: "Resolved · 1/8", evidence: "county filing 2024-0892 · title examiner Alice" },
         messages: [
           { type: "user", who: "Alice · Title examiner", text: "Our model says the Smith Trust owns 1/4. The county filing says 1/8. Do not overwrite either claim." },
@@ -846,16 +796,6 @@
       document.getElementById("detailButton").textContent = proof.classList.contains("open") ? "Hide contract" : "Show contract";
     });
 
-    const humanButton = document.getElementById("humanMode");
-    const contractButton = document.getElementById("contractMode");
-    function setMode(mode) {
-      document.body.classList.toggle("technical", mode === "contract");
-      humanButton.classList.toggle("active", mode === "human");
-      contractButton.classList.toggle("active", mode === "contract");
-      document.getElementById("conversationLabel").textContent = mode === "contract" ? "User intent + review gate" : "Conversation";
-    }
-    humanButton.addEventListener("click", () => setMode("human"));
-    contractButton.addEventListener("click", () => setMode("contract"));
     window.addEventListener("scroll", () => document.getElementById("header").classList.toggle("scrolled", window.scrollY > 12), { passive: true });
 
     renderScenario(0);

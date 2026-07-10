@@ -62,27 +62,14 @@ maturity and real adoption pressure, not fixed calendar promises.
 
 - Provide agents with compiled scope policy bundles before collection,
   classification, evidence extraction, or promotion.
-- Compile domain authority, claim policy, source confirmation, evidence,
-  confidence, classification, and agent capability into one temporal promotion
-  decision: `allow`, `review`, or `deny`, with durable reason codes.
-- Treat an authorized user's explicit scoped instruction as the approval for
-  that action. Do not require the same person to approve it a second time.
-- Keep semantic candidates as provenance even when an active policy allows
-  immediate promotion. Allow deterministic source-of-truth updates to take a
-  shorter path only when they still record the policy decision and source event.
+- Add one temporal `allow`, `review`, or `deny` promotion decision that accounts
+  for authority, policy, evidence, confidence, and scope.
 - Separate collector, classifier, evidence-extractor, promotion, dispute, and
   cleanup responsibilities.
 - Add audit trails for why an agent considered evidence relevant, why it chose a
   node/edge/assertion type, and which policy allowed or blocked the action.
-- Let repeated review outcomes propose a narrow autonomy rule. Require a
-  trusted administrator to activate that rule; agents cannot expand their own
-  authority.
-- Support agent-only handling after a scope policy makes the action safe enough,
-  and route only novel, sensitive, contradictory, low-confidence, or
-  out-of-policy cases to review.
-
-The proposed contract and delivery sequence are detailed in
-`design/model/agent-driven-autonomy.md`.
+- Let review outcomes propose a narrow autonomy rule without allowing agents to
+  activate their own authority.
 
 ## Graph Quality
 
@@ -96,14 +83,8 @@ The proposed contract and delivery sequence are detailed in
 ## Integration Surface
 
 - Support three explicit agent access modes: trusted direct SQL, scoped direct
-  database access through token-authenticated Rye functions and a rigid CLI,
-  and secure API/MCP access for external runtimes.
-- Keep business authorization in Rye policy data. Use a restricted database
-  transport role only to prevent scoped direct-database agents from bypassing
-  the approved function surface; never use database roles to decide domain
-  authority.
-- Make CLI, API, MCP, and trusted SQL guidance converge on the same lifecycle
-  and policy helpers so wrappers cannot drift.
+  database through a rigid CLI, and secure API/MCP, all converging on the same
+  Rye lifecycle and policy helpers.
 - Build repeatable Composio intake recipes that land source accounts,
   containers, source items, artifacts, context gaps, and pending confirmations
   without over-promoting business facts.

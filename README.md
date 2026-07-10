@@ -110,9 +110,8 @@ the fast-start commands.
 
 - `docs/onboarding.md` describes onboarding scopes, source/channel/context
   separation, expected contexts, context gaps, and plugin policy helpers.
-- `design/model/agent-driven-autonomy.md` proposes the agent-driven operating
-  model: policy-defined autonomy, exception review, secure consumption, and a
-  simple deploy/use/modify/consume contract.
+- `design/model/agent-driven-autonomy.md` proposes trusted SQL, scoped database,
+  and API/MCP access paths plus one policy-aware promotion decision.
 - `docs/roadmap.md` records the undated improvement roadmap.
 - `docs/conventions-catalog.md` lists graph conventions and type vocabulary.
 
