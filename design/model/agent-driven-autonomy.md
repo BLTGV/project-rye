@@ -9,6 +9,10 @@ This document defines two related contracts:
 1. how trusted and scoped agents enter Rye
 2. how an agent interpretation becomes accepted knowledge
 
+It also defines how temporal authority and process knowledge constrain that
+promotion decision. A conversation is evidence about operational state and
+governance state; it is not accepted state by itself.
+
 It does not design CDC payload migration, change cursors, materialized-view
 freshness, or retention. Those are separate proposals with different migration
 and compatibility requirements.
@@ -31,7 +35,9 @@ accepted write receives one decision:
 Observation is a pipeline stage, not an autonomy mode. An authorized user's
 explicit instruction is an authority input, not a separate decision type.
 Policy, evidence, classification, confidence, and conflict state are other
-inputs to the same `allow` / `review` / `deny` decision.
+inputs to the same `allow` / `review` / `deny` decision. For state transitions,
+the accepted state, process version, prerequisites, and authority assignments
+in effect at the requested time are inputs as well.
 
 ## Day-One Behavior
 
@@ -262,6 +268,90 @@ Membership inheritance:
 Backfill candidate membership from `target_payload.domain_keys`. Put other
 unclassified nodes in an admin worklist rather than inferring their domain.
 
+## Conversation And Governance Knowledge
+
+Conversation sources such as Slack contain evidence, not an implicit system of
+record. Model a Slack workspace as a `source_account`, a channel as a
+`source_container`, and a relevant message or thread as a `source_item` reached
+through a `retrieval_channel`.
+
+For each relevant message preserve:
+
+- stable workspace, channel, message, thread, and speaker references
+- source occurrence, edit, retrieval, and business-effective times separately
+- compact content or artifact references subject to classification and
+  retention policy
+- reply context and message lifecycle state
+- extracted speech act, confidence, and date quality
+
+The agent extracts operational candidates, such as a proposed deal-stage
+change, separately from governance candidates, such as a procedure, authority,
+delegation, or policy change. A channel name, job title, repeated behavior, or
+confident wording never establishes authority by itself.
+
+## Authority Resolution Contract
+
+Authority resolution follows this path:
+
+> authenticated source identity -> person -> temporal role or team membership
+> -> active domain authority -> permitted claim type and speech act
+
+Use stable Rye node references for person, team, and role authorities. Keep
+external text references for systems and sources. The implementation must
+define one canonical `authority_ref` representation and reject ambiguous or
+unresolved references.
+
+Role and team membership are temporal edges. Delegation is explicit and
+temporal. Resolve both at the candidate's requested effective time, not only at
+ingestion time.
+
+Do not use a generic numeric hierarchy. Distinguish responsibility through
+speech acts and claim scope:
+
+- a salesperson may report or propose a `deal_stage` transition
+- a sales manager may approve or decide it
+- a process owner may set or supersede the transition policy
+
+When two actors genuinely hold equal decision authority and disagree, preserve
+a dispute. Do not silently choose the actor with the higher title.
+
+Every deployment needs a small root of trust established during onboarding:
+confirmed identity mappings, process owners, and authorities permitted to set
+authority or process policy. Agents may propose changes to that root but may
+not activate their own authority.
+
+## Temporal Process Contract
+
+Keep the process convention-driven. Do not add domain-specific columns or a
+deal-state table to Rye Core.
+
+A stable `pipeline` or other process node identifies the process. Temporal
+assertions describe its behavior:
+
+- `process_definition` records states, initial state, and terminal states
+- `process_transition_policy` records one transition and its requirements
+
+Use stable assertion keys. A transition key should include the process,
+normalized source state set, and target state. Supersede process assertions
+when the process changes so an as-of query can reconstruct the rules that
+applied to an earlier decision.
+
+A `process_transition_policy` claim contains:
+
+- process key, allowed source states, and target state
+- roles or authorities that may propose, approve, decide, or reopen
+- required evidence and prior steps
+- whether an exception may be reviewed and who may approve it
+- impact and reversibility metadata
+
+For example, a salesperson may propose `proposal -> closed_lost`, while a sales
+manager must decide it and provide a loss reason. Until those conditions match,
+the accepted `deal_stage` does not change.
+
+Conversation can suggest a new procedure or policy. Record it as a `procedure`
+or `policy_change` candidate. Only an actor with applicable `policy_set`
+authority can promote or supersede the active process definition.
+
 ## Promotion Decision Contract
 
 Add an append-only promotion decision record containing:
@@ -280,9 +370,14 @@ The evaluator considers:
 - candidate and target domain membership
 - assertion or target type and stable key
 - authority kind and authority reference
+- confirmed source identity plus temporal role, team, and delegation resolution
 - speech act such as confirmed, approved, decided, suggested, or inferred
+- accepted subject state at the requested effective time
+- active process definition and transition policy at that time
+- transition prerequisites, required evidence, and exception policy
 - source confirmation status
 - evidence requirements
+- business date quality and source occurrence versus retrieval time
 - confidence policy
 - classification and sensitivity
 - impact and reversibility
@@ -294,12 +389,45 @@ Default results:
 
 - missing capability or ungranted domain: `deny`
 - no applicable promotion policy: `review`
+- unresolved identity or authority: `review`
+- an actor permitted to propose but not decide: `review`
+- missing process definition, transition rule, prerequisite, or evidence:
+  `review`
+- a transition explicitly marked non-overridable: `deny`
 - incomplete authority or evidence: `review`
 - contradiction: `review` through the dispute path
 - complete active policy match: `allow`
 
 Policy records are temporal. A decision retains the policy snapshot used at the
 time so later policy changes do not rewrite why the action occurred.
+
+For a state transition, the snapshot includes the accepted prior state,
+process definition, transition policy, resolved authority path, prerequisite
+results, evidence references, and date-quality basis.
+
+## Compliance Contract
+
+Keep decision compliance separate from operational compliance:
+
+- **Decision compliance** asks whether Rye was permitted to accept the change.
+- **Operational compliance** asks whether available evidence shows that the
+  business completed the required steps.
+
+Provide a derived view or function over promotion decisions with these results:
+
+- `compliant`
+- `approved_exception`
+- `missing_evidence`
+- `noncompliant`
+- `not_evaluable`
+
+Missing evidence is not proof of noncompliance. If Slack contains no legal
+approval, Rye reports the missing support; it does not assert that legal review
+never happened.
+
+Compliance uses the policy snapshot effective when the decision occurred.
+Applying today's process to an earlier decision is a separate retrospective
+analysis and must be labeled as such.
 
 ## Explicit User Instructions
 
@@ -394,21 +522,36 @@ Add tests for:
 - invalid candidate status transitions rejected
 - temporal authority and future-effective policy evaluation
 - explicit user instruction recorded without duplicate approval
+- source identity resolving through temporal role and team membership
+- an authorized proposer who lacks decision authority returning `review`
+- a manager decision matching the active transition policy returning `allow`
+- missing process definition, prerequisite, and evidence returning distinct
+  reason codes
+- process supersession preserving the policy used by an earlier decision
+- equal-authority contradictions entering the dispute path
+- Slack occurrence, edit, retrieval, and business-effective times remaining
+  distinct
+- compliance distinguishing missing evidence from proven noncompliance
 
 ## Delivery Sequence
 
 1. Close broad administrative routes to agent tokens.
 2. Reconcile and document trusted SQL, scoped DB, and secure API/MCP paths.
 3. Add constrained node-domain membership and domain-safe reads.
-4. Add append-only promotion decisions and idempotent promotion records.
-5. Implement the atomic policy-aware promotion helper with audit-only migration
+4. Define the authority-resolution and temporal process pattern contracts.
+5. Add append-only promotion decisions and idempotent promotion records.
+6. Implement the atomic process-aware promotion helper with audit-only migration
    support.
-6. Add the `rye agent` CLI and make API/MCP call the same SQL helpers.
-7. Opt confirmed domain and claim policies into enforcement incrementally.
+7. Add the compliance read model.
+8. Add the `rye agent` CLI and make API/MCP call the same SQL helpers.
+9. Opt confirmed domain, claim, and transition policies into enforcement
+   incrementally.
 
 ## Non-Goals
 
 - Agents do not activate their own authority.
+- Conversation frequency, channel names, and job titles do not establish
+  authority or process policy.
 - The transport database role does not become a business authorization model.
 - Trusted administrative helpers are not removed.
 - Local installations do not require an API gateway.

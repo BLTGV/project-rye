@@ -368,7 +368,7 @@
             <div class="map-kicker">02 · Agent boundary</div>
             <div class="map-title">Read, act, learn.<br />Escalate exceptions.</div>
             <div class="map-copy">Use scoped API/MCP externally and lifecycle-safe SQL helpers locally.</div>
-            <div class="map-tags"><span class="map-tag">policy</span><span class="map-tag">evidence</span></div>
+            <div class="map-tags"><span class="map-tag">policy</span><span class="map-tag">process</span><span class="map-tag">evidence</span></div>
           </div>
           <div class="map-arrow" aria-hidden="true"></div>
           <div class="map-box rye">
@@ -388,7 +388,7 @@
             <div class="eyebrow">The operating vision</div>
             <h2>One decision. Three outcomes.</h2>
           </div>
-          <p>Evidence, explicit instructions, authority, policy, confidence, and conflict state are inputs. Every proposed accepted write ends in <strong>allow</strong>, <strong>review</strong>, or <strong>deny</strong>.</p>
+          <p>Evidence, explicit instructions, temporal authority, active process, accepted prior state, confidence, and conflict state are inputs. Every proposed accepted write ends in <strong>allow</strong>, <strong>review</strong>, or <strong>deny</strong>.</p>
         </div>
         <div class="decision-panel">
           <div class="decision-card">
@@ -415,7 +415,7 @@
       <div class="shell">
         <div class="section-head">
           <div>
-            <div class="eyebrow">Four paths through one decision</div>
+            <div class="eyebrow">Five interactions through one decision</div>
             <h2>Same contract. Different access paths.</h2>
           </div>
           <p>Secure API/MCP, scoped direct database, and trusted SQL all converge on the same Rye lifecycle and policy helpers.</p>
@@ -486,7 +486,7 @@
               <div class="guard"><div class="guard-top"><div class="guard-icon">↗</div><h4>Domain-scoped capability grants</h4></div><p><code>agent_identities</code>, tokens, grants, authority records, and channel subscriptions limit external agents.</p></div>
               <div class="guard"><div class="guard-top"><div class="guard-icon">≠</div><h4>Candidate before authority</h4></div><p>Collectors can propose without gaining permission to promote accepted organizational knowledge.</p></div>
               <div class="guard"><div class="guard-top"><div class="guard-icon">⏱</div><h4>Current is not future</h4></div><p><code>current_valid_assertions</code> answers now; <code>assertions_as_of()</code> reconstructs another time.</p></div>
-              <div class="guard"><div class="guard-top"><div class="guard-icon">◉</div><h4>Every decision can be traced</h4></div><p>Candidate edges, source refs, events, actor fields, and agent action logs explain how knowledge arrived.</p></div>
+              <div class="guard"><div class="guard-top"><div class="guard-icon">◉</div><h4>Process and authority are temporal</h4></div><p>Every decision preserves the prior state, process version, authority path, evidence, and reasons that applied at the time.</p></div>
               <div class="guard"><div class="guard-top"><div class="guard-icon">⇄</div><h4>Operational systems stay authoritative</h4></div><p><code>link_record()</code> and <code>track_table()</code> connect domain rows without making those systems point back to Rye.</p></div>
             </div>
           </div>
@@ -519,7 +519,7 @@
             <div class="eyebrow">Autonomy is configured</div>
             <h2>Authority is data—not a prompt convention.</h2>
           </div>
-          <p>Capabilities answer “may this agent attempt the verb?” Domain authorities and claim policies should answer “may this interpretation become accepted knowledge without review?”</p>
+          <p>Capabilities answer “may this agent attempt the verb?” Domain authorities, accepted process, prior state, and claim policies should answer “may this interpretation become accepted knowledge without review?”</p>
         </div>
         <div class="trust-grid">
           <div class="trust-card">
@@ -567,7 +567,7 @@
           <article class="gap-card p0"><div class="gap-priority">P0</div><div><h3>Authenticated read routes are not consistently capability- or domain-scoped.</h3><p>When API auth is required, a bearer token is mandatory—but routes such as node search/detail, graph, events, disputes, dashboards, and workspaces call admin-scoped queries without a route-level domain capability check. Any valid agent token may be able to read beyond its grant.</p></div><div class="gap-evidence"><strong>Evidence</strong><code>admin/src/server/worker.ts</code><br /><code>admin/src/server/queries.ts</code><br />admin CTE sets <code>app.current_role=admin</code></div></article>
           <article class="gap-card p0"><div class="gap-priority">P0</div><div><h3>CDC events can preserve full sensitive domain rows.</h3><p><code>capture_domain_change()</code> puts complete <code>old</code> and <code>new</code> row JSON into event properties. Field redaction is implemented for node properties, not event payloads, so node visibility can expose fields that would otherwise be redacted.</p></div><div class="gap-evidence"><strong>Evidence</strong><code>0005_function_fixes.sql</code><br /><code>0006_security_config.sql</code><br />redaction target: node JSONB</div></article>
           <article class="gap-card p1"><div class="gap-priority">P1</div><div><h3>The secure MCP cannot yet answer ordinary entity questions.</h3><p><code>rye.get_context_pack</code> returns domains, authority, policies, and open candidates—but not accepted assertions, nodes, relationships, or recent events. The secure MCP does not expose the API's node knowledge endpoints, so “what changed on Acme?” is not yet an end-to-end secure-MCP workflow.</p></div><div class="gap-evidence"><strong>Evidence</strong><code>agent_get_context_pack()</code><br /><code>rye_api_mcp_server.mts</code><br />context ≠ accepted knowledge</div></article>
-          <article class="gap-card p1"><div class="gap-priority">P1</div><div><h3>Autonomy policy is recorded, but not compiled into the promotion decision.</h3><p>Rye stores domain authorities, claim policies, source-of-truth policy, and agent autonomy policy. The promotion API currently checks the broad <code>rye.authoritative.promote</code> capability, then calls the lifecycle helper. It does not appear to evaluate claim type, authority basis, speech act, evidence, confidence, and risk as one explainable allow/review decision.</p></div><div class="gap-evidence"><strong>Needed</strong><code>authorize_candidate_promotion()</code><br />allow · review · deny + reasons<br /><strong>Evidence</strong> <code>0016_agent_domain_security.sql</code> · <code>worker.ts</code></div></article>
+          <article class="gap-card p1"><div class="gap-priority">P1</div><div><h3>Authority and process policy are recorded, but not compiled into the promotion decision.</h3><p>Rye stores domain authorities, claim policies, source-of-truth policy, procedures, and agent autonomy policy. The promotion API currently checks the broad <code>rye.authoritative.promote</code> capability, then calls the lifecycle helper. It does not evaluate temporal identity and role resolution, prior accepted state, transition policy, prerequisites, speech act, evidence, confidence, and risk as one explainable decision.</p></div><div class="gap-evidence"><strong>Needed</strong><code>evaluate_candidate_promotion()</code><br />allow · review · deny + reasons<br />policy + process snapshot<br /><strong>Evidence</strong> <code>0012</code> · <code>0013</code> · <code>0016</code> · <code>worker.ts</code></div></article>
           <article class="gap-card p1"><div class="gap-priority">P1</div><div><h3>Reviewer capabilities exist, but reviewer MCP tools do not.</h3><p>The API implements candidate status changes, generic promotion, source-policy acceptance, and CRM/PM plan acceptance. The secure MCP only registers review-queue reads; a reviewer agent must fall back to REST, the admin UI, or trusted SQL to finish the loop.</p></div><div class="gap-evidence"><strong>Evidence</strong><code>worker.ts</code> promotion routes<br /><code>rye_api_mcp_server.mts</code><br />no adjudicate/promote tools</div></article>
           <article class="gap-card p2"><div class="gap-priority">P2</div><div><h3>Profile read models can be stale after agent writes.</h3><p><code>opportunities_active</code>, <code>contacts_directory</code>, and <code>task_board</code> are materialized. Refresh is manual through <code>refresh_materialized_views()</code>, so a chat agent can write a new assertion and a workspace can still show the old state.</p></div><div class="gap-evidence"><strong>Evidence</strong><code>0100_profile_crm.sql</code><br /><code>0110_profile_pm.sql</code><br /><code>refresh_materialized_views()</code></div></article>
           <article class="gap-card p2"><div class="gap-priority">P2</div><div><h3>Documentation trails the executable agent surface.</h3><p>The admin README still describes authentication as a stub, while token auth and capability enforcement are implemented. The data dictionary omits newer agent-domain security tables and key workflows from migrations 0009–0016.</p></div><div class="gap-evidence"><strong>Evidence</strong><code>admin/README.md</code><br /><code>docs/data-dictionary.md</code><br /><code>0016_agent_domain_security.sql</code></div></article>
@@ -591,6 +591,29 @@
 
   <script>
     const scenarios = [
+      {
+        tab: "Slack deal · review",
+        title: "A salesperson says the deal is dead; policy keeps it open",
+        meta: "Conversation evidence · temporal authority · process validation",
+        surface: "secure API/MCP · review → allow",
+        review: { policy: true, status: "Review · proposer cannot decide", action: "Inspect why", accepted: "Process trace verified", evidence: "accepted stage: proposal · candidate: closed_lost · authority.may_propose_not_decide · loss reason missing" },
+        messages: [
+          { type: "user", who: "Jordan · Salesperson", text: "Aurora is dead. We should close it out." },
+          { type: "agent", who: "Deal memory agent", text: "I preserved that as a <strong>closed_lost candidate</strong>, not accepted state. Jordan may propose this transition, but the active process requires a sales manager to decide and a loss reason to be present." },
+          { type: "system", who: "Rye decision", text: "<code>review</code>: authority.may_propose_not_decide · evidence.loss_reason_missing. Accepted deal stage remains <strong>proposal</strong>.", review: true },
+          { type: "user", who: "Maya · Sales manager", text: "It is not dead. Procurement moved the decision to next week; keep it in proposal." },
+          { type: "agent", who: "Deal memory agent", text: "Maya’s manager role and <code>decided</code> speech act match the process in effect today. The closure candidate is rejected, the next action is updated, and the full conversation remains evidence." }
+        ],
+        trace: [
+          { phase: "Preserve source", call: "source_account → source_container → source_item", does: "Stores stable Slack workspace, channel, message, thread, speaker, occurrence, edit, and retrieval references without treating the channel as authority." },
+          { phase: "Propose state", call: "agent_create_candidate(deal_stage = closed_lost)", does: "Records Jordan’s authority basis, speech act, confidence, date quality, and evidence refs. Accepted deal state is unchanged." },
+          { phase: "Resolve authority", call: "identity → person → temporal role → domain_authorities", does: "Finds that Jordan may propose deal-stage changes but may not decide this transition." },
+          { phase: "Validate process", call: "process_definition + process_transition_policy", does: "Evaluates proposal → closed_lost against the process version effective at the message time and reports the missing manager decision and loss reason." },
+          { phase: "Apply manager decision", call: "evaluate + reject candidate + preserve state", does: "Maya’s active manager authority matches. Rye keeps proposal accepted, records the decision snapshot, and retains Jordan’s message as history rather than overwriting it." }
+        ],
+        delta: [["+2", "source items"], ["+2", "candidates"], ["+2", "decisions"], ["+0", "stage changes"], ["1", "process trace"]],
+        proof: [["Implemented", "Slack-shaped source account/container/item · candidate authority basis · speech act · evidence · temporal assertions"], ["Proposed", "identity/role resolver · process transition contract · policy snapshot · compliance view"], ["Invariant", "conversation never changes accepted state without authority and process evaluation"]]
+      },
       {
         tab: "API/MCP · allow",
         title: "A familiar Slack signal is promoted by policy",
