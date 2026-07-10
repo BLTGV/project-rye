@@ -238,9 +238,10 @@
     the picture current. People stay in charge of what counts as true.
   </p>
   <p>
-    The operating rule is simple: <strong>people approve the boundaries once;
-    agents work inside them; anything unusual comes back to a person.</strong>
-    No approval fatigue, and no agent ever expands its own authority.
+    The operating rule is simple: <strong>people activate and revisit the
+    boundaries; agents work inside them; anything unusual comes back to a
+    person.</strong> Routine work does not require repeated approval, and no
+    agent ever expands its own authority.
   </p>
   <p>
     <strong>Where this stands:</strong> the memory itself — evidence, accepted
@@ -255,10 +256,10 @@
   <div class="kicker"><span class="num">02</span><h2>What the business gets</h2></div>
   <div class="benefits">
     <div class="benefit"><h4>Nothing walks out the door</h4>
-      <p>What departing employees knew — who owns what, why a decision was made, where a deal stood — stays in the memory and stays answerable.</p></div>
+      <p>Knowledge captured from day-to-day work — who owns what, why a decision was made, where a deal stood — remains answerable when people move on.</p></div>
     <div class="benefit"><h4>Answers with receipts</h4>
       <p>Every accepted fact traces back to who said it, where, and when. No more "I think someone mentioned it in a meeting."</p></div>
-    <div class="benefit"><h4>Routine upkeep, zero meetings</h4>
+    <div class="benefit"><h4>Routine upkeep, fewer meetings</h4>
       <p>Status changes, follow-up tasks, and record updates happen automatically when they match rules a person approved.</p></div>
     <div class="benefit"><h4>People judge the exceptions</h4>
       <p>New, sensitive, or conflicting items queue for quick human review — judgment where it matters, not clicks on everything.</p></div>
@@ -359,12 +360,12 @@
   </figure>
 
   <ol class="steps">
-    <li><b>Listen.</b> Rye watches the sources you connect — team chat, meeting
-      transcripts, email, documents, and the databases behind your existing
-      apps. Nothing is asked of the people doing the work.</li>
-    <li><b>Remember.</b> Everything relevant is preserved as evidence: who said
-      it, where, and when. Evidence is memory of what happened — it is
-      <em>not yet</em> treated as fact.</li>
+    <li><b>Listen.</b> After a person confirms a narrow scope and source
+      boundaries, Rye watches the approved sources — team chat, meeting
+      transcripts, email, documents, and connected applications.</li>
+    <li><b>Remember.</b> Evidence selected by the scope, classification, and
+      retention policy preserves who said it, where, and when. It is
+      <em>not yet</em> treated as accepted knowledge.</li>
     <li><b>Suggest.</b> An agent reads the evidence and proposes what it means:
       "this deal sounds lost," "Niko agreed to update the safety doc by
       Friday," "this invoice contact has changed."</li>
@@ -377,9 +378,10 @@
       trail — the evidence, the rule that allowed it, the person or agent that
       acted — and with effective dates, so plans and history stay distinct
       from today's truth.</li>
-    <li><b>Learn.</b> When people approve the same kind of suggestion again and
-      again, Rye drafts a rule from those decisions and shows its track record.
-      A person reviews and switches it on. Review shrinks to the exceptions.</li>
+    <li><b>Learn.</b> Proposed discovery tooling can notice repeated human
+      decisions, draft a rule, and show its track record. A person with
+      <code>policy_set</code> authority reviews and activates it. Review then
+      shrinks to the exceptions.</li>
   </ol>
 
   <div class="pull">
@@ -416,7 +418,7 @@
       </g>
       <g fill="var(--ink-soft)" class="svg-sub" font-size="12.5">
         <text x="40" y="102">Learned by observing day-to-day</text>
-        <text x="40" y="120">activity. No setup required.</text>
+        <text x="40" y="120">activity, after a source scope is set.</text>
         <text x="342" y="102">Org charts and process docs,</text>
         <text x="342" y="120">loaded on day one or year two.</text>
         <text x="645" y="102">Skipped steps, unused rules,</text>
@@ -445,18 +447,20 @@
 
   <h3>Start empty — value on day one</h3>
   <p>
-    Connect sources and do nothing else. Everything is remembered, every
-    suggestion asks first, and within days you can ask questions no single
-    app could answer: <em>how do deals actually move? who really decides?</em>
-    Rye drafts a picture of your working process from what it observes.
+    Confirm one limited workflow, its source boundaries, and its retention and
+    review policy. Then connect relevant sources. Evidence can accumulate before
+    the official process is known, while every semantic promotion without a
+    matching rule asks first. The resulting history can answer questions no
+    single app could: <em>how do deals actually move? who appears to decide?</em>
   </p>
 
   <h3>Feed the official picture — whenever it exists</h3>
   <p>
-    Load the org chart; import the process documents. They become the rulebook
-    directly — no observation period required. Fed knowledge isn't privileged,
-    though: it's checked against reality like everything else, so a stale org
-    chart gets flagged rather than silently trusted.
+    Load the org chart; import the process documents. They enter as
+    authoritative candidates with provenance. An applicable source policy and
+    an actor with <code>policy_set</code> authority must activate them; no
+    observation period is required. Once active, they are still compared with
+    observed practice, so stale documentation can be surfaced.
   </p>
 
   <h3>Compare — where compliance and improvement live</h3>
@@ -471,8 +475,9 @@
 
   <div class="pull">
     These three modes work independently, together, or in any order over time.
-    Knowledge accumulated before the rules existed is never lost; rules fed
-    before any observation still enforce from day zero.
+    Evidence accumulated before the rules existed is never lost. Rules loaded
+    before any observation begin to govern only after activation and from their
+    recorded effective time.
   </div>
 </section>
 
@@ -518,13 +523,13 @@
 
   <h3>Observed and authoritative process, side by side</h3>
   <p>
-    Process knowledge keeps two stances with shared keys and distinct
-    assertion types: <code>observed_process_transition</code> (descriptive —
+    Process knowledge keeps two stances with shared comparison vocabulary and
+    distinct assertion types: <code>observed_process_transition</code> (descriptive —
     what happened, with evidence) and <code>process_definition</code> /
     <code>process_transition_policy</code> (normative — what's permitted, set
     only by <code>policy_set</code> authority). The evaluator can only bind
     the normative lineage, by construction. Divergence between them is a
-    derived view — <em>unmodeled transitions, dead policy steps, authority
+    derived view — <em>unmodeled transitions, unobserved policy transitions, authority
     divergence</em> — feeding compliance reporting and
     <code>policy_change</code> candidates. Neither lineage ever writes to the
     other, which is what makes the three on-ramps in §04 order-independent.
@@ -554,6 +559,31 @@
     <li>Conflicting claims coexist as disputes until an authority resolves them; the losing claim remains part of history.</li>
     <li>Compliance findings distinguish <em>noncompliant</em> from <em>missing evidence</em>; absence of a Slack message is never proof a step didn't happen.</li>
   </ul>
+
+  <h3>Seven known implementation gaps</h3>
+  <ol class="steps">
+    <li><b>Agent read boundary.</b> Broad administrative routes must be closed
+      and allowlisted agent reads must be domain-filtered. Draft PR #2 addresses
+      the route boundary; domain-safe review, domain, and audit reads remain part
+      of that work.</li>
+    <li><b>CDC data protection.</b> Change events can retain complete old and new
+      domain rows. Payload migration and read-time protection for existing
+      immutable events require a separate security proposal.</li>
+    <li><b>Secure knowledge reads.</b> The secure MCP context pack cannot yet
+      answer ordinary entity questions from accepted assertions, relationships,
+      and recent events.</li>
+    <li><b>Process-aware promotion.</b> Authority, process, evidence, and risk are
+      recorded but are not yet compiled into one atomic, explainable
+      <code>allow</code>, <code>review</code>, or <code>deny</code> decision.</li>
+    <li><b>Reviewer agent tools.</b> Reviewer capabilities and API routes exist,
+      but secure MCP tools do not yet complete adjudication and promotion.</li>
+    <li><b>Read-model freshness.</b> CRM and PM materialized views can remain
+      stale until an explicit refresh; freshness metadata and policy are still
+      needed.</li>
+    <li><b>Documentation parity.</b> CLI administration is documented, but the
+      data dictionary and some admin deployment documentation still trail the
+      executable agent surface.</li>
+  </ol>
 
   <h3>Worked examples</h3>
   <details>
@@ -596,12 +626,13 @@
   <h3>Honest status</h3>
   <p>
     Implemented today: the core memory (entities, events, assertions,
-    disputes, temporal reads), agent identities and capabilities, candidate
-    workflow, admin/agent route separation, and the governed-process claim
-    contracts. Proposed and sequenced: the policy evaluator, domain
-    membership, the scoped runtime CLI, discovery tooling, and the divergence
-    read model. This document describes the target; the design docs carry the
-    delivery order.
+    disputes, temporal reads), agent identities and capabilities, and the
+    candidate workflow. Draft PR #2 implements the initial admin/agent route
+    separation; draft PR #3 defines governed-process and Slack-source claim
+    contracts. Proposed and sequenced: domain-safe reads, the policy evaluator,
+    domain membership, the scoped runtime CLI, discovery tooling, and the
+    divergence read model. This document describes the target; the design docs
+    carry the delivery order.
   </p>
 </section>
 

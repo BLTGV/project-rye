@@ -358,18 +358,20 @@ Process knowledge exists in two stances that must coexist without merging:
 
 - **Observed** process describes how work actually flowed: which states
   occurred, which transitions happened, who initiated and who decided them.
-  It is descriptive accepted knowledge with evidence. It makes no claim about
-  what is permitted.
+  Source observations and events preserve the evidence. A derived observed
+  assertion is descriptive knowledge and makes no claim about what is
+  permitted.
 - **Authoritative** process prescribes how work must flow. Only it binds the
   promotion evaluator. It is established by feeding structured sources such as
   an org chart or process document, or by activating a proposed rule, and in
   both cases only through an actor with applicable `policy_set` authority.
 
-Both stances use the same claim shapes and the same process and transition
-keys so they can be compared mechanically. They use distinct assertion types,
-for example `observed_process_definition` and
-`observed_process_transition`, so the evaluator cannot bind to the observed
-lineage by construction.
+Both stances share a comparison vocabulary normalized to
+`(process_key, from_state, to_state)`. They use stance-specific claim shapes,
+assertion keys, and assertion types. Authoritative
+`process_transition_policy` records transition requirements;
+`observed_process_transition` records evidenced occurrences within a closed
+window. The evaluator cannot bind to the observed lineage by construction.
 
 Required properties:
 
@@ -377,9 +379,11 @@ Required properties:
    process exists, authoritative knowledge may be fed before any observation
    exists, and either may arrive later. Neither writes to the other's lineage.
 2. **Observed knowledge accumulates under an unknown process.** Mined
-   descriptive claims promote under a lenient default policy because they
-   assert only that behavior occurred, with evidence. This makes an
-   unconfigured install queryable about actual behavior from day one.
+   source observations and immutable events can accumulate before a process is
+   known. A derived observed-process assertion follows the normal candidate and
+   promotion contract: no matching policy returns `review`. A deterministic
+   evidence projection may promote automatically only under an explicit active
+   source or evidence policy. There is no second lenient default.
 3. **Observed never becomes authoritative automatically.** Discovery emits
    authoritative-process candidates from the observed lineage. Activation
    requires `policy_set` authority. Drafts are presented as observed practice,
@@ -400,8 +404,8 @@ For a window and process, classify:
 - observed transitions covered by active policy: routine
 - observed transitions absent from active policy: unmodeled transitions —
   candidate noncompliance or evidence that the documented process is wrong
-- authorized transitions never observed: dead policy steps — process debt or
-  training gaps
+- policy transitions not observed during a window with known opportunities:
+  unobserved policy transitions — possible process debt or training gaps
 - observed deciders absent from active authority: authority divergence —
   candidate noncompliance or a stale org chart
 
@@ -489,8 +493,8 @@ observation has accumulated, the resulting backward-looking divergence report
 is exactly this labeled retrospective analysis, not a compliance verdict.
 
 Operational compliance additionally reports the divergence classes from
-Observed And Authoritative Process: unmodeled transitions, dead policy steps,
-and authority divergence.
+Observed And Authoritative Process: unmodeled transitions, unobserved policy
+transitions, and authority divergence.
 
 ## Explicit User Instructions
 
@@ -550,37 +554,39 @@ evidence, and history. External wrappers do not expose raw SQL.
 
 ## Vocabulary Contract
 
-Internal vocabulary is canonical. Plain language is a presentation register at
-the human boundary, not a second vocabulary.
+Machine identifiers are canonical. Plain language is a presentation register
+at the human boundary, not an alternate authorization or storage contract.
 
-- Schema names, function names, API fields, reason codes, and audit records
-  use only internal vocabulary. Nothing durable is stored in plain language.
+- Schema names, function names, API fields, categorical values, and reason
+  codes use canonical internal identifiers.
+- Durable records may contain human labels, statements, summaries, and reasons.
+  That text is explanatory and never substitutes for the canonical code or
+  structured value used to make a decision.
 - When an agent addresses a non-technical person — chat, review requests,
-  reports, exception explanations — it renders internal concepts through one
-  canonical lexicon and accepts plain-language instructions by mapping them
-  back to internal operations.
-- Plain rendering never replaces the precise record. A decision shown as
-  "asking a person: only a sales manager can decide this" carries its reason
-  codes with it, available on request.
-- The lexicon is data, versioned in the repository, and included in the agent
-  context pack so every wrapper renders the same terms. A translation change
-  lands once, in the lexicon, not in four surfaces.
-- Scopes may localize plain terms (a team that says "deal" instead of
-  "opportunity") through the existing scope convention registry. Internal
-  names never localize.
+  reports, or exception explanations — it renders internal concepts through
+  one versioned lexicon and maps plain-language instructions back to canonical
+  operations before calling CLI, API, MCP, or SQL helpers.
+- A decision shown as "needs a decision: only a sales manager can decide this"
+  retains its reason codes and policy snapshot. Where replay of the exact
+  rendering matters, record the lexicon version alongside the rendered text.
+- The repository owns the default lexicon. Agent-facing adapters use the same
+  version; the database does not require every human sentence to come from it.
+- Scopes may localize display terms through the existing convention registry.
+  Internal identifiers and reason codes never localize.
 
 Starter lexicon:
 
 | Internal | Plain register |
 |---|---|
-| observation, source item | something Rye remembered; evidence |
+| observation | something Rye noticed |
+| source item | a record from a connected source |
 | candidate | suggestion |
 | promotion | acceptance |
-| assertion | accepted fact |
+| assertion | recorded claim; accepted knowledge when current and authoritative |
 | promotion policy, autonomy rule | rule; the rulebook |
 | decision `allow` | act on it |
-| decision `review` | ask a person |
-| decision `deny` | refuse |
+| decision `review` | needs more information or a decision |
+| decision `deny` | cannot act |
 | dispute | open disagreement |
 | supersession | replaced by a newer fact |
 | effective time | when it is true |
@@ -591,15 +597,17 @@ Starter lexicon:
 | observed process | how work actually flows |
 | authoritative process | the official process |
 | divergence | difference between practice and policy |
-| source identity | a confirmed account of a real person |
+| source identity | an account or identity observed in a source; confirmation is separate |
 
 Conformance for this contract:
 
-- every reason code shipped to an interface has a plain rendering; an
-  unmapped code is a test failure, not a fallback string
-- plain-language instructions round-trip to the same internal operation across
-  CLI, API, and MCP wrappers
-- audit records contain no plain-register strings
+- every reason code shown on a human surface has a versioned plain rendering
+- agent-facing adapters map equivalent plain-language instructions to the same
+  canonical operation and payload
+- wrapper responses and audit records retain canonical codes even when they
+  also contain human summaries
+- rendered decision snapshots identify the lexicon version when exact replay is
+  required
 
 ## Out Of Scope Follow-Ups
 
@@ -651,8 +659,8 @@ Add tests for:
 - observed and authoritative process lineages accepted in either order without
   cross-writes
 - the evaluator unable to bind an observed-process assertion as policy
-- divergence reporting unmodeled transitions, dead policy steps, and authority
-  divergence without mutating either lineage
+- divergence reporting unmodeled transitions, unobserved policy transitions,
+  and authority divergence without mutating either lineage
 
 ## Delivery Sequence
 
