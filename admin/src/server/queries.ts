@@ -105,6 +105,51 @@ export async function authorizeAgentAction(
   return rows[0]?.payload as AgentAuthorizationResult;
 }
 
+export async function recordAgentActionOutcome(
+  sql: Sql,
+  input: {
+    agentId: string;
+    action: string;
+    capability: string;
+    allowed: boolean;
+    domainKeys?: string[];
+    scopeRef?: string | null;
+    targetRef?: string | null;
+    reason?: string | null;
+    request?: Record<string, unknown>;
+    result?: Record<string, unknown>;
+  }
+): Promise<void> {
+  await sql.unsafe(
+    withAdminCte() +
+      `SELECT rye.record_agent_action(
+         p_agent_id    := $1::uuid,
+         p_action      := $2::text,
+         p_capability  := $3::text,
+         p_allowed     := $4::boolean,
+         p_domain_keys := $5::text[],
+         p_scope_ref   := $6::text,
+         p_target_ref  := $7::text,
+         p_reason      := $8::text,
+         p_request     := $9::jsonb,
+         p_result      := $10::jsonb
+       )
+       FROM cfg`,
+    [
+      input.agentId,
+      input.action,
+      input.capability,
+      input.allowed,
+      input.domainKeys ?? [],
+      input.scopeRef ?? null,
+      input.targetRef ?? null,
+      input.reason ?? null,
+      jsonParam(input.request ?? {}),
+      jsonParam(input.result ?? {}),
+    ]
+  );
+}
+
 export async function fetchCandidateAccessEnvelope(
   sql: Sql,
   candidateId: string
@@ -145,7 +190,7 @@ export async function fetchCandidateAccessEnvelope(
 
 export async function fetchDomains(
   sql: Sql,
-  opts: { includeProperties?: boolean } = {}
+  opts: { includeProperties?: boolean; agentId?: string | null } = {}
 ) {
   const rows = await sql.unsafe(
     withAdminCte() +
@@ -157,7 +202,20 @@ export async function fetchDomains(
            kd.label,
            kd.purpose,
            kd.owner_node_id::text AS owner_node_id,
-           CASE WHEN $1::boolean THEN kd.properties ELSE '{}'::jsonb END AS properties,
+           CASE
+             WHEN $1::boolean
+              AND (
+                $2::uuid IS NULL
+                OR rye.has_agent_capability(
+                  $2::uuid,
+                  'rye.domain.admin',
+                  ARRAY[kd.domain_key],
+                  NULL
+                )
+              )
+             THEN kd.properties
+             ELSE '{}'::jsonb
+           END AS properties,
            kd.created_at,
            kd.updated_at,
            COALESCE((
@@ -185,8 +243,17 @@ export async function fetchDomains(
            ), '[]'::json) AS channel_subscriptions
          FROM rye.knowledge_domains kd, cfg
          WHERE kd.archived_at IS NULL
+           AND (
+             $2::uuid IS NULL
+             OR rye.has_agent_capability(
+               $2::uuid,
+               'rye.context.read',
+               ARRAY[kd.domain_key],
+               NULL
+             )
+           )
        ) d`,
-    [opts.includeProperties ?? false]
+    [opts.includeProperties ?? false, opts.agentId ?? null]
   );
   return rows[0]?.domains ?? [];
 }
@@ -1446,6 +1513,7 @@ export interface CandidateReviewQueueOptions {
   includeClosed?: boolean;
   limit?: number;
   offset?: number;
+  agentId?: string | null;
 }
 
 export async function fetchCandidateReviewQueue(
@@ -1454,7 +1522,7 @@ export async function fetchCandidateReviewQueue(
 ) {
   const rows = await sql.unsafe(
     withAdminCte() +
-      `, candidate_base AS (
+      `, candidate_source AS (
          SELECT
            n.id,
            n.id::text AS id_text,
@@ -1468,7 +1536,19 @@ export async function fetchCandidateReviewQueue(
            n.properties->>'statement' AS statement,
            n.properties->>'normalized_key' AS normalized_key,
            n.properties->>'created_by' AS created_by,
-           n.properties->>'confidence' AS confidence_text
+           n.properties->>'confidence' AS confidence_text,
+           ARRAY(
+             SELECT DISTINCT rye.rye_slugify_key(value)
+             FROM jsonb_array_elements_text(
+               CASE
+                 WHEN jsonb_typeof(n.properties->'target_payload'->'domain_keys') = 'array'
+                   THEN n.properties->'target_payload'->'domain_keys'
+                 ELSE '[]'::jsonb
+               END
+             ) AS value
+             WHERE rye.rye_slugify_key(value) IS NOT NULL
+           ) AS domain_keys,
+           nullif(trim(n.properties->'target_payload'->>'source_scope'), '') AS source_scope
          FROM rye.nodes n
          LEFT JOIN rye.current_valid_assertions status
            ON status.subject_node_id = n.id
@@ -1476,6 +1556,20 @@ export async function fetchCandidateReviewQueue(
           AND status.assertion_key = 'default'
          WHERE n.node_type = 'knowledge_candidate'
            AND n.archived_at IS NULL
+       ),
+       candidate_base AS (
+         SELECT *
+         FROM candidate_source cs
+         WHERE $7::uuid IS NULL
+            OR (
+              cardinality(cs.domain_keys) > 0
+              AND rye.has_agent_capability(
+                $7::uuid,
+                'rye.review.read',
+                cs.domain_keys,
+                cs.source_scope
+              )
+            )
        ),
        filtered AS (
          SELECT *
@@ -1592,6 +1686,7 @@ export async function fetchCandidateReviewQueue(
       opts.limit ?? 80,
       opts.includeClosed ?? false,
       opts.offset ?? 0,
+      opts.agentId ?? null,
     ]
   );
   return rows[0]?.payload ?? {

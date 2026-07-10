@@ -41,6 +41,7 @@ import {
   fetchTopLessees,
   fetchTopOwners,
   promoteKnowledgeCandidate,
+  recordAgentActionOutcome,
   searchNodes,
   setKnowledgeCandidateStatus,
   submitAgentObservation,
@@ -268,6 +269,15 @@ function authActor(c: RyeContext): string | null {
   return apiAuthRequired(c.env) ? c.get("auth")?.agent_key ?? null : null;
 }
 
+function hasGlobalCapability(auth: AgentAuthContext | null, capability: string): boolean {
+  return !!auth?.capabilities.some(
+    (grant) =>
+      grant.capability === capability &&
+      grant.domain_key === null &&
+      grant.scope_ref === null
+  );
+}
+
 /**
  * Auth-required mode is the scoped agent plane. Keep this as an explicit
  * allowlist so a newly added administrative route is closed to agent tokens
@@ -332,6 +342,14 @@ app.use("/api/*", async (c, next) => {
   c.set("auth", auth);
 
   if (!isScopedAgentRoute(c.req.method, c.req.path)) {
+    await recordAgentActionOutcome(sql, {
+      agentId: auth.agent_id,
+      action: "admin_route_denied",
+      capability: "rye.admin.read",
+      allowed: false,
+      reason: "agent tokens cannot access administrative routes",
+      request: { method: c.req.method, path: c.req.path },
+    });
     return c.json(
       {
         error: "forbidden",
@@ -372,7 +390,12 @@ app.get("/api/domains", async (c) => {
     !apiAuthRequired(c.env) ||
     !!auth?.capabilities.some((grant) => grant.capability === "rye.domain.admin");
   const sql = sqlFor(c.get("instance"));
-  return c.json(await fetchDomains(sql, { includeProperties }));
+  return c.json(
+    await fetchDomains(sql, {
+      includeProperties,
+      agentId: apiAuthRequired(c.env) ? auth?.agent_id ?? null : null,
+    })
+  );
 });
 
 app.get("/api/context-pack", async (c) => {
@@ -461,12 +484,28 @@ app.get(
         includeClosed: boolQuery(q.include_closed),
         limit: q.limit,
         offset: q.offset,
+        agentId: c.get("auth")?.agent_id ?? null,
       })
     );
   }
 );
 
 app.get("/api/audit/actions", async (c) => {
+  const auth = c.get("auth");
+  if (apiAuthRequired(c.env) && !hasGlobalCapability(auth, "rye.audit.read")) {
+    if (auth) {
+      await recordAgentActionOutcome(sqlFor(c.get("instance")), {
+        agentId: auth.agent_id,
+        action: "audit_actions_read",
+        capability: "rye.audit.read",
+        allowed: false,
+        reason: "global capability grant required",
+        request: { path: c.req.path },
+      });
+    }
+    return c.json({ error: "forbidden", reason: "global capability grant required" }, 403);
+  }
+
   const blocked = await enforceCapability(c, {
     action: "audit_actions_read",
     capability: "rye.audit.read",
@@ -593,6 +632,7 @@ app.get(
         includeClosed: boolQuery(q.include_closed),
         limit: q.limit,
         offset: q.offset,
+        agentId: c.get("auth")?.agent_id ?? null,
       })
     );
   }
