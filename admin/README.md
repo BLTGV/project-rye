@@ -30,6 +30,23 @@ SQL to each configured instance with the rye RLS admin context set per query.
 - The static SPA is served from the Worker's asset binding with SPA fallback,
   so client-side routing works out of the box.
 
+### Admin and agent access modes
+
+The Worker has two deployment postures:
+
+- With `RYE_API_AUTH_MODE=off` (the default), it is a trusted administrative
+  surface. Use this only for local development or behind an authenticated
+  boundary such as Cloudflare Access.
+- With `RYE_API_AUTH_MODE=required`, it is a scoped agent API. Bearer tokens are
+  authenticated as Rye agent identities. Only explicitly allowlisted agent
+  routes are reachable, and those routes apply capability and domain checks.
+  Agent tokens cannot call dashboard, catalog, workspace, node, graph, event,
+  or dispute routes backed by administrative queries.
+
+Do not expose the admin SPA by enabling agent-token authentication on the same
+public route. Deploy the trusted admin surface behind human authentication and
+the scoped agent API on a separate route or Worker deployment.
+
 ## Configure
 
 ```bash
@@ -94,15 +111,15 @@ the request supplies `?instance=<id>` or `X-Rye-Instance`.
 
 Command palette: `⌘K` opens a fuzzy node finder anywhere in the app.
 
-## What's intentionally a stub
+## Remaining deployment work
 
 - **Vector search.** `pgvector` is available on Supabase but not yet installed
   on the production instance. Enable with `CREATE EXTENSION vector;`, add a
   `claim_embedding vector(1536)` column to `rye.assertions`, then we can swap
   the trigram ORDER BY for an ANN search.
-- **Auth.** Today the Worker trusts whoever can reach it. Drop Cloudflare
-  Access in front of the route or wire an OAuth check in a Hono middleware
-  before exposing it publicly.
+- **Human admin authentication.** The admin SPA still relies on its deployment
+  boundary for human authentication. Put Cloudflare Access or an equivalent
+  identity-aware proxy in front of it before exposing it publicly.
 
 ## Multi-instance config shape
 

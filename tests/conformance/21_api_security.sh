@@ -100,6 +100,34 @@ missing_status="$(status_code "${BASE_URL}/api/domains")"
 invalid_status="$(status_code -H "Authorization: Bearer not-a-real-token" "${BASE_URL}/api/domains")"
 [[ "$invalid_status" == "401" ]] || { echo "Expected invalid token 401, got $invalid_status" >&2; exit 1; }
 
+admin_only_routes=(
+  "/api/catalog"
+  "/api/dashboard"
+  "/api/knowledge-map"
+  "/api/workspace/crm"
+  "/api/workspace/pm"
+  "/api/nodes"
+  "/api/nodes/${subject_id}"
+  "/api/nodes/${subject_id}/knowledge"
+  "/api/nodes/${subject_id}/graph"
+  "/api/disputes"
+  "/api/events"
+)
+
+for route in "${admin_only_routes[@]}"; do
+  route_status="$(status_code -H "Authorization: Bearer ${candidate_token}" "${BASE_URL}${route}")"
+  [[ "$route_status" == "403" ]] || {
+    echo "Expected candidate token to be denied from admin route ${route}, got ${route_status}" >&2
+    exit 1
+  }
+done
+
+reviewer_admin_status="$(status_code -H "Authorization: Bearer ${reviewer_token}" "${BASE_URL}/api/nodes")"
+[[ "$reviewer_admin_status" == "403" ]] || {
+  echo "Expected reviewer agent token to be denied from admin node search, got ${reviewer_admin_status}" >&2
+  exit 1
+}
+
 domains_json="$(curl -sS -H "Authorization: Bearer ${candidate_token}" "${BASE_URL}/api/domains")"
 if [[ "$domains_json" == *"secret_internal_note"* ]]; then
   echo "Low-privilege domain response exposed restricted properties" >&2

@@ -268,6 +268,31 @@ function authActor(c: RyeContext): string | null {
   return apiAuthRequired(c.env) ? c.get("auth")?.agent_key ?? null : null;
 }
 
+/**
+ * Auth-required mode is the scoped agent plane. Keep this as an explicit
+ * allowlist so a newly added administrative route is closed to agent tokens
+ * until it is deliberately backed by a capability- and domain-scoped query.
+ */
+function isScopedAgentRoute(method: string, path: string): boolean {
+  if (method === "GET") {
+    return [
+      "/api/agent/me",
+      "/api/domains",
+      "/api/context-pack",
+      "/api/review-queue",
+      "/api/audit/actions",
+      "/api/candidates/review",
+    ].includes(path);
+  }
+
+  if (method !== "POST") return false;
+  if (path === "/api/observations" || path === "/api/candidates") return true;
+
+  return /^\/api\/candidates\/[^/]+\/(status|promote|accept-source-policy|accept-crm-stage-plan|accept-pm-task-plan|accept-pm-milestone-plan)$/.test(
+    path
+  );
+}
+
 // Resolve which Rye instance every API call targets.
 app.use("/api/*", async (c, next) => {
   const requested = c.req.query("instance") ?? c.req.header("x-rye-instance") ?? null;
@@ -305,6 +330,17 @@ app.use("/api/*", async (c, next) => {
   }
 
   c.set("auth", auth);
+
+  if (!isScopedAgentRoute(c.req.method, c.req.path)) {
+    return c.json(
+      {
+        error: "forbidden",
+        reason: "agent tokens cannot access administrative routes",
+      },
+      403
+    );
+  }
+
   await next();
 });
 
