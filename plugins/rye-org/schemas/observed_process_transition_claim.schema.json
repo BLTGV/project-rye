@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://projectrye.dev/schemas/rye.observed_process_transition.claim.v1.json",
   "title": "Rye observed process transition assertion claim",
-  "description": "Descriptive claim that a process transition was observed to occur. Shares process_key and transition vocabulary with rye.process_transition_policy.claim.v1 so observed and authoritative lineages can be compared mechanically. This claim never binds the promotion evaluator.",
+  "description": "Descriptive aggregate of evidenced process transitions in one closed window. Normalize process_key, from_state, and to_state for comparison with authoritative policy, while keeping the observed claim and key distinct. This claim never binds the promotion evaluator.",
   "type": "object",
   "required": [
     "schema_type",
@@ -21,9 +21,21 @@
     "process_key": { "type": "string", "minLength": 1 },
     "from_state": { "type": "string", "minLength": 1 },
     "to_state": { "type": "string", "minLength": 1 },
-    "window_start": { "type": "string", "format": "date-time" },
-    "window_end": { "type": "string", "format": "date-time" },
-    "occurrence_count": { "type": "integer", "minimum": 1 },
+    "window_start": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Inclusive start of the closed aggregation window."
+    },
+    "window_end": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Exclusive end of the closed aggregation window; must be later than window_start."
+    },
+    "occurrence_count": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Number of evidenced occurrences represented by this aggregate."
+    },
     "initiator_refs": {
       "type": "array",
       "items": { "type": "string", "minLength": 1 }
@@ -37,6 +49,7 @@
     },
     "sample_event_ids": {
       "type": "array",
+      "description": "Optional examples only. Complete lineage is retained by the assertion source_event_id aggregation event or its artifact.",
       "items": { "type": "string", "minLength": 1 }
     },
     "notes": { "type": "string" }

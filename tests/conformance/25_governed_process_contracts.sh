@@ -63,10 +63,22 @@ function validate(schema, value, path = "$") {
 
 const processSchema = load("plugins/rye-org/schemas/process_definition_claim.schema.json");
 const transitionSchema = load("plugins/rye-org/schemas/process_transition_policy_claim.schema.json");
+const observedTransitionSchema = load("plugins/rye-org/schemas/observed_process_transition_claim.schema.json");
 const slackSchema = load("plugins/rye-source-context/schemas/slack_conversation_source_item.schema.json");
 const process = load("tests/fixtures/governed-process/process-definition.json");
 const transition = load("tests/fixtures/governed-process/process-transition-policy.json");
+const observedTransition = load("tests/fixtures/governed-process/observed-process-transition.json");
 const slack = load("tests/fixtures/governed-process/slack-source-item.json");
+
+function validateObservedTransition(value) {
+  const errors = validate(observedTransitionSchema, value);
+  const start = Date.parse(value.window_start);
+  const end = Date.parse(value.window_end);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+    errors.push("$.window_end must be later than $.window_start");
+  }
+  return errors;
+}
 
 for (const [name, schema, fixture] of [
   ["process definition", processSchema, process],
@@ -76,6 +88,10 @@ for (const [name, schema, fixture] of [
   const errors = validate(schema, fixture);
   if (errors.length) throw new Error(`${name} fixture failed: ${errors.join("; ")}`);
 }
+const observedErrors = validateObservedTransition(observedTransition);
+if (observedErrors.length) {
+  throw new Error(`observed transition fixture failed: ${observedErrors.join("; ")}`);
+}
 
 if (!process.states.includes(process.initial_state)) throw new Error("Initial state must be in process states");
 for (const state of process.terminal_states) {
@@ -84,6 +100,26 @@ for (const state of process.terminal_states) {
 for (const state of [...transition.from_states, transition.to_state]) {
   if (!process.states.includes(state)) throw new Error(`Transition state ${state} is not in process states`);
 }
+if (observedTransition.process_key !== process.process_key) {
+  throw new Error("Observed transition must use the process comparison key");
+}
+for (const state of [observedTransition.from_state, observedTransition.to_state]) {
+  if (!process.states.includes(state)) throw new Error(`Observed transition state ${state} is not in process states`);
+}
+const observedKey = (claim) =>
+  `observed:${claim.from_state}:${claim.to_state}:${claim.window_start}:${claim.window_end}`;
+if (observedKey(observedTransition) !==
+    "observed:proposal:closed_lost:2026-06-01T00:00:00Z:2026-07-01T00:00:00Z") {
+  throw new Error("Observed transition key must include both closed-window bounds");
+}
+const lateEvidenceAggregate = structuredClone(observedTransition);
+lateEvidenceAggregate.occurrence_count += 1;
+if (observedKey(lateEvidenceAggregate) !== observedKey(observedTransition)) {
+  throw new Error("Late evidence for the same window must retain the observed assertion key");
+}
+if (observedKey(observedTransition) === `transition:${transition.transition_key}`) {
+  throw new Error("Observed and authoritative transitions must not share assertion keys");
+}
 
 const invalidTransition = structuredClone(transition);
 delete invalidTransition.transition_key;
@@ -91,10 +127,25 @@ if (validate(transitionSchema, invalidTransition).length === 0) {
   throw new Error("Transition without transition_key unexpectedly passed");
 }
 
+const missingEvidenceBasis = structuredClone(observedTransition);
+delete missingEvidenceBasis.evidence_basis;
+if (validateObservedTransition(missingEvidenceBasis).length === 0) {
+  throw new Error("Observed transition without evidence_basis unexpectedly passed");
+}
+
+const invalidObservedWindow = structuredClone(observedTransition);
+invalidObservedWindow.window_end = invalidObservedWindow.window_start;
+if (validateObservedTransition(invalidObservedWindow).length === 0) {
+  throw new Error("Invalid observed transition window unexpectedly passed");
+}
+
 const orgManifest = load("plugins/rye-org/rye-plugin.json");
 const sourceManifest = load("plugins/rye-source-context/rye-plugin.json");
-for (const type of ["process_definition", "process_transition_policy"]) {
+for (const type of ["process_definition", "process_transition_policy", "observed_process_transition"]) {
   if (!orgManifest.contributes.assertion_types.includes(type)) throw new Error(`rye-org missing ${type}`);
+}
+if (!orgManifest.contributes.event_types.includes("observed_process_transition_aggregated")) {
+  throw new Error("rye-org missing observed_process_transition_aggregated");
 }
 if (!orgManifest.contributes.edge_types.includes("holds_role")) throw new Error("rye-org missing holds_role");
 if (!sourceManifest.contributes.node_types.includes("source_identity")) throw new Error("source-context missing source_identity");

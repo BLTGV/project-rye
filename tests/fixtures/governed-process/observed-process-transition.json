@@ -1,0 +1,18 @@
+{
+  "schema_type": "rye.observed_process_transition.claim.v1",
+  "schema_version": 1,
+  "process_key": "standard-sales",
+  "from_state": "proposal",
+  "to_state": "closed_lost",
+  "window_start": "2026-06-01T00:00:00Z",
+  "window_end": "2026-07-01T00:00:00Z",
+  "occurrence_count": 3,
+  "initiator_refs": ["person:jordan", "person:alex"],
+  "decider_refs": ["person:maya"],
+  "evidence_basis": "mixed",
+  "sample_event_ids": [
+    "2c99fbe7-e54b-43a4-a123-ef0b2a75d8ac",
+    "d43d9456-df48-4ee3-a942-2424cb825ac5"
+  ],
+  "notes": "Complete input lineage is retained by the aggregation source event."
+}

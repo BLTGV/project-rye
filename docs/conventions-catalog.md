@@ -20,8 +20,8 @@ Governed process and conversation-source patterns add:
 
 - **Node types:** `source_identity`
 - **Edge types:** `identity_of`, `holds_role`
-- **Assertion types:** `source_identity_confirmation`, `process_definition`, `process_transition_policy`
-- **Event types:** `source_identity_confirmed`, `process_transition_evaluated`, `process_exception_approved`
+- **Assertion types:** `source_identity_confirmation`, `process_definition`, `process_transition_policy`, `observed_process_transition`
+- **Event types:** `source_identity_confirmed`, `process_transition_evaluated`, `process_exception_approved`, `observed_process_transition_aggregated`
 
 Run `SELECT rye_catalog()` to see which types are in use in a given instance.
 
@@ -121,9 +121,23 @@ copying every source statement into current state.
 - `process_transition_policy` uses key `transition:<transition_key>` and records
   allowed source states, target state, proposing and deciding authorities,
   prerequisites, evidence, exception handling, impact, and reversibility.
+- `observed_process_transition` uses key
+  `observed:<from_state>:<to_state>:<window_start>:<window_end>` and records
+  evidenced occurrences in one closed window. It is descriptive and never
+  binds the promotion evaluator.
 - Process assertions are temporal. Supersede them when the process changes.
-- An observed transition remains a candidate until active authority and process
-  conditions match.
+- Normalize observed and authoritative transitions to
+  `(process_key, from_state, to_state)` for comparison. Their claim shapes,
+  keys, and supersession lineages remain distinct.
+- Source observations and events can accumulate before an authoritative
+  process exists. A derived observed aggregate still follows candidate and
+  promotion policy; descriptive claims do not receive an implicit lenient
+  default.
+- Record each aggregate with an
+  `observed_process_transition_aggregated` source event containing complete
+  evidence references (or an artifact that does). `sample_event_ids` are only
+  examples. Late evidence uses `supersede_assertion()` for the same full window
+  key; an authoritative process assertion never supersedes an observed one.
 
 Use a confirmed temporal `holds_role` edge and `domain_authorities` to resolve
 whether a person may propose, decide, approve an exception, or set policy. Do
@@ -134,6 +148,7 @@ The full contract and claim schemas live in:
 - `plugins/rye-org/patterns/governed-process-transition.md`
 - `plugins/rye-org/schemas/process_definition_claim.schema.json`
 - `plugins/rye-org/schemas/process_transition_policy_claim.schema.json`
+- `plugins/rye-org/schemas/observed_process_transition_claim.schema.json`
 
 ## Slack Conversation Evidence Pattern
 

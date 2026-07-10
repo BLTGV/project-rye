@@ -116,8 +116,10 @@ BEGIN
           AND p.properties->'contributes'->'assertion_types' ? 'convention_registry'
           AND p.properties->'contributes'->'assertion_types' ? 'process_definition'
           AND p.properties->'contributes'->'assertion_types' ? 'process_transition_policy'
+          AND p.properties->'contributes'->'assertion_types' ? 'observed_process_transition'
           AND p.properties->'contributes'->'event_types' ? 'process_transition_evaluated'
           AND p.properties->'contributes'->'event_types' ? 'process_exception_approved'
+          AND p.properties->'contributes'->'event_types' ? 'observed_process_transition_aggregated'
           AND p.properties->'onboarding'->'never_infer_defaults' ? 'Do not infer employment, department membership, responsibility, or policy ownership from source membership alone.'
     ) THEN
         RAISE EXCEPTION 'Expected rye-org organization metadata and never-infer defaults to be synced';

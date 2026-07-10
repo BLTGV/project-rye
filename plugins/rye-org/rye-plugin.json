@@ -1,6 +1,6 @@
 {
   "id": "rye-org",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "label": "Organization Model",
   "description": "People, systems, departments, mission, vision, goals, related organizations, policies, and procedures.",
   "dependencies": [],
@@ -48,7 +48,11 @@
       "process_transition_policy",
       "observed_process_transition"
     ],
-    "event_types": ["process_transition_evaluated", "process_exception_approved"],
+    "event_types": [
+      "process_transition_evaluated",
+      "process_exception_approved",
+      "observed_process_transition_aggregated"
+    ],
     "artifact_types": []
   },
   "capabilities": [
