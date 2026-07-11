@@ -82,6 +82,12 @@ SELECT rye.create_knowledge_candidate(
   p_target_payload := '{"domain_keys":["api-title-diligence"],"source_scope":"slack:#api-title-secret"}'::jsonb,
   p_created_by := 'api-security-foreign-fixture'
 );
+SELECT rye.create_knowledge_candidate(
+  p_candidate_kind := 'fact',
+  p_statement := 'Mixed-domain API candidate should remain hidden.',
+  p_target_payload := '{"domain_keys":["api-account-updates","api-title-diligence"],"source_scope":"slack:#api-sales"}'::jsonb,
+  p_created_by := 'api-security-mixed-fixture'
+);
 INSERT INTO rye.nodes (node_type, label, properties)
 VALUES ('account', 'API Security Test Account', '{"suite":"api_security"}')
 RETURNING id;
@@ -168,6 +174,17 @@ fi
 if [[ "$domains_json" == *"api_title_diligence"* || "$domains_json" == *"api-title-review-board"* || "$domains_json" == *"slack:#api-title-secret"* ]]; then
   echo "Scoped domain response exposed a foreign domain, authority, or channel" >&2
   echo "$domains_json" >&2
+  exit 1
+fi
+
+context_json="$(curl -sS -G \
+  -H "Authorization: Bearer ${candidate_token}" \
+  --data-urlencode "domain_keys=api-account-updates" \
+  --data-urlencode "channel_ref=slack:#api-sales" \
+  "${BASE_URL}/api/context-pack")"
+if [[ "$context_json" == *"Mixed-domain API candidate should remain hidden"* || "$context_json" == *"api_title_diligence"* || "$context_json" == *"api-title-diligence"* || "$context_json" == *"secret_internal_note"* ]]; then
+  echo "Scoped context pack exposed mixed-domain or restricted data" >&2
+  echo "$context_json" >&2
   exit 1
 fi
 
