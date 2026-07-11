@@ -120,6 +120,22 @@ Select a specific scope by UUID or scope key:
 This calls `rye_agent_context(scope_id)`. If exactly one scope is active, Rye
 selects it automatically. If multiple scopes are active, pass `--scope`.
 
+### Grant a direct-database runtime role
+
+After an operator creates a restricted PostgreSQL login role, grant only the
+token-bound Rye runtime functions:
+
+```bash
+./scripts/grant_agent_runtime.sh \
+  --db-url "$DATABASE_URL" \
+  --role rye_agent_runtime
+```
+
+This does not create the role or manage its password. It grants no Rye table
+access and no raw identity-taking or administrative helpers. Direct database
+agents call the `*_with_token` functions with parameter binding; bearer tokens
+must never appear in generated SQL or process arguments.
+
 ## Source Commands
 
 Review known source accounts and containers:

@@ -88,6 +88,62 @@ Maps graph nodes to records in domain tables.
 
 **Write convention:** Use `link_record()` instead of inserting directly — it creates both the node and the source map entry.
 
+#### `knowledge_domains` — Scoped Knowledge Areas
+
+Named business areas used to bound agent reads and writes. A domain records a
+stable key, label, purpose, optional owner node, and extension properties.
+
+**Why it exists:** Agent access cannot safely depend on channel names or labels.
+Domains provide an explicit unit for capabilities, authorities, candidate
+routing, and node membership.
+
+#### `domain_authorities` — Temporal Business Authority
+
+Records which person, role, team, system, or source may speak for claim types
+and speech acts in a domain, optionally within a scope and effective window.
+
+#### `channel_domain_subscriptions` — Source Routing
+
+Maps a retrieval channel to one or more domains. A subscription helps route
+source context; it does not itself establish business authority.
+
+#### `domain_claim_policies` — Candidate Handling
+
+Records the default candidate policy and authority requirement for a claim type
+within a domain.
+
+#### `agent_identities`, `agent_capability_grants`, and `agent_api_tokens`
+
+Agent identity, bounded capability, and transport-credential records. Tokens
+are stored only as SHA-256 hashes and may expire or be revoked. A database role
+is transport isolation, not business authority; capability grants remain the
+authorization source.
+
+#### `agent_action_log` — Agent Decision Audit
+
+Append-oriented audit records for allowed and denied agent operations. Stores
+the capability, domain, scope, target, reason, bounded request metadata, and
+bounded result metadata. Tokens and raw private source bodies must not appear.
+
+#### `api_idempotency_keys` — Retry Safety
+
+Stores an agent, idempotency key, request hash, and prior response so repeated
+candidate writes return the original result and conflicting reuse is rejected.
+
+#### `node_domain_memberships` — Temporal Agent Read Boundary
+
+Connects a node to a knowledge domain with optional scope and effective bounds.
+Every membership requires a source event. Active membership ranges for the same
+node, domain, and normalized scope cannot overlap.
+
+**Why it exists:** Scoped agent reads need a durable, temporal answer to which
+domains contain a node. Nodes with no current membership are excluded from
+token-bound reads and appear in `node_domain_membership_gaps`.
+
+**Write convention:** Use `assign_node_domain_membership()` and
+`end_node_domain_membership()`. Candidate and agent-observation helpers attach
+known target domains automatically.
+
 #### `node_merges` — Deduplication Tracking
 
 Records which nodes were merged into which canonical nodes, and by whom.
@@ -143,6 +199,13 @@ Nodes with field-level redaction applied via `redact_properties()`.
 **Why it exists:** When exposing node data to users with limited roles, sensitive JSONB fields must be stripped. This view applies the redaction automatically based on the calling session's role.
 
 Uses `security_invoker = true` so RLS is evaluated with the caller's permissions.
+
+#### `node_domain_membership_gaps`
+
+Administrative worklist for active nodes with no current domain membership and
+candidates whose declared domain is unknown or lacks a matching membership.
+Each row has a stable `gap_id`, filterable `gap_type`, severity, node, and
+reason. Scoped runtime functions never infer through these gaps.
 
 #### `active_disputes`
 
@@ -331,6 +394,42 @@ agent_node_summary(p_node_id, p_max_items) → jsonb
 Returns compact context for a node: the node itself, top relationships (both outbound and inbound, ranked by weight, each with a `direction` field), current facts, and recent activity. Each section is limited to `p_max_items`.
 
 **Why it exists:** Agents need context but have limited context windows. Dumping a node's full history overwhelms the model. This function returns a ranked, bounded summary that fits typical agent consumption.
+
+`agent_node_summary()` is a trusted-session helper. Direct database runtimes
+use the token-bound functions below.
+
+#### Token-Bound Agent Runtime Functions
+
+```
+agent_context_pack_with_token(p_token, p_scope_ref, p_channel_ref, p_domain_keys) → jsonb
+agent_search_nodes_with_token(p_token, p_query, p_domain_keys, p_scope_ref, p_limit) → jsonb
+agent_node_summary_with_token(p_token, p_node_id, p_scope_ref, p_max_items) → jsonb
+agent_submit_observation_with_token(p_token, p_observation) → uuid
+agent_create_candidate_with_token(p_token, p_candidate, p_idempotency_key) → uuid
+```
+
+These functions authenticate the token, establish trusted internal RLS context,
+check complete domain and scope coverage, perform the bounded operation, and
+record the action in one transaction. They are the only functions granted to a
+restricted direct-database runtime role.
+
+Search excludes unclassified nodes and nodes with any ungranted active domain.
+Summary separates accepted current assertions, relationships, and recent event
+metadata. It omits access-gated assertion types, raw event summaries, and
+classified node fields. Observation and candidate writes require at least one
+domain and create sourced memberships for the new node.
+
+#### `assign_node_domain_membership()` and `end_node_domain_membership()`
+
+Create or close temporal membership ranges under trusted admin context.
+Assignment requires a source event; overlapping ranges are rejected under a
+transaction-scoped concurrency lock.
+
+#### `agent_can_read_node()`
+
+Internal fail-closed predicate used by token-bound search and summary. It
+returns true only when the node has an active membership and the agent has a
+matching current `rye.context.read` grant for every active membership.
 
 #### `log_agent_query()`
 

@@ -26,7 +26,31 @@ Two tiers:
 
 ### SECURITY DEFINER Hardening
 
-`redact_properties()` is the only `SECURITY DEFINER` function. Its search path is locked to `rye, pg_catalog` (no `public`) to prevent search-path injection attacks. The function only needs `field_classifications` and `role_classification_access`, both in `rye`.
+Security-definer functions lock their search path to `rye, pg_catalog` unless
+they explicitly require cross-schema domain access. Agent runtime wrappers use
+the internal path, authenticate a Rye token, establish admin RLS context only
+inside the function transaction, apply explicit capability and membership
+checks, record the action, and restore the prior session value before return.
+
+Raw identity-taking functions and credential or authority administration
+helpers are revoked from `PUBLIC`. Restricted database callers receive only the
+token-bound wrappers through `scripts/grant_agent_runtime.sh`.
+
+The runtime PostgreSQL role is a transport boundary, not business authority.
+It has no Rye table privileges. Rye tokens, capability grants, temporal node
+memberships, and domain authorities remain the authorization model.
+
+Tokens must be passed with database parameter binding. They must not appear in
+generated SQL, process arguments, audit payloads, or error messages.
+
+### Temporal Node-Domain Membership
+
+`node_domain_memberships` records which domains contain a node over time. An
+advisory-lock trigger prevents concurrent overlapping ranges without adding a
+new PostgreSQL extension. Token-bound reads require an active membership and a
+matching current grant for every active node membership. Unclassified nodes
+and unknown candidate domains appear in `node_domain_membership_gaps` and are
+never inferred from labels, channel names, or connector metadata.
 
 ## Overlay Architecture
 

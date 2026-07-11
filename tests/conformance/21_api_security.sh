@@ -47,15 +47,47 @@ SELECT rye.ensure_knowledge_domain(
   NULL,
   '{"secret_internal_note":"should be redacted from low privilege API clients"}'::jsonb
 );
+SELECT rye.ensure_knowledge_domain(
+  'api-title-diligence',
+  'API Test Title Diligence',
+  'Foreign domain used to verify agent read isolation.',
+  NULL,
+  '{"secret_title_note":"must never cross the domain boundary"}'::jsonb
+);
+SELECT rye.grant_domain_authority(
+  'api-title-diligence',
+  'team',
+  'api-title-review-board',
+  ARRAY['title_status'],
+  'slack:#api-title-secret'
+);
+SELECT rye.subscribe_channel_to_domain(
+  'slack:#api-title-secret',
+  'api-title-diligence',
+  'review'
+);
 SELECT rye.create_agent_identity('api-candidate-agent', 'API Candidate Agent', 'conformance');
 SELECT rye.create_agent_identity('api-reviewer-agent', 'API Reviewer Agent', 'conformance');
 SELECT rye.grant_agent_capability('api-candidate-agent', 'rye.context.read', 'api-account-updates');
 SELECT rye.grant_agent_capability('api-candidate-agent', 'rye.candidate.create', 'api-account-updates');
+SELECT rye.grant_agent_capability('api-candidate-agent', 'rye.audit.read', 'api-account-updates');
 SELECT rye.grant_agent_capability('api-reviewer-agent', 'rye.context.read', 'api-account-updates');
 SELECT rye.grant_agent_capability('api-reviewer-agent', 'rye.review.read', 'api-account-updates');
 SELECT rye.grant_agent_capability('api-reviewer-agent', 'rye.candidate.adjudicate', 'api-account-updates');
 SELECT rye.grant_agent_capability('api-reviewer-agent', 'rye.authoritative.promote', 'api-account-updates');
 SELECT rye.grant_agent_capability('api-reviewer-agent', 'rye.audit.read', NULL);
+SELECT rye.create_knowledge_candidate(
+  p_candidate_kind := 'fact',
+  p_statement := 'Foreign title candidate should remain hidden.',
+  p_target_payload := '{"domain_keys":["api-title-diligence"],"source_scope":"slack:#api-title-secret"}'::jsonb,
+  p_created_by := 'api-security-foreign-fixture'
+);
+SELECT rye.create_knowledge_candidate(
+  p_candidate_kind := 'fact',
+  p_statement := 'Mixed-domain API candidate should remain hidden.',
+  p_target_payload := '{"domain_keys":["api-account-updates","api-title-diligence"],"source_scope":"slack:#api-sales"}'::jsonb,
+  p_created_by := 'api-security-mixed-fixture'
+);
 INSERT INTO rye.nodes (node_type, label, properties)
 VALUES ('account', 'API Security Test Account', '{"suite":"api_security"}')
 RETURNING id;
@@ -100,10 +132,59 @@ missing_status="$(status_code "${BASE_URL}/api/domains")"
 invalid_status="$(status_code -H "Authorization: Bearer not-a-real-token" "${BASE_URL}/api/domains")"
 [[ "$invalid_status" == "401" ]] || { echo "Expected invalid token 401, got $invalid_status" >&2; exit 1; }
 
+admin_only_routes=(
+  "/api/catalog"
+  "/api/dashboard"
+  "/api/knowledge-map"
+  "/api/workspace/crm"
+  "/api/workspace/pm"
+  "/api/nodes"
+  "/api/nodes/${subject_id}"
+  "/api/nodes/${subject_id}/knowledge"
+  "/api/nodes/${subject_id}/graph"
+  "/api/disputes"
+  "/api/events"
+)
+
+for route in "${admin_only_routes[@]}"; do
+  route_status="$(status_code -H "Authorization: Bearer ${candidate_token}" "${BASE_URL}${route}")"
+  [[ "$route_status" == "403" ]] || {
+    echo "Expected candidate token to be denied from admin route ${route}, got ${route_status}" >&2
+    exit 1
+  }
+done
+
+reviewer_admin_status="$(status_code -H "Authorization: Bearer ${reviewer_token}" "${BASE_URL}/api/nodes")"
+[[ "$reviewer_admin_status" == "403" ]] || {
+  echo "Expected reviewer agent token to be denied from admin node search, got ${reviewer_admin_status}" >&2
+  exit 1
+}
+
 domains_json="$(curl -sS -H "Authorization: Bearer ${candidate_token}" "${BASE_URL}/api/domains")"
 if [[ "$domains_json" == *"secret_internal_note"* ]]; then
   echo "Low-privilege domain response exposed restricted properties" >&2
   echo "$domains_json" >&2
+  exit 1
+fi
+if [[ "$domains_json" != *"api_account_updates"* ]]; then
+  echo "Scoped domain response omitted the granted domain" >&2
+  echo "$domains_json" >&2
+  exit 1
+fi
+if [[ "$domains_json" == *"api_title_diligence"* || "$domains_json" == *"api-title-review-board"* || "$domains_json" == *"slack:#api-title-secret"* ]]; then
+  echo "Scoped domain response exposed a foreign domain, authority, or channel" >&2
+  echo "$domains_json" >&2
+  exit 1
+fi
+
+context_json="$(curl -sS -G \
+  -H "Authorization: Bearer ${candidate_token}" \
+  --data-urlencode "domain_keys=api-account-updates" \
+  --data-urlencode "channel_ref=slack:#api-sales" \
+  "${BASE_URL}/api/context-pack")"
+if [[ "$context_json" == *"Mixed-domain API candidate should remain hidden"* || "$context_json" == *"api_title_diligence"* || "$context_json" == *"api-title-diligence"* || "$context_json" == *"secret_internal_note"* ]]; then
+  echo "Scoped context pack exposed mixed-domain or restricted data" >&2
+  echo "$context_json" >&2
   exit 1
 fi
 
@@ -140,6 +221,26 @@ candidate_id_2="$(json_get "$candidate_json_2" "id")"
   echo "Expected idempotent candidate id, got $candidate_id_1 and $candidate_id_2" >&2
   exit 1
 }
+
+candidate_review_status="$(status_code -H "Authorization: Bearer ${candidate_token}" "${BASE_URL}/api/review-queue")"
+[[ "$candidate_review_status" == "403" ]] || {
+  echo "Expected candidate token review queue read 403, got $candidate_review_status" >&2
+  exit 1
+}
+
+for review_route in "/api/review-queue" "/api/candidates/review"; do
+  review_json="$(curl -sS -H "Authorization: Bearer ${reviewer_token}" "${BASE_URL}${review_route}")"
+  if [[ "$review_json" != *"Brightline account health is green"* ]]; then
+    echo "Granted-domain candidate missing from ${review_route}" >&2
+    echo "$review_json" >&2
+    exit 1
+  fi
+  if [[ "$review_json" == *"Foreign title candidate should remain hidden"* || "$review_json" == *"api-title-diligence"* || "$review_json" == *"slack:#api-title-secret"* ]]; then
+    echo "Review route ${review_route} exposed a foreign-domain candidate" >&2
+    echo "$review_json" >&2
+    exit 1
+  fi
+done
 
 denied_candidate_status="$(status_code \
   -H "Authorization: Bearer ${candidate_token}" \
@@ -186,13 +287,13 @@ reviewer_promote_status="$(status_code \
 
 audit_denied_status="$(status_code -H "Authorization: Bearer ${candidate_token}" "${BASE_URL}/api/audit/actions")"
 [[ "$audit_denied_status" == "403" ]] || {
-  echo "Expected low-privilege audit read 403, got $audit_denied_status" >&2
+  echo "Expected domain-scoped audit grant to be insufficient, got $audit_denied_status" >&2
   exit 1
 }
 
-audit_json="$(curl -sS -H "Authorization: Bearer ${reviewer_token}" "${BASE_URL}/api/audit/actions?limit=20")"
-if [[ "$audit_json" != *"candidate_promote"* || "$audit_json" != *"false"* || "$audit_json" != *"true"* ]]; then
-  echo "Expected audit log to include allowed and denied promotion actions" >&2
+audit_json="$(curl -sS -H "Authorization: Bearer ${reviewer_token}" "${BASE_URL}/api/audit/actions?limit=100")"
+if [[ "$audit_json" != *"candidate_promote"* || "$audit_json" != *"admin_route_denied"* || "$audit_json" != *"global capability grant required"* || "$audit_json" != *"false"* || "$audit_json" != *"true"* ]]; then
+  echo "Expected audit log to include promotion, boundary, and global-grant decisions" >&2
   echo "$audit_json" >&2
   exit 1
 fi

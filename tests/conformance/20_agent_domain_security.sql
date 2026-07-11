@@ -16,6 +16,9 @@ DECLARE
     v_authz jsonb;
     v_candidate uuid;
     v_future_candidate uuid;
+    v_mixed_candidate uuid;
+    v_finance_candidate uuid;
+    v_unclassified_candidate uuid;
     v_denied boolean := false;
     v_context jsonb;
 BEGIN
@@ -25,7 +28,9 @@ BEGIN
     v_account_domain := ensure_knowledge_domain(
         'sec-account-updates',
         'Security Test Account Updates',
-        'Shared account status and owner updates for conformance tests.'
+        'Shared account status and owner updates for conformance tests.',
+        NULL,
+        '{"internal_routing_note":"context readers must not see this"}'::jsonb
     );
     v_title_domain := ensure_knowledge_domain(
         'sec-title-diligence',
@@ -48,6 +53,14 @@ BEGIN
         'person:ava-deal-lead',
         ARRAY['account_status'],
         NULL,
+        ARRAY['confirmed']
+    );
+    PERFORM grant_domain_authority(
+        'sec-account-updates',
+        'person',
+        'person:finance-only-authority',
+        ARRAY['account_status'],
+        'slack:#sec-finance',
         ARRAY['confirmed']
     );
 
@@ -141,6 +154,33 @@ BEGIN
     ) THEN
         RAISE EXCEPTION 'Agent candidate did not preserve domain metadata';
     END IF;
+
+    v_mixed_candidate := create_knowledge_candidate(
+        p_candidate_kind := 'fact',
+        p_statement := 'Mixed account and title candidate must remain hidden.',
+        p_target_payload := jsonb_build_object(
+            'domain_keys', jsonb_build_array('sec-account-updates', 'sec-title-diligence'),
+            'source_scope', 'slack:#sec-sales'
+        ),
+        p_created_by := 'test:agent-domain-security'
+    );
+    v_finance_candidate := create_knowledge_candidate(
+        p_candidate_kind := 'fact',
+        p_statement := 'Finance-only account candidate.',
+        p_target_payload := jsonb_build_object(
+            'domain_keys', jsonb_build_array('sec-account-updates'),
+            'source_scope', 'slack:#sec-finance'
+        ),
+        p_created_by := 'test:agent-domain-security'
+    );
+    v_unclassified_candidate := create_knowledge_candidate(
+        p_candidate_kind := 'fact',
+        p_statement := 'Unclassified candidate must remain hidden.',
+        p_target_payload := jsonb_build_object(
+            'source_scope', 'slack:#sec-sales'
+        ),
+        p_created_by := 'test:agent-domain-security'
+    );
 
     v_future_candidate := agent_create_candidate(
         p_agent_id          := v_intake_agent,
@@ -259,6 +299,38 @@ BEGIN
     IF EXISTS (
         SELECT 1
         FROM jsonb_array_elements(v_context->'domains') d
+        WHERE d->'properties' <> '{}'::jsonb
+    ) THEN
+        RAISE EXCEPTION 'Context reader without domain-admin capability received domain properties';
+    END IF;
+
+    IF v_context::text LIKE '%person:finance-only-authority%' THEN
+        RAISE EXCEPTION 'Sales context leaked finance-scoped authority';
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM jsonb_array_elements(v_context->'open_candidates') c
+        WHERE c->>'candidate_id' = v_candidate::text
+    ) THEN
+        RAISE EXCEPTION 'Sales context omitted its authorized account candidate';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM jsonb_array_elements(v_context->'open_candidates') c
+        WHERE c->>'candidate_id' IN (
+            v_mixed_candidate::text,
+            v_finance_candidate::text,
+            v_unclassified_candidate::text
+        )
+    ) THEN
+        RAISE EXCEPTION 'Sales context leaked mixed-domain, foreign-channel, or unclassified candidate';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM jsonb_array_elements(v_context->'domains') d
         WHERE d->>'domain_key' = rye_slugify_key('sec-title-diligence')
     ) THEN
         RAISE EXCEPTION 'Context pack leaked unrelated title domain';
@@ -277,6 +349,22 @@ BEGIN
         WHERE d->>'domain_key' = rye_slugify_key('sec-channel-local-ops')
     ) THEN
         RAISE EXCEPTION 'Channel-local domain leaked to another channel';
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM jsonb_array_elements(v_context->'open_candidates') c
+        WHERE c->>'candidate_id' = v_finance_candidate::text
+    ) THEN
+        RAISE EXCEPTION 'Finance context omitted its channel candidate';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM jsonb_array_elements(v_context->'open_candidates') c
+        WHERE c->>'candidate_id' IN (v_candidate::text, v_mixed_candidate::text)
+    ) THEN
+        RAISE EXCEPTION 'Finance context leaked sales or mixed-domain candidate';
     END IF;
 
     IF NOT EXISTS (
