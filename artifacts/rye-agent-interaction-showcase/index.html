@@ -560,29 +560,36 @@
     <li>Compliance findings distinguish <em>noncompliant</em> from <em>missing evidence</em>; absence of a Slack message is never proof a step didn't happen.</li>
   </ul>
 
-  <h3>Seven known implementation gaps</h3>
+  <h3>Seven implementation gaps — current status</h3>
   <ol class="steps">
-    <li><b>Agent read boundary.</b> Broad administrative routes must be closed
-      and allowlisted agent reads must be domain-filtered. Draft PR #2 addresses
-      the route boundary; domain-safe review, domain, and audit reads remain part
-      of that work.</li>
-    <li><b>CDC data protection.</b> Change events can retain complete old and new
+    <li><b>Agent read boundary.</b> <span class="verdict v-review">in draft</span>
+      Draft PR #2 separates administrative routes and hardens scoped context
+      packs. Stacked draft PR #4 adds temporal node-domain membership, complete
+      multi-domain checks, token-bound database functions, and a transport role
+      with no direct table access.</li>
+    <li><b>CDC data protection.</b> <span class="verdict v-review">open</span>
+      Change events can retain complete old and new
       domain rows. Payload migration and read-time protection for existing
       immutable events require a separate security proposal.</li>
-    <li><b>Secure knowledge reads.</b> The secure MCP context pack cannot yet
-      answer ordinary entity questions from accepted assertions, relationships,
-      and recent events.</li>
-    <li><b>Process-aware promotion.</b> Authority, process, evidence, and risk are
+    <li><b>Secure knowledge reads.</b> <span class="verdict v-review">database contract drafted</span>
+      Draft PR #4 adds scoped token-bound search and summaries over redacted
+      nodes, accepted current assertions, readable relationships, and bounded
+      event metadata. API and MCP adapters still need to expose that contract.</li>
+    <li><b>Process-aware promotion.</b> <span class="verdict v-review">open</span>
+      Authority, process, evidence, and risk are
       recorded but are not yet compiled into one atomic, explainable
       <code>allow</code>, <code>review</code>, or <code>deny</code> decision.</li>
-    <li><b>Reviewer agent tools.</b> Reviewer capabilities and API routes exist,
+    <li><b>Reviewer agent tools.</b> <span class="verdict v-review">open</span>
+      Reviewer capabilities and API routes exist,
       but secure MCP tools do not yet complete adjudication and promotion.</li>
-    <li><b>Read-model freshness.</b> CRM and PM materialized views can remain
+    <li><b>Read-model freshness.</b> <span class="verdict v-review">open</span>
+      CRM and PM materialized views can remain
       stale until an explicit refresh; freshness metadata and policy are still
       needed.</li>
-    <li><b>Documentation parity.</b> CLI administration is documented, but the
-      data dictionary and some admin deployment documentation still trail the
-      executable agent surface.</li>
+    <li><b>Documentation parity.</b> <span class="verdict v-review">in draft</span>
+      Draft PR #4 documents direct-database roles, token binding, temporal
+      memberships, the gap worklist, and the five restricted runtime functions.
+      Documentation must stay synchronized as the remaining transports land.</li>
   </ol>
 
   <h3>Worked examples</h3>
@@ -627,12 +634,15 @@
   <p>
     Implemented today: the core memory (entities, events, assertions,
     disputes, temporal reads), agent identities and capabilities, and the
-    candidate workflow. Draft PR #2 implements the initial admin/agent route
-    separation; draft PR #3 defines governed-process and Slack-source claim
-    contracts. Proposed and sequenced: domain-safe reads, the policy evaluator,
-    domain membership, the scoped runtime CLI, discovery tooling, and the
-    divergence read model. This document describes the target; the design docs
-    carry the delivery order.
+    candidate workflow. Draft PR #2 implements admin/agent route separation and
+    scoped context-pack hardening. Draft PR #3 defines governed-process and
+    Slack-source claim contracts. Stacked draft PR #4 adds temporal domain
+    membership, a restricted direct-database role, token-bound agent functions,
+    secure entity reads, backfill, diagnostics, and documentation. Still open:
+    CDC payload protection, the atomic policy evaluator, secure MCP reviewer
+    tools, read-model freshness, discovery tooling, and the divergence read
+    model. This document describes the target; the design docs carry the
+    delivery order.
   </p>
 </section>
 
