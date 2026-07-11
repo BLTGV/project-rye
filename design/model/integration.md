@@ -83,7 +83,10 @@ WHERE n.node_type = 'ticket';
 
 ## 4. Change Data Capture (CDC)
 
-A built-in trigger function captures INSERT, UPDATE, and DELETE on domain tables as `domain_change` events in the graph. Includes full before/after state and a diff of changed fields.
+A built-in trigger function captures INSERT, UPDATE, and DELETE on domain
+tables as `domain_change` events. Payload version 2 preserves public values and
+replaces classified values with classification plus SHA-256 digest. Rye does
+not copy classified source values into the event log.
 
 ### Attaching CDC
 
@@ -128,6 +131,10 @@ WHERE ep.node_id = '<node_uuid>'
   AND e.event_type = 'domain_change'
 ORDER BY e.occurred_at;
 ```
+
+Use `events_safe` for consumption. Immutable legacy full-row CDC events are
+admin-only and appear in `cdc_protection_gaps` until retention expiry or
+protected reingestion.
 
 **Recommendation:** Start with explicit `link_record()` calls for correctness. Add CDC triggers when you've validated the graph model against your domain.
 

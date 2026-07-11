@@ -89,6 +89,9 @@ SELECT rye.create_agent_identity('runtime-role-agent', 'Runtime Role Agent', 'co
 SELECT rye.grant_agent_capability('runtime-role-agent', 'rye.context.read', 'runtime-role-a');
 SELECT rye.grant_agent_capability('runtime-role-agent', 'rye.candidate.create', 'runtime-role-a');
 SELECT rye.grant_agent_capability('runtime-role-agent', 'rye.observation.create', 'runtime-role-a');
+SELECT rye.grant_agent_capability('runtime-role-agent', 'rye.review.read', 'runtime-role-a');
+SELECT rye.grant_agent_capability('runtime-role-agent', 'rye.candidate.adjudicate', 'runtime-role-a');
+SELECT rye.grant_agent_capability('runtime-role-agent', 'rye.authoritative.promote', 'runtime-role-a');
 SELECT rye.issue_agent_token('runtime-role-agent', 'runtime role token');
 SQL
 )"
@@ -107,9 +110,14 @@ SELECT has_function_privilege(
   'rye.agent_get_context_pack(uuid,text,text,text[])',
   'EXECUTE'
 );
+SELECT has_function_privilege(
+  '${RUNTIME_ROLE}',
+  'rye.agent_promote_candidate_with_token(text,uuid,jsonb)',
+  'EXECUTE'
+);
 SQL
 )"
-[[ "$privileges" == $'t\nf' ]] || {
+[[ "$privileges" == $'t\nf\nt' ]] || {
   echo "Runtime role received an unexpected function privilege set: $privileges" >&2
   exit 1
 }
@@ -170,6 +178,50 @@ SELECT rye.agent_create_candidate_with_token(
 );
 SQL
 )"
+
+review_json="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atq -v token="$token" <<'SQL'
+SET ROLE rye_runtime_boundary_test;
+SELECT rye.agent_review_queue_with_token(
+  :'token', NULL, NULL, 'Runtime role candidate remains bounded.', false, 20, 0
+);
+SQL
+)"
+
+[[ "$review_json" == *"Runtime role candidate remains bounded."* ]] || {
+  echo "Token-bound review queue omitted the scoped candidate" >&2
+  echo "$review_json" >&2
+  exit 1
+}
+
+visible_node_id="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atq <<'SQL'
+SELECT set_config('app.current_role', 'admin', false);
+SELECT id FROM rye.nodes
+WHERE external_source = 'conformance' AND external_id = 'runtime-role-visible';
+SQL
+)"
+visible_node_id="$(tail -n 1 <<<"$visible_node_id")"
+
+promotion_json="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atq \
+  -v token="$token" -v candidate_id="$candidate_id" -v subject_id="$visible_node_id" <<'SQL'
+SET ROLE rye_runtime_boundary_test;
+SELECT rye.agent_promote_candidate_with_token(
+  :'token',
+  :'candidate_id'::uuid,
+  jsonb_build_object(
+    'target_type', 'assertion',
+    'subject_node_id', :'subject_id',
+    'assertion_type', 'runtime_reviewed_status',
+    'assertion_key', 'default',
+    'claim', jsonb_build_object('status', 'accepted')
+  )
+);
+SQL
+)"
+
+[[ "$promotion_json" == *'"target_type": "assertion"'* || "$promotion_json" == *'"target_type":"assertion"'* ]] || {
+  echo "Token-bound reviewer promotion failed: $promotion_json" >&2
+  exit 1
+}
 
 membership_output="$(psql "$DATABASE_URL" -Atq <<SQL
 SELECT set_config('app.current_role', 'admin', false);

@@ -88,13 +88,41 @@ SELECT rye.create_knowledge_candidate(
   p_target_payload := '{"domain_keys":["api-account-updates","api-title-diligence"],"source_scope":"slack:#api-sales"}'::jsonb,
   p_created_by := 'api-security-mixed-fixture'
 );
+INSERT INTO rye.field_classifications (node_type, field_path, classification, min_role)
+VALUES ('api_account', 'properties.secret_note', 'confidential', 'manager')
+ON CONFLICT (node_type, field_path)
+DO UPDATE SET classification = EXCLUDED.classification, min_role = EXCLUDED.min_role;
 INSERT INTO rye.nodes (node_type, label, properties)
-VALUES ('account', 'API Security Test Account', '{"suite":"api_security"}')
+VALUES (
+  'api_account',
+  'API Security Test Account',
+  '{"suite":"api_security","public_note":"visible","secret_note":"must remain hidden"}'
+)
 RETURNING id;
 SQL
 )"
 
 subject_id="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atq <<<"$seed_sql" | tail -n 1)"
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -v subject_id="$subject_id" <<'SQL' >/dev/null
+SET search_path = rye, public, pg_catalog;
+SELECT set_config('app.current_role', 'admin', false);
+WITH event_row AS (
+  SELECT record_event(
+    'api_subject_classified',
+    'API test subject assigned to account updates',
+    '{}'::jsonb,
+    ARRAY[:'subject_id'::uuid],
+    ARRAY['subject'],
+    'test:api-security'
+  ) AS event_id
+)
+SELECT assign_node_domain_membership(
+  :'subject_id'::uuid,
+  'api-account-updates',
+  event_row.event_id
+)
+FROM event_row;
+SQL
 candidate_token="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atq <<'SQL'
 SET search_path = rye, public, pg_catalog;
 SELECT rye.issue_agent_token('api-candidate-agent', 'api security candidate token');
@@ -187,6 +215,35 @@ if [[ "$context_json" == *"Mixed-domain API candidate should remain hidden"* || 
   echo "$context_json" >&2
   exit 1
 fi
+
+search_json="$(curl -sS -G \
+  -H "Authorization: Bearer ${candidate_token}" \
+  --data-urlencode "domain_keys=api-account-updates" \
+  --data-urlencode "q=API Security Test" \
+  "${BASE_URL}/api/nodes/search")"
+if [[ "$search_json" != *"API Security Test Account"* || "$search_json" == *"must remain hidden"* ]]; then
+  echo "Scoped node search omitted the granted node or exposed a classified field" >&2
+  echo "$search_json" >&2
+  exit 1
+fi
+
+summary_json="$(curl -sS \
+  -H "Authorization: Bearer ${candidate_token}" \
+  "${BASE_URL}/api/nodes/${subject_id}/summary?max_items=10")"
+if [[ "$summary_json" != *"API Security Test Account"* || "$summary_json" == *"must remain hidden"* ]]; then
+  echo "Scoped node summary omitted the granted node or exposed a classified field" >&2
+  echo "$summary_json" >&2
+  exit 1
+fi
+
+foreign_search_status="$(status_code -G \
+  -H "Authorization: Bearer ${candidate_token}" \
+  --data-urlencode "domain_keys=api-title-diligence" \
+  "${BASE_URL}/api/nodes/search")"
+[[ "$foreign_search_status" == "403" ]] || {
+  echo "Expected foreign-domain node search 403, got ${foreign_search_status}" >&2
+  exit 1
+}
 
 candidate_body='{
   "candidate_kind":"fact",

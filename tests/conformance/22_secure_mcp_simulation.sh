@@ -36,10 +36,15 @@ SET search_path = rye, public, pg_catalog;
 SELECT rye.ensure_knowledge_domain('mcp-account-updates', 'MCP Account Updates', 'MCP security simulation domain.');
 SELECT rye.create_agent_identity('mcp-read-agent', 'MCP Read Agent', 'conformance');
 SELECT rye.create_agent_identity('mcp-candidate-agent', 'MCP Candidate Agent', 'conformance');
+SELECT rye.create_agent_identity('mcp-reviewer-agent', 'MCP Reviewer Agent', 'conformance');
 SELECT rye.grant_agent_capability('mcp-read-agent', 'rye.context.read', 'mcp-account-updates');
 SELECT rye.grant_agent_capability('mcp-candidate-agent', 'rye.context.read', 'mcp-account-updates');
 SELECT rye.grant_agent_capability('mcp-candidate-agent', 'rye.observation.create', 'mcp-account-updates');
 SELECT rye.grant_agent_capability('mcp-candidate-agent', 'rye.candidate.create', 'mcp-account-updates');
+SELECT rye.grant_agent_capability('mcp-reviewer-agent', 'rye.context.read', 'mcp-account-updates');
+SELECT rye.grant_agent_capability('mcp-reviewer-agent', 'rye.review.read', 'mcp-account-updates');
+SELECT rye.grant_agent_capability('mcp-reviewer-agent', 'rye.candidate.adjudicate', 'mcp-account-updates');
+SELECT rye.grant_agent_capability('mcp-reviewer-agent', 'rye.authoritative.promote', 'mcp-account-updates');
 SQL
 
 read_token="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atq <<'SQL'
@@ -50,6 +55,11 @@ SQL
 candidate_token="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atq <<'SQL'
 SET search_path = rye, public, pg_catalog;
 SELECT rye.issue_agent_token('mcp-candidate-agent', 'mcp candidate token');
+SQL
+)"
+reviewer_token="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atq <<'SQL'
+SET search_path = rye, public, pg_catalog;
+SELECT rye.issue_agent_token('mcp-reviewer-agent', 'mcp reviewer token');
 SQL
 )"
 
@@ -82,8 +92,9 @@ fi
 
 read_tools="$(RYE_API_URL="$BASE_URL" RYE_AGENT_TOKEN="$read_token" RYE_MCP_PRINT_TOOLS=1 node "$MCP_SCRIPT")"
 candidate_tools="$(RYE_API_URL="$BASE_URL" RYE_AGENT_TOKEN="$candidate_token" RYE_MCP_PRINT_TOOLS=1 node "$MCP_SCRIPT")"
+reviewer_tools="$(RYE_API_URL="$BASE_URL" RYE_AGENT_TOKEN="$reviewer_token" RYE_MCP_PRINT_TOOLS=1 node "$MCP_SCRIPT")"
 
-if [[ "$read_tools" != *"rye.get_context_pack"* || "$read_tools" != *"rye.list_domains"* ]]; then
+if [[ "$read_tools" != *"rye.get_context_pack"* || "$read_tools" != *"rye.list_domains"* || "$read_tools" != *"rye.search_nodes"* || "$read_tools" != *"rye.get_node_summary"* ]]; then
   echo "Read-only MCP agent did not expose expected read tools" >&2
   echo "$read_tools" >&2
   exit 1
@@ -101,11 +112,24 @@ if [[ "$candidate_tools" != *"rye.propose_candidate_fact"* || "$candidate_tools"
   exit 1
 fi
 
-if [[ "$candidate_tools" == *"promote"* || "$read_tools" == *"promote"* ]]; then
-  echo "Secure MCP server must not expose promotion tools" >&2
+if [[ "$candidate_tools" == *"promote"* || "$read_tools" == *"promote"* || "$candidate_tools" == *"adjudicate"* || "$read_tools" == *"adjudicate"* ]]; then
+  echo "Non-reviewer MCP agents exposed reviewer tools" >&2
   echo "$candidate_tools" >&2
   exit 1
 fi
+
+for expected_tool in \
+  rye.list_review_queue \
+  rye.adjudicate_candidate \
+  rye.evaluate_process_transition \
+  rye.promote_candidate \
+  rye.apply_process_transition; do
+  if [[ "$reviewer_tools" != *"${expected_tool}"* ]]; then
+    echo "Reviewer MCP agent omitted ${expected_tool}" >&2
+    echo "$reviewer_tools" >&2
+    exit 1
+  fi
+done
 
 if ! rg -n "maxPayloadBytes|ensurePayloadSize|statement: z\\.string\\(\\)\\.min\\(1\\)\\.max\\(4000\\)" "$MCP_SCRIPT" >/dev/null; then
   echo "Secure MCP server is missing oversized or invalid payload guards" >&2

@@ -76,6 +76,47 @@ if (hasCapability("rye.context.read")) {
       openWorldHint: false,
     },
   }, async () => jsonToolResult(await apiGet("/api/domains")));
+
+  registerTool("rye.search_nodes", {
+    title: "Search Scoped Rye Knowledge",
+    description: "Search nodes only when every active node domain is visible to this agent.",
+    inputSchema: {
+      query: z.string().max(300).optional(),
+      domain_keys: z.array(z.string().min(1).max(120)).min(1).max(20),
+      scope_ref: z.string().min(1).max(300).optional(),
+      limit: z.number().int().min(1).max(100).default(25).optional(),
+    },
+    annotations: {
+      readOnlyHint: true,
+      openWorldHint: false,
+    },
+  }, async (input) => {
+    const query = new URLSearchParams();
+    if (input.query) query.set("q", input.query);
+    query.set("domain_keys", input.domain_keys.join(","));
+    if (input.scope_ref) query.set("scope_ref", input.scope_ref);
+    if (input.limit !== undefined) query.set("limit", String(input.limit));
+    return jsonToolResult(await apiGet(`/api/nodes/search?${query.toString()}`));
+  });
+
+  registerTool("rye.get_node_summary", {
+    title: "Get Scoped Rye Node Summary",
+    description: "Return redacted accepted knowledge, readable relationships, memberships, and bounded event metadata for one node.",
+    inputSchema: {
+      node_id: z.string().uuid(),
+      scope_ref: z.string().min(1).max(300).optional(),
+      max_items: z.number().int().min(1).max(50).default(10).optional(),
+    },
+    annotations: {
+      readOnlyHint: true,
+      openWorldHint: false,
+    },
+  }, async (input) => {
+    const query = new URLSearchParams();
+    if (input.scope_ref) query.set("scope_ref", input.scope_ref);
+    if (input.max_items !== undefined) query.set("max_items", String(input.max_items));
+    return jsonToolResult(await apiGet(`/api/nodes/${input.node_id}/summary?${query.toString()}`));
+  });
 }
 
 if (hasCapability("rye.observation.create")) {
@@ -157,6 +198,83 @@ if (hasCapability("rye.review.read")) {
     if (input.offset !== undefined) query.set("offset", String(input.offset));
     return jsonToolResult(await apiGet(`/api/review-queue?${query.toString()}`));
   });
+}
+
+if (hasCapability("rye.candidate.adjudicate")) {
+  registerTool("rye.adjudicate_candidate", {
+    title: "Adjudicate Rye Candidate",
+    description: "Mark a scoped candidate as needing review, rejected, duplicate, or superseded without promoting it.",
+    inputSchema: {
+      candidate_id: z.string().uuid(),
+      status: z.enum(["needs_review", "rejected", "duplicate", "superseded"]),
+      reason: z.string().min(1).max(1000).optional(),
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      openWorldHint: false,
+    },
+  }, async (input) => jsonToolResult(await apiPost(
+    `/api/candidates/${input.candidate_id}/status`,
+    { status: input.status, reason: input.reason },
+  )));
+
+  registerTool("rye.evaluate_process_transition", {
+    title: "Evaluate Governed Process Transition",
+    description: "Return an explainable allow, review, or deny decision without applying the transition.",
+    inputSchema: {
+      candidate_id: z.string().uuid(),
+      actor_ref: z.string().min(1).max(300),
+      actor_node_id: z.string().uuid().optional(),
+      as_of: z.string().min(1).max(80).optional(),
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      openWorldHint: false,
+    },
+  }, async (input) => jsonToolResult(await apiPost(
+    `/api/candidates/${input.candidate_id}/process-transition/evaluate`,
+    { ...input, candidate_id: undefined, apply: false },
+  )));
+}
+
+if (hasCapability("rye.authoritative.promote")) {
+  registerTool("rye.promote_candidate", {
+    title: "Promote Rye Candidate",
+    description: "Promote a scoped non-process candidate through Rye's token-bound promotion contract.",
+    inputSchema: {
+      candidate_id: z.string().uuid(),
+      promotion: z.record(z.string(), z.unknown()),
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      openWorldHint: false,
+    },
+  }, async (input) => jsonToolResult(await apiPost(
+    `/api/candidates/${input.candidate_id}/promote`,
+    input.promotion,
+  )));
+
+  registerTool("rye.apply_process_transition", {
+    title: "Apply Governed Process Transition",
+    description: "Evaluate and atomically apply a process transition only when the result is allow.",
+    inputSchema: {
+      candidate_id: z.string().uuid(),
+      actor_ref: z.string().min(1).max(300),
+      actor_node_id: z.string().uuid().optional(),
+      as_of: z.string().min(1).max(80).optional(),
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      openWorldHint: false,
+    },
+  }, async (input) => jsonToolResult(await apiPost(
+    `/api/candidates/${input.candidate_id}/process-transition/evaluate`,
+    { ...input, candidate_id: undefined, apply: true },
+  )));
 }
 
 if (hasCapability("rye.audit.read")) {

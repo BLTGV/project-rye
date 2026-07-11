@@ -95,6 +95,30 @@ SELECT format(
   :'rye_schema',
   :'runtime_role'
 ) \gexec
+
+SELECT format(
+  'GRANT EXECUTE ON FUNCTION %I.agent_review_queue_with_token(text,text,text,text,boolean,integer,integer) TO %I',
+  :'rye_schema',
+  :'runtime_role'
+) \gexec
+
+SELECT format(
+  'GRANT EXECUTE ON FUNCTION %I.agent_adjudicate_candidate_with_token(text,uuid,text,text) TO %I',
+  :'rye_schema',
+  :'runtime_role'
+) \gexec
+
+SELECT format(
+  'GRANT EXECUTE ON FUNCTION %I.agent_evaluate_process_transition_with_token(text,uuid,text,uuid,timestamptz,boolean) TO %I',
+  :'rye_schema',
+  :'runtime_role'
+) \gexec
+
+SELECT format(
+  'GRANT EXECUTE ON FUNCTION %I.agent_promote_candidate_with_token(text,uuid,jsonb) TO %I',
+  :'rye_schema',
+  :'runtime_role'
+) \gexec
 SQL
 
 echo "Granted token-bound Rye agent runtime functions to ${RUNTIME_ROLE}"

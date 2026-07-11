@@ -144,6 +144,20 @@ token-bound reads and appear in `node_domain_membership_gaps`.
 `end_node_domain_membership()`. Candidate and agent-observation helpers attach
 known target domains automatically.
 
+#### `process_transition_decisions` — Governed Promotion Decisions
+
+Append-only snapshots of process transition evaluation. Each row retains the
+candidate, process and subject, business time, actor, prior and proposed state,
+`allow`/`review`/`deny`, reason codes, exact process and transition assertion
+versions, matched temporal authorities, missing evidence, risk, evaluation
+event, and optional applied assertion.
+
+#### `read_model_refresh_policies` and `read_model_refresh_state`
+
+Per-materialized-view refresh mode and maximum staleness, plus dirty reason,
+last start/completion/failure, duration, approximate rows, and refresh count.
+Core node, edge, and assertion writes mark registered models dirty.
+
 #### `node_merges` — Deduplication Tracking
 
 Records which nodes were merged into which canonical nodes, and by whom.
@@ -206,6 +220,24 @@ Administrative worklist for active nodes with no current domain membership and
 candidates whose declared domain is unknown or lacks a matching membership.
 Each row has a stable `gap_id`, filterable `gap_type`, severity, node, and
 reason. Scoped runtime functions never infer through these gaps.
+
+#### `process_transition_compliance` and `process_transition_gaps`
+
+The compliance view classifies decisions as `compliant`, `missing_evidence`,
+`noncompliant`, or `requires_review`. The gap view lists unevaluated and
+reviewable process candidates with stable gap IDs.
+
+#### `events_safe` and `cdc_protection_gaps`
+
+`events_safe` exposes protected CDC v2 payloads and strips full rows from
+legacy CDC metadata. Raw legacy CDC events are admin-only. The gap view lists
+immutable legacy payloads awaiting retention expiry or protected reingestion.
+
+#### `read_model_freshness` and `read_model_freshness_gaps`
+
+Current `fresh`, `dirty`, `stale`, `never_refreshed`, or `disabled` status for
+every registered materialized view, plus a queryable worklist for non-fresh
+enabled models.
 
 #### `active_disputes`
 
@@ -275,7 +307,11 @@ Attaches a CDC trigger (`capture_domain_change`) to a domain table. After this, 
 
 #### `capture_domain_change()`
 
-Trigger function called by `track_table()`. Not called directly. Fires on INSERT/UPDATE/DELETE, checks if the affected row has a linked node in `node_source_map`, and if so, calls `record_event()` with the full before/after diff. Unlinked rows are silently skipped.
+Trigger function called by `track_table()`. Not called directly. Fires on
+INSERT/UPDATE/DELETE, checks if the affected row has a linked node in
+`node_source_map`, and records a CDC v2 event. Public fields keep before/after
+values; classified fields keep only classification and digest. Unlinked rows
+are silently skipped.
 
 Supports tables with any primary key column — tries `id` first, then falls back to the table's actual PK column via `pg_index` catalog lookup.
 
@@ -406,6 +442,10 @@ agent_search_nodes_with_token(p_token, p_query, p_domain_keys, p_scope_ref, p_li
 agent_node_summary_with_token(p_token, p_node_id, p_scope_ref, p_max_items) → jsonb
 agent_submit_observation_with_token(p_token, p_observation) → uuid
 agent_create_candidate_with_token(p_token, p_candidate, p_idempotency_key) → uuid
+agent_review_queue_with_token(p_token, p_status, p_kind, p_query, p_include_closed, p_limit, p_offset) → jsonb
+agent_adjudicate_candidate_with_token(p_token, p_candidate_id, p_status, p_reason) → jsonb
+agent_promote_candidate_with_token(p_token, p_candidate_id, p_promotion) → jsonb
+agent_evaluate_process_transition_with_token(p_token, p_candidate_id, p_actor_ref, p_actor_node_id, p_as_of, p_apply) → jsonb
 ```
 
 These functions authenticate the token, establish trusted internal RLS context,
@@ -418,6 +458,17 @@ Summary separates accepted current assertions, relationships, and recent event
 metadata. It omits access-gated assertion types, raw event summaries, and
 classified node fields. Observation and candidate writes require at least one
 domain and create sourced memberships for the new node.
+
+Reviewer functions repeat candidate domain and scope checks and never treat the
+database role as business authority.
+
+#### `evaluate_process_transition()`
+
+Compiles accepted prior state, the effective process definition and transition
+policy, temporal actor authority, speech act, required evidence, prior steps,
+impact, and reversibility into an atomic `allow`, `review`, or `deny` snapshot.
+With `p_apply = true`, only an `allow` result promotes the candidate. Generic
+assertion promotion rejects process-marked candidates.
 
 #### `assign_node_domain_membership()` and `end_node_domain_membership()`
 
@@ -499,9 +550,12 @@ Processes multiple `link_record()` calls in a single function call. Accepts para
 refresh_materialized_views() → void
 ```
 
-Refreshes all profile materialized views (`opportunities_active`, `contacts_directory`, `task_board`) that exist in the database. Uses `CONCURRENTLY` to allow reads during refresh. Safe to call regardless of which profiles are installed.
+Force-refreshes every enabled registered materialized view with `CONCURRENTLY`
+and records duration, completion, failure, and approximate row count.
 
-**Why it exists:** Profile materialized views need periodic refreshing to reflect current data. This function handles the check-and-refresh pattern so callers don't need to know which profiles are active.
+Related functions: `sync_read_model_registry()`,
+`configure_read_model_refresh()`, `refresh_read_model()`,
+`ensure_read_model_fresh()`, and `refresh_due_materialized_views()`.
 
 #### `generate_crm_code()`
 

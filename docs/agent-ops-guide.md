@@ -75,7 +75,7 @@ then grant it only Rye's token-bound functions:
   --role rye_agent_runtime
 ```
 
-The script grants database connection, Rye schema usage, and execution on five
+The script grants database connection, Rye schema usage, and execution on nine
 token-bound functions. It grants no table, sequence, raw helper, token-issuer,
 or administrative privileges. The role is transport isolation only; Rye agent
 tokens and capability rows still decide business access.
@@ -86,6 +86,49 @@ generated SQL, command arguments, logs, audit metadata, or error messages.
 Candidate and observation inputs are JSON objects so SQL, API, MCP, and CLI
 adapters can share one stable payload contract. Both require explicit
 `domain_keys`; missing domains are rejected rather than treated as global.
+
+Reviewer tokens use `agent_review_queue_with_token()`,
+`agent_adjudicate_candidate_with_token()`,
+`agent_promote_candidate_with_token()`, and
+`agent_evaluate_process_transition_with_token()`. Each function repeats the
+candidate's complete domain and scope checks. A PostgreSQL role does not grant
+review or promotion authority by itself.
+
+## Governed Process Transitions
+
+Mark a process candidate explicitly in `target_payload` with
+`process_node_id`, `subject_node_id`, `process_key`, `transition_key`,
+`from_state`, `to_state`, `speech_act`, `domain_keys`, and available evidence.
+Call `evaluate_process_transition()` from trusted administration or the
+token-bound wrapper from an agent.
+
+The evaluator reads the process definition, transition policy, accepted prior
+state, temporal role and domain authority, required evidence, prior steps, and
+risk at the requested business time. It records `allow`, `review`, or `deny`
+with the exact policy assertion IDs. `p_apply = true` promotes only `allow`.
+Process-marked candidates cannot use generic assertion promotion.
+
+Routine transitions do not require repeated human approval when an active
+policy, authorized decision speech act, and required evidence all match.
+Missing policy, identity, authority, or evidence fails to review. A stale or
+explicitly invalid transition denies. `process_transition_compliance`
+distinguishes missing evidence from proven noncompliance.
+
+## CDC Payload Safety
+
+CDC payload version 2 preserves public fields and replaces every classified
+field value with its classification and SHA-256 digest. The source domain table
+remains the place to retrieve the value. Immutable legacy full-row CDC events
+are admin-only and appear in `cdc_protection_gaps`; `events_safe` never returns
+their raw before/after rows.
+
+## Read Model Freshness
+
+Core writes mark registered materialized views dirty. CRM and PM workspace
+reads call `ensure_read_model_fresh()` and follow each model's `on_read`,
+`scheduled`, or `manual` policy. Inspect `read_model_freshness` and
+`read_model_freshness_gaps`; use `refresh_due_materialized_views()` for a
+scheduler and `refresh_read_model()` for a targeted operator refresh.
 
 ## Safe Write Path
 

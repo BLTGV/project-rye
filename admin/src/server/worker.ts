@@ -8,6 +8,7 @@ import {
   acceptPmMilestonePlanCandidate,
   acceptPmTaskPlanCandidate,
   acceptSourcePolicyCandidate,
+  adjudicateAgentCandidateWithToken,
   authenticateAgentToken,
   authorizeAgentAction,
   createAgentKnowledgeCandidate,
@@ -35,15 +36,21 @@ import {
   fetchNodeDetail,
   fetchNodeKnowledge,
   fetchQuoteTimeline,
+  fetchReadModelFreshness,
   fetchReconKpis,
   fetchRecentEvents,
   fetchTopClients,
   fetchTopLessees,
   fetchTopOwners,
+  evaluateAgentProcessTransitionWithToken,
+  evaluateProcessTransition,
   promoteKnowledgeCandidate,
+  promoteAgentCandidateWithToken,
   recordAgentActionOutcome,
+  searchAgentNodesWithToken,
   searchNodes,
   setKnowledgeCandidateStatus,
+  summarizeAgentNodeWithToken,
   submitAgentObservation,
   type AgentAuthContext,
 } from "./queries";
@@ -190,6 +197,13 @@ const observationSchema = z.object({
   properties: jsonRecordSchema.optional(),
 });
 
+const processTransitionEvaluationSchema = z.object({
+  actor_ref: z.string().trim().min(1).max(300),
+  actor_node_id: uuidSchema.nullable().optional(),
+  as_of: z.string().trim().min(1).max(80).nullable().optional(),
+  apply: z.boolean().optional(),
+});
+
 function boolQuery(value: string | undefined): boolean {
   return value === "1" || value === "true" || value === "yes" || value === "on";
 }
@@ -285,20 +299,22 @@ function hasGlobalCapability(auth: AgentAuthContext | null, capability: string):
  */
 function isScopedAgentRoute(method: string, path: string): boolean {
   if (method === "GET") {
-    return [
+    if ([
       "/api/agent/me",
       "/api/domains",
       "/api/context-pack",
       "/api/review-queue",
       "/api/audit/actions",
       "/api/candidates/review",
-    ].includes(path);
+      "/api/nodes/search",
+    ].includes(path)) return true;
+    return /^\/api\/nodes\/[^/]+\/summary$/.test(path);
   }
 
   if (method !== "POST") return false;
   if (path === "/api/observations" || path === "/api/candidates") return true;
 
-  return /^\/api\/candidates\/[^/]+\/(status|promote|accept-source-policy|accept-crm-stage-plan|accept-pm-task-plan|accept-pm-milestone-plan)$/.test(
+  return /^\/api\/candidates\/[^/]+\/(status|promote|process-transition\/evaluate|accept-source-policy|accept-crm-stage-plan|accept-pm-task-plan|accept-pm-milestone-plan)$/.test(
     path
   );
 }
@@ -600,6 +616,11 @@ app.get("/api/workspace/pm", async (c) => {
   return c.json(await fetchPmWorkspace(sql));
 });
 
+app.get("/api/read-models/freshness", async (c) => {
+  const sql = sqlFor(c.get("instance"));
+  return c.json(await fetchReadModelFreshness(sql));
+});
+
 app.get(
   "/api/candidates/review",
   zValidator(
@@ -635,6 +656,82 @@ app.get(
         agentId: c.get("auth")?.agent_id ?? null,
       })
     );
+  }
+);
+
+app.get(
+  "/api/nodes/search",
+  zValidator(
+    "query",
+    z.object({
+      q: z.string().max(300).optional(),
+      domain_keys: z.string().min(1),
+      scope_ref: z.string().max(300).optional(),
+      limit: z.coerce.number().int().min(1).max(100).optional(),
+      instance: z.string().optional(),
+    })
+  ),
+  async (c) => {
+    const token = bearerToken(c.req.raw);
+    if (!token) return c.json({ error: "missing bearer token" }, 401);
+    const query = c.req.valid("query");
+    const domainKeys = domainKeysFromQuery(query.domain_keys);
+    if (domainKeys.length === 0) {
+      return c.json({ error: "at least one domain key is required" }, 400);
+    }
+    const blocked = await enforceCapability(c, {
+      action: "node_search",
+      capability: "rye.context.read",
+      domainKeys,
+      scopeRef: query.scope_ref ?? c.get("auth")?.default_scope_ref ?? null,
+      request: { query: query.q ?? "", limit: query.limit ?? 25 },
+    });
+    if (blocked) return blocked;
+    return c.json(
+      await searchAgentNodesWithToken(sqlFor(c.get("instance")), token, {
+        query: query.q ?? "",
+        domainKeys,
+        scopeRef: query.scope_ref ?? c.get("auth")?.default_scope_ref ?? null,
+        limit: query.limit,
+      })
+    );
+  }
+);
+
+app.get(
+  "/api/nodes/:id/summary",
+  zValidator("param", z.object({ id: uuidSchema })),
+  zValidator(
+    "query",
+    z.object({
+      scope_ref: z.string().max(300).optional(),
+      max_items: z.coerce.number().int().min(1).max(50).optional(),
+      instance: z.string().optional(),
+    })
+  ),
+  async (c) => {
+    const token = bearerToken(c.req.raw);
+    if (!token) return c.json({ error: "missing bearer token" }, 401);
+    const query = c.req.valid("query");
+    try {
+      return c.json(
+        await summarizeAgentNodeWithToken(
+          sqlFor(c.get("instance")),
+          token,
+          c.req.valid("param").id,
+          {
+            scopeRef: query.scope_ref ?? c.get("auth")?.default_scope_ref ?? null,
+            maxItems: query.max_items,
+          }
+        )
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes("not authorized")) {
+        return c.json({ error: "forbidden", reason: "node is outside the complete domain grant" }, 403);
+      }
+      throw error;
+    }
   }
 );
 
@@ -722,12 +819,17 @@ app.post(
     });
     if (blocked) return blocked;
 
-    return c.json(
-      await setKnowledgeCandidateStatus(sql, candidateId, {
-        ...input,
-        actor: input.actor ?? authActor(c),
-      })
-    );
+    const token = bearerToken(c.req.raw);
+    if (apiAuthRequired(c.env) && token) {
+      return c.json(
+        await adjudicateAgentCandidateWithToken(sql, token, candidateId, {
+          status: input.status,
+          reason: input.reason,
+        })
+      );
+    }
+
+    return c.json(await setKnowledgeCandidateStatus(sql, candidateId, input));
   }
 );
 
@@ -750,11 +852,52 @@ app.post(
     });
     if (blocked) return blocked;
 
+    const token = bearerToken(c.req.raw);
+    if (apiAuthRequired(c.env) && token) {
+      return c.json(
+        await promoteAgentCandidateWithToken(
+          sql,
+          token,
+          candidateId,
+          input as Record<string, unknown>
+        )
+      );
+    }
+
+    return c.json(await promoteKnowledgeCandidate(sql, candidateId, input));
+  }
+);
+
+app.post(
+  "/api/candidates/:id/process-transition/evaluate",
+  zValidator("param", z.object({ id: uuidSchema })),
+  zValidator("json", processTransitionEvaluationSchema),
+  async (c) => {
+    const token = bearerToken(c.req.raw);
+    const candidateId = c.req.valid("param").id;
+    const input = c.req.valid("json");
+    const sql = sqlFor(c.get("instance"));
+    if (!apiAuthRequired(c.env)) {
+      return c.json(await evaluateProcessTransition(sql, candidateId, input));
+    }
+
+    if (!token) {
+      return c.json({ error: "process transition evaluation requires an authenticated agent" }, 401);
+    }
+
+    const envelope = await fetchCandidateAccessEnvelope(sql, candidateId);
+    const blocked = await enforceCapability(c, {
+      action: "process_transition_evaluate",
+      capability: input.apply ? "rye.authoritative.promote" : "rye.candidate.adjudicate",
+      domainKeys: envelope.domain_keys,
+      scopeRef: envelope.source_scope,
+      targetRef: candidateId,
+      request: { apply: input.apply ?? false },
+    });
+    if (blocked) return blocked;
+
     return c.json(
-      await promoteKnowledgeCandidate(sql, candidateId, {
-        ...input,
-        actor: input.actor ?? authActor(c),
-      })
+      await evaluateAgentProcessTransitionWithToken(sql, token, candidateId, input)
     );
   }
 );

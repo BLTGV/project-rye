@@ -136,6 +136,10 @@ access and no raw identity-taking or administrative helpers. Direct database
 agents call the `*_with_token` functions with parameter binding; bearer tokens
 must never appear in generated SQL or process arguments.
 
+The grant includes scoped context, search, summary, observation, candidate,
+review queue, adjudication, promotion, and governed process evaluation. The
+token's Rye capability rows still decide which of those calls are allowed.
+
 ## Source Commands
 
 Review known source accounts and containers:

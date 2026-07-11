@@ -48,6 +48,9 @@ BEGIN
   IF to_regclass('rye.assertions') IS NULL THEN v_missing := array_append(v_missing, 'assertions'); END IF;
   IF to_regclass('rye.artifacts') IS NULL THEN v_missing := array_append(v_missing, 'artifacts'); END IF;
   IF to_regclass('rye.node_domain_memberships') IS NULL THEN v_missing := array_append(v_missing, 'node_domain_memberships'); END IF;
+  IF to_regclass('rye.process_transition_decisions') IS NULL THEN v_missing := array_append(v_missing, 'process_transition_decisions'); END IF;
+  IF to_regclass('rye.read_model_refresh_policies') IS NULL THEN v_missing := array_append(v_missing, 'read_model_refresh_policies'); END IF;
+  IF to_regclass('rye.read_model_refresh_state') IS NULL THEN v_missing := array_append(v_missing, 'read_model_refresh_state'); END IF;
 
   IF array_length(v_missing, 1) IS NOT NULL THEN
     RAISE EXCEPTION 'Missing core tables: %', array_to_string(v_missing, ', ');
@@ -81,8 +84,20 @@ BEGIN
      OR to_regprocedure('rye.agent_node_summary_with_token(text,uuid,text,integer)') IS NULL
      OR to_regprocedure('rye.agent_submit_observation_with_token(text,jsonb)') IS NULL
      OR to_regprocedure('rye.agent_create_candidate_with_token(text,jsonb,text)') IS NULL
+     OR to_regprocedure('rye.agent_review_queue_with_token(text,text,text,text,boolean,integer,integer)') IS NULL
+     OR to_regprocedure('rye.agent_adjudicate_candidate_with_token(text,uuid,text,text)') IS NULL
+     OR to_regprocedure('rye.agent_evaluate_process_transition_with_token(text,uuid,text,uuid,timestamp with time zone,boolean)') IS NULL
+     OR to_regprocedure('rye.agent_promote_candidate_with_token(text,uuid,jsonb)') IS NULL
   THEN
     RAISE EXCEPTION 'token-bound agent runtime function signature missing';
+  END IF;
+
+  IF to_regprocedure('rye.sync_read_model_registry(text,interval)') IS NULL
+     OR to_regprocedure('rye.refresh_read_model(text,text,boolean)') IS NULL
+     OR to_regprocedure('rye.ensure_read_model_fresh(text,text)') IS NULL
+     OR to_regprocedure('rye.refresh_due_materialized_views()') IS NULL
+  THEN
+    RAISE EXCEPTION 'read model freshness function signature missing';
   END IF;
 
   IF NOT EXISTS (
@@ -107,6 +122,29 @@ BEGIN
         AND c.relforcerowsecurity = true
   ) THEN
     RAISE EXCEPTION 'node_domain_memberships RLS is not enabled+forced';
+  END IF;
+
+  IF NOT EXISTS (
+      SELECT 1
+      FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = v_schema
+        AND c.relname = 'process_transition_decisions'
+        AND c.relrowsecurity = true
+        AND c.relforcerowsecurity = true
+  ) THEN
+    RAISE EXCEPTION 'process_transition_decisions RLS is not enabled+forced';
+  END IF;
+
+  IF NOT EXISTS (
+      SELECT 1
+      FROM pg_policies
+      WHERE schemaname = v_schema
+        AND tablename = 'events'
+        AND policyname = 'event_read_policy'
+        AND coalesce(qual, '') LIKE '%cdc_payload_version%'
+  ) THEN
+    RAISE EXCEPTION 'event_read_policy does not fail closed for legacy CDC payloads';
   END IF;
 
   IF EXISTS (

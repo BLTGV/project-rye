@@ -332,7 +332,13 @@ SELECT
 FROM nodes;
 ```
 
-This applies to all views: `current_assertions`, `node_context`, and `nodes_secure`.
+This applies to all views, including `current_assertions`, `node_context`,
+`nodes_secure`, `events_safe`, process diagnostics, and freshness diagnostics.
+
+Legacy `domain_change` events created before protected CDC payload version 2
+may contain source rows. The raw event policy limits those immutable events to
+admin context. Non-admin consumers use `events_safe`; administrators use
+`cdc_protection_gaps` for retention or protected-reingestion work.
 
 ### 3.3 Classification Enforcement
 

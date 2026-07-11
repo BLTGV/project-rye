@@ -315,7 +315,10 @@ Usage:
 SELECT track_table('public', 'customers');
 ```
 
-Changes to linked rows produce `domain_change` events with full before/after diff in the `changed_fields` property.
+Changes to linked rows produce CDC payload version 2 `domain_change` events.
+Public fields retain before/after values. Classified fields retain only their
+classification and SHA-256 digest, so change detection remains possible
+without copying the source value into Rye.
 
 ### capture_domain_change — CDC trigger function
 
@@ -486,7 +489,9 @@ Returns rows where a subject has multiple active assertions of the same type, wi
 
 ## 13. Materialized View Refresh
 
-Refreshes all profile materialized views that exist in the database. Uses `CONCURRENTLY` to allow reads during refresh.
+Force-refreshes every enabled registered materialized view with
+`CONCURRENTLY`. Rye records dirty reason, completion, failure, duration,
+approximate row count, and refresh count.
 
 ```sql
 CREATE FUNCTION refresh_materialized_views() RETURNS void;
@@ -498,11 +503,29 @@ Usage:
 SELECT refresh_materialized_views();
 ```
 
-Only refreshes views that are installed — checks `pg_matviews` before each refresh. Safe to call regardless of which profiles are active.
+Use `ensure_read_model_fresh()` for policy-aware reads,
+`refresh_due_materialized_views()` for a scheduler, and
+`read_model_freshness_gaps` for operations. Policies support `on_read`,
+`scheduled`, and `manual` modes with a maximum staleness interval.
 
 ---
 
-## 14. Node Property Updates
+## 14. Governed Process Transition Evaluation
+
+`evaluate_process_transition()` evaluates a process-marked knowledge candidate
+against the accepted state, effective process definition, effective transition
+policy, temporal role and domain authority, speech act, evidence, prior steps,
+impact, and reversibility.
+
+It always records `process_transition_evaluated` and an append-only decision
+snapshot. With `p_apply = true`, only `allow` promotes the state assertion in
+the same transaction. Missing policy, authority, or evidence returns `review`;
+stale and explicitly invalid transitions return `deny`. Generic assertion
+promotion rejects process-marked candidates.
+
+---
+
+## 15. Node Property Updates
 
 Agents (`agent:*` roles) cannot directly UPDATE nodes (blocked by `node_update_policy`). When the node IS the system of record (no backing domain table), use `update_node_properties()` for controlled, audited property updates.
 
@@ -538,7 +561,7 @@ Non-agent roles can also use this function — they already have direct UPDATE a
 
 ---
 
-## 15. Common Query Patterns
+## 16. Common Query Patterns
 
 ### Point-in-time reconstruction
 

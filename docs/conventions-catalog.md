@@ -359,7 +359,10 @@ Domain tables are the system of record. Rye connects them without modifying them
 - Use `link_record(schema, table, id, node_type, label, properties)` to connect domain table rows to the graph. Each distinct `source_id` creates a new node; same `(schema, table, source_id)` updates the existing one. Looks up `node_source_map` first, then `external_id`/`external_source`.
 - Use `link_records_batch(schema, table, ids[], type, labels[], properties[])` for bulk imports — processes multiple records in a single call.
 - Use `track_table(schema, table)` to attach CDC triggers for automatic change tracking. Supports tables with any PK column name.
-- CDC events have type `domain_change` and include `changed_fields` with before/after diffs.
+- CDC events have type `domain_change`. Payload version 2 keeps public values
+  and replaces classified values with classification plus SHA-256 digest.
+- Query `events_safe`. Immutable legacy full-row payloads are admin-only and
+  appear in `cdc_protection_gaps`.
 - Only rows with a linked node (in `node_source_map`) produce CDC events. Unlinked rows are silently skipped.
 
 ## Human-Readable Code Convention
@@ -407,11 +410,28 @@ All views must use `security_invoker = true` (PostgreSQL 15+) so that RLS polici
 
 ## Materialized View Convention
 
-Profile materialized views (`opportunities_active`, `contacts_directory`, `task_board`) need periodic refreshing.
+Profile materialized views (`opportunities_active`, `contacts_directory`, `task_board`) use explicit freshness policy.
 
-- Use `refresh_materialized_views()` to refresh all installed profile views.
+- Registered models use `on_read`, `scheduled`, or `manual` policy and are
+  marked dirty by core writes.
+- Use `read_model_freshness_gaps` for operations,
+  `refresh_due_materialized_views()` for scheduling, and
+  `refresh_materialized_views()` for an operator-forced full refresh.
 - Uses `CONCURRENTLY` — reads continue during refresh.
 - Safe to call regardless of which profiles are installed.
+
+## Governed Process Transition Convention
+
+- Conversation creates evidence and candidates; it never changes accepted
+  process state by itself.
+- A process candidate names its process, subject, transition, business time,
+  speech act, domains, and evidence explicitly.
+- `evaluate_process_transition()` retains the exact effective process,
+  transition policy, and temporal authority rows used for its decision.
+- `allow` may apply atomically; `review` preserves uncertainty; `deny` records
+  a stale or explicitly invalid transition.
+- Missing evidence is not proof of noncompliance. Use
+  `process_transition_compliance` and `process_transition_gaps`.
 
 ## Security Configuration Convention
 

@@ -223,6 +223,41 @@ export function promoteKnowledgeCandidate(
   return post<{ target_type: string; id: string }>(`${BASE}/candidates/${id}/promote`, instance, input);
 }
 
+export interface ProcessTransitionEvaluationInput {
+  actor_ref: string;
+  actor_node_id?: string | null;
+  as_of?: string | null;
+  apply?: boolean;
+}
+
+export interface ProcessTransitionEvaluationResult {
+  decision_id: string;
+  decision: "allow" | "review" | "deny";
+  reason_codes: string[];
+  prior_state: string | null;
+  proposed_state: string | null;
+  impact: string | null;
+  reversible: boolean | null;
+  missing_evidence: string[];
+  missing_prior_steps: string[];
+  applied: boolean;
+  applied_assertion_id: string | null;
+  process_definition_assertion_id: string | null;
+  transition_policy_assertion_id: string | null;
+}
+
+export function evaluateProcessTransition(
+  instance: string,
+  id: string,
+  input: ProcessTransitionEvaluationInput
+) {
+  return post<ProcessTransitionEvaluationResult>(
+    `${BASE}/candidates/${id}/process-transition/evaluate`,
+    instance,
+    input
+  );
+}
+
 export interface AcceptSourcePolicyCandidateInput {
   scope_id: string;
   status_domains: string[];

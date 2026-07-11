@@ -277,6 +277,166 @@ export async function fetchAgentContextPack(
   return rows[0]?.payload ?? {};
 }
 
+export async function searchAgentNodesWithToken(
+  sql: Sql,
+  token: string,
+  opts: {
+    query?: string | null;
+    domainKeys: string[];
+    scopeRef?: string | null;
+    limit?: number;
+  }
+) {
+  const rows = await sql.unsafe(
+    withAdminCte() +
+      `SELECT rye.agent_search_nodes_with_token(
+         p_token       := $1::text,
+         p_query       := $2::text,
+         p_domain_keys := $3::text[],
+         p_scope_ref   := $4::text,
+         p_limit       := $5::integer
+       ) AS payload
+       FROM cfg`,
+    [
+      token,
+      opts.query ?? "",
+      opts.domainKeys,
+      opts.scopeRef ?? null,
+      Math.max(1, Math.min(opts.limit ?? 25, 100)),
+    ]
+  );
+  return rows[0]?.payload ?? {};
+}
+
+export async function summarizeAgentNodeWithToken(
+  sql: Sql,
+  token: string,
+  nodeId: string,
+  opts: { scopeRef?: string | null; maxItems?: number } = {}
+) {
+  const rows = await sql.unsafe(
+    withAdminCte() +
+      `SELECT rye.agent_node_summary_with_token(
+         p_token     := $1::text,
+         p_node_id   := $2::uuid,
+         p_scope_ref := $3::text,
+         p_max_items := $4::integer
+       ) AS payload
+       FROM cfg`,
+    [
+      token,
+      nodeId,
+      opts.scopeRef ?? null,
+      Math.max(1, Math.min(opts.maxItems ?? 10, 50)),
+    ]
+  );
+  return rows[0]?.payload ?? {};
+}
+
+export async function adjudicateAgentCandidateWithToken(
+  sql: Sql,
+  token: string,
+  candidateId: string,
+  input: { status: string; reason?: string | null }
+) {
+  const rows = await sql.unsafe(
+    withAdminCte() +
+      `SELECT rye.agent_adjudicate_candidate_with_token(
+         p_token        := $1::text,
+         p_candidate_id := $2::uuid,
+         p_status       := $3::text,
+         p_reason       := $4::text
+       ) AS payload
+       FROM cfg`,
+    [token, candidateId, input.status, input.reason ?? null]
+  );
+  return rows[0]?.payload ?? {};
+}
+
+export async function promoteAgentCandidateWithToken(
+  sql: Sql,
+  token: string,
+  candidateId: string,
+  promotion: Record<string, unknown>
+) {
+  const rows = await sql.unsafe(
+    withAdminCte() +
+      `SELECT rye.agent_promote_candidate_with_token(
+         p_token        := $1::text,
+         p_candidate_id := $2::uuid,
+         p_promotion    := $3::jsonb
+       ) AS payload
+       FROM cfg`,
+    [token, candidateId, jsonParam(promotion)]
+  );
+  return rows[0]?.payload ?? {};
+}
+
+export async function evaluateAgentProcessTransitionWithToken(
+  sql: Sql,
+  token: string,
+  candidateId: string,
+  input: {
+    actor_ref: string;
+    actor_node_id?: string | null;
+    as_of?: string | null;
+    apply?: boolean;
+  }
+) {
+  const rows = await sql.unsafe(
+    withAdminCte() +
+      `SELECT rye.agent_evaluate_process_transition_with_token(
+         p_token         := $1::text,
+         p_candidate_id  := $2::uuid,
+         p_actor_ref     := $3::text,
+         p_actor_node_id := $4::uuid,
+         p_as_of         := $5::timestamptz,
+         p_apply         := $6::boolean
+       ) AS payload
+       FROM cfg`,
+    [
+      token,
+      candidateId,
+      input.actor_ref,
+      input.actor_node_id ?? null,
+      input.as_of ?? null,
+      input.apply ?? false,
+    ]
+  );
+  return rows[0]?.payload ?? {};
+}
+
+export async function evaluateProcessTransition(
+  sql: Sql,
+  candidateId: string,
+  input: {
+    actor_ref: string;
+    actor_node_id?: string | null;
+    as_of?: string | null;
+    apply?: boolean;
+  }
+) {
+  const rows = await sql.unsafe(
+    withAdminCte() +
+      `SELECT rye.evaluate_process_transition(
+         p_candidate_id  := $1::uuid,
+         p_actor_ref     := $2::text,
+         p_actor_node_id := $3::uuid,
+         p_as_of         := $4::timestamptz,
+         p_apply         := $5::boolean
+       ) AS payload
+       FROM cfg`,
+    [
+      candidateId,
+      input.actor_ref,
+      input.actor_node_id ?? null,
+      input.as_of ?? null,
+      input.apply ?? false,
+    ]
+  );
+  return rows[0]?.payload ?? {};
+}
+
 export async function fetchAgentAuditActions(sql: Sql, limit = 100) {
   const rows = await sql.unsafe(
     withAdminCte() +
@@ -1606,6 +1766,10 @@ export async function fetchCandidateReviewQueue(
              FROM jsonb_array_elements_text(coalesce(f.properties->'review_context_ids', '[]'::jsonb)) ctx_ids(id_text)
              JOIN rye.nodes ctx ON ctx.id::text = ctx_ids.id_text
              WHERE ctx.archived_at IS NULL
+               AND (
+                 $7::uuid IS NULL
+                 OR rye.agent_can_read_node($7::uuid, ctx.id, now(), f.source_scope)
+               )
            ), '[]'::json) AS review_contexts,
            COALESCE((
              SELECT json_agg(json_build_object(
@@ -1619,6 +1783,10 @@ export async function fetchCandidateReviewQueue(
              WHERE e.source_id = f.id
                AND e.edge_type IN ('supported_by', 'derived_from')
                AND e.archived_at IS NULL
+               AND (
+                 $7::uuid IS NULL
+                 OR rye.agent_can_read_node($7::uuid, n.id, now(), f.source_scope)
+               )
            ), '[]'::json) AS supporting_sources,
            COALESCE((
              SELECT json_agg(json_build_object(
@@ -1632,6 +1800,10 @@ export async function fetchCandidateReviewQueue(
              WHERE e.source_id = f.id
                AND e.edge_type = 'promoted_to'
                AND e.archived_at IS NULL
+               AND (
+                 $7::uuid IS NULL
+                 OR rye.agent_can_read_node($7::uuid, n.id, now(), f.source_scope)
+               )
            ), '[]'::json) AS promoted_targets,
            COALESCE((
              SELECT json_agg(json_build_object(
@@ -1697,7 +1869,38 @@ export async function fetchCandidateReviewQueue(
   };
 }
 
+export async function ensureReadModelsFresh(sql: Sql, viewNames: string[]) {
+  if (viewNames.length === 0) return [];
+  const rows = await sql.unsafe(
+    withAdminCte() +
+      `, requested AS (
+         SELECT DISTINCT value AS view_name
+         FROM unnest($1::text[]) value
+       )
+       SELECT COALESCE(
+         json_agg(rye.ensure_read_model_fresh('rye', requested.view_name) ORDER BY requested.view_name),
+         '[]'::json
+       ) AS results
+       FROM cfg, requested`,
+    [viewNames]
+  );
+  return rows[0]?.results ?? [];
+}
+
+export async function fetchReadModelFreshness(sql: Sql) {
+  const rows = await sql.unsafe(
+    withAdminCte() +
+      `SELECT COALESCE(
+         json_agg(row_to_json(freshness) ORDER BY freshness.view_schema, freshness.view_name),
+         '[]'::json
+       ) AS models
+       FROM rye.read_model_freshness freshness, cfg`
+  );
+  return rows[0]?.models ?? [];
+}
+
 export async function fetchCrmWorkspace(sql: Sql) {
+  await ensureReadModelsFresh(sql, ["opportunities_active"]);
   const rows = await sql.unsafe(
     withAdminCte() +
       `, opportunities AS (
@@ -1885,6 +2088,7 @@ export async function fetchCrmWorkspace(sql: Sql) {
 }
 
 export async function fetchPmWorkspace(sql: Sql) {
+  await ensureReadModelsFresh(sql, ["task_board"]);
   const rows = await sql.unsafe(
     withAdminCte() +
       `, tasks AS (

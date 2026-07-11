@@ -40,8 +40,10 @@ The Worker has two deployment postures:
 - With `RYE_API_AUTH_MODE=required`, it is a scoped agent API. Bearer tokens are
   authenticated as Rye agent identities. Only explicitly allowlisted agent
   routes are reachable, and those routes apply capability and domain checks.
-  Agent tokens cannot call dashboard, catalog, workspace, node, graph, event,
-  or dispute routes backed by administrative queries.
+  Agent tokens can use scoped context, domain, redacted node search/summary,
+  candidate, review, adjudication, promotion, and governed-process routes.
+  They cannot call dashboard, catalog, workspace, raw node, graph, event, or
+  dispute routes backed by administrative queries.
 
 Do not expose the admin SPA by enabling agent-token authentication on the same
 public route. Deploy the trusted admin surface behind human authentication and
@@ -108,6 +110,19 @@ the request supplies `?instance=<id>` or `X-Rye-Instance`.
 | `/graph` and `/graph/:id` | Free-form graph explorer with anchor switcher |
 | `/events` | Activity log with quick filter and property chips |
 | `/disputes` | Subjects with multiple active assertions of the same type |
+
+The scoped agent deployment also exposes:
+
+| API route | Capability |
+|---|---|
+| `GET /api/nodes/search` and `GET /api/nodes/:id/summary` | `rye.context.read` with complete temporal domain coverage |
+| `GET /api/review-queue` | `rye.review.read` in every candidate domain |
+| `POST /api/candidates/:id/status` | `rye.candidate.adjudicate` |
+| `POST /api/candidates/:id/promote` | `rye.authoritative.promote`; process candidates cannot bypass evaluation |
+| `POST /api/candidates/:id/process-transition/evaluate` | adjudicate for preview, authoritative promotion for apply |
+
+`GET /api/read-models/freshness` is admin-only. CRM and PM workspace routes
+enforce their configured read-model freshness policy before returning data.
 
 Command palette: `⌘K` opens a fuzzy node finder anywhere in the app.
 

@@ -16,6 +16,7 @@ import {
   acceptPmMilestonePlanCandidate,
   acceptPmTaskPlanCandidate,
   acceptSourcePolicyCandidate,
+  evaluateProcessTransition,
   promoteKnowledgeCandidate,
   setKnowledgeCandidateStatus,
   useCandidateReviewQueue,
@@ -27,6 +28,7 @@ import {
   type CandidateReviewRow,
   type KnowledgeCandidateKind,
   type KnowledgeCandidateStatus,
+  type ProcessTransitionEvaluationResult,
   type PromoteKnowledgeCandidateInput,
 } from "../lib/api";
 import { shortId, fmtDate, fmtNumber } from "../lib/format";
@@ -342,14 +344,18 @@ function ReviewWorkspace({
           </div>
         </section>
       </div>
-      <PromotionEditor
-        key={candidate.id}
-        candidate={candidate}
-        promoting={promoting}
-        guidedAccepting={guidedAccepting}
-        onPromote={onPromote}
-        onGuidedAccept={onGuidedAccept}
-      />
+      {isProcessCandidate(candidate) ? (
+        <ProcessTransitionEditor key={candidate.id} candidate={candidate} />
+      ) : (
+        <PromotionEditor
+          key={candidate.id}
+          candidate={candidate}
+          promoting={promoting}
+          guidedAccepting={guidedAccepting}
+          onPromote={onPromote}
+          onGuidedAccept={onGuidedAccept}
+        />
+      )}
     </section>
   );
 }
@@ -412,6 +418,122 @@ function CandidateEvidencePanel({ candidate }: { candidate: CandidateReviewRow }
               </Link>
             ))}
           </div>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function ProcessTransitionEditor({ candidate }: { candidate: CandidateReviewRow }) {
+  const { current } = useInstance();
+  const queryClient = useQueryClient();
+  const target = asRecord(candidate.properties.target_payload);
+  const [actorRef, setActorRef] = useState(
+    firstString(target.actor_ref, candidate.properties.created_by) ?? ""
+  );
+  const [actorNodeId, setActorNodeId] = useState(firstString(target.actor_node_id) ?? "");
+  const [asOf, setAsOf] = useState(firstString(target.effective_at, target.as_of) ?? "");
+  const [result, setResult] = useState<ProcessTransitionEvaluationResult | null>(null);
+
+  const evaluation = useMutation({
+    mutationFn: (apply: boolean) =>
+      evaluateProcessTransition(current, candidate.id, {
+        actor_ref: actorRef.trim(),
+        actor_node_id: actorNodeId.trim() || null,
+        as_of: asOf.trim() || null,
+        apply,
+      }),
+    onSuccess: (next) => {
+      setResult(next);
+      queryClient.invalidateQueries({ queryKey: ["candidate-review", current] });
+    },
+  });
+
+  const disabled = evaluation.isPending || !actorRef.trim();
+
+  return (
+    <section className="card max-h-[720px] min-w-0 overflow-y-auto scrollbar">
+      <h2 className="flex items-center gap-2 text-sm font-medium">
+        <ShieldCheck size={14} /> Governed process decision
+      </h2>
+      <p className="mt-2 text-xs leading-5 text-[color:var(--color-ink-muted)]">
+        Rye compares the accepted prior state with the process and transition policy,
+        the speaker&apos;s authority at that time, required proof, prior steps, and risk.
+        Evaluation records a decision. Apply changes state only when that decision is allow.
+      </p>
+
+      <div className="mt-4 grid grid-cols-1 gap-3 xl:grid-cols-2">
+        <label className="flex min-w-0 flex-col gap-1">
+          <span className="field-label">Business actor reference</span>
+          <input
+            className="input text-sm"
+            value={actorRef}
+            onChange={(event) => setActorRef(event.target.value)}
+            placeholder="slack:maya or system:crm"
+          />
+        </label>
+        <label className="flex min-w-0 flex-col gap-1">
+          <span className="field-label">Confirmed actor node (optional)</span>
+          <input
+            className="input font-mono text-sm"
+            value={actorNodeId}
+            onChange={(event) => setActorNodeId(event.target.value)}
+            placeholder="Person node UUID"
+          />
+        </label>
+      </div>
+      <label className="mt-3 flex min-w-0 flex-col gap-1">
+        <span className="field-label">Business time (optional)</span>
+        <input
+          className="input text-sm"
+          value={asOf}
+          onChange={(event) => setAsOf(event.target.value)}
+          placeholder="ISO timestamp; defaults to now"
+        />
+      </label>
+
+      <div className="mt-4 flex flex-wrap gap-2">
+        <button
+          type="button"
+          className="btn h-9 text-xs"
+          disabled={disabled}
+          onClick={() => evaluation.mutate(false)}
+        >
+          <ClipboardCheck size={14} /> Evaluate only
+        </button>
+        <button
+          type="button"
+          className="btn-primary h-9 text-xs"
+          disabled={disabled}
+          onClick={() => evaluation.mutate(true)}
+        >
+          <CheckCircle2 size={14} /> Evaluate and apply if allowed
+        </button>
+      </div>
+
+      {evaluation.error ? <ErrorLine error={evaluation.error} /> : null}
+      {result ? (
+        <div className="mt-4 rounded-md border border-[color:var(--color-line-soft)] bg-[color:var(--color-surface-2)] p-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="pill">{result.decision}</span>
+            <span className="chip">{result.prior_state ?? "unknown"} → {result.proposed_state ?? "missing"}</span>
+            {result.impact ? <span className="chip">{result.impact} impact</span> : null}
+            {result.applied ? <span className="pill">applied</span> : null}
+          </div>
+          {result.reason_codes.length > 0 ? (
+            <p className="mt-3 text-xs leading-5 text-[color:var(--color-ink-muted)]">
+              {result.reason_codes.join(", ")}
+            </p>
+          ) : (
+            <p className="mt-3 text-xs leading-5 text-[color:var(--color-ink-muted)]">
+              Active policy, authority, state, and evidence all matched.
+            </p>
+          )}
+          {result.missing_evidence.length > 0 ? (
+            <p className="mt-2 text-xs text-[color:var(--color-ink-muted)]">
+              Missing evidence: {result.missing_evidence.join(", ")}
+            </p>
+          ) : null}
         </div>
       ) : null}
     </section>
@@ -1238,6 +1360,11 @@ function candidateKind(candidate: CandidateReviewRow): KnowledgeCandidateKind {
   return kind && KIND_OPTIONS.includes(kind)
     ? (kind as KnowledgeCandidateKind)
     : "fact";
+}
+
+function isProcessCandidate(candidate: CandidateReviewRow): boolean {
+  const target = asRecord(candidate.properties.target_payload);
+  return Boolean(firstString(target.process_node_id, target.transition_key));
 }
 
 function candidateStatement(candidate: CandidateReviewRow): string {

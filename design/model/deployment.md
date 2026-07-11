@@ -60,6 +60,10 @@ Rye is an overlay graph that connects to existing domain data without moving it.
 - **`track_table()`** creates a trigger on a domain table (e.g., `public.contacts`) that fires `rye.capture_domain_change()`. The dynamic SQL in `track_table` schema-qualifies the trigger function reference.
 - **`capture_domain_change()`** fires in the context of the domain table's schema but writes events into `rye.events` via `record_event()`.
 
+CDC payload version 2 never copies classified source values into Rye. It keeps
+classification and digest for change detection. Immutable earlier full-row
+events are admin-only and reported by `cdc_protection_gaps`.
+
 ## Session Variables for Identity
 
 Rye uses PostgreSQL session variables for identity, not database roles:
