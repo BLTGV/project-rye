@@ -50,9 +50,42 @@ All Rye functions include `SET search_path` in their definitions, so calling `ry
 
 ## Safe Read Path
 
-- Use `agent_node_summary(node_id, max_items)` for compact context retrieval
+- Trusted sessions use `agent_node_summary(node_id, max_items)` for compact
+  context retrieval.
+- Restricted direct-database agents use `agent_search_nodes_with_token(...)`
+  and `agent_node_summary_with_token(...)`. They never select Rye tables or
+  call identity-taking helpers directly.
 - Keep `max_items` conservative (10-20) for context-window efficiency
 - Use `current_assertions` view for non-superseded facts (never query `assertions` directly for current state)
+
+Token-bound summaries separate accepted current knowledge, relationships, and
+event metadata. Nodes with missing membership, incomplete multi-domain grants,
+or restricted assertion types fail closed. Use
+`node_domain_membership_gaps` under admin context to repair classification
+instead of inferring a domain from source or channel names.
+
+## Restricted Direct Database Runtime
+
+Create a PostgreSQL login role through your normal credential-management path,
+then grant it only Rye's token-bound functions:
+
+```bash
+./scripts/grant_agent_runtime.sh \
+  --db-url "$DATABASE_URL" \
+  --role rye_agent_runtime
+```
+
+The script grants database connection, Rye schema usage, and execution on five
+token-bound functions. It grants no table, sequence, raw helper, token-issuer,
+or administrative privileges. The role is transport isolation only; Rye agent
+tokens and capability rows still decide business access.
+
+Pass the Rye token as a bound database parameter. Do not interpolate it into
+generated SQL, command arguments, logs, audit metadata, or error messages.
+
+Candidate and observation inputs are JSON objects so SQL, API, MCP, and CLI
+adapters can share one stable payload contract. Both require explicit
+`domain_keys`; missing domains are rejected rather than treated as global.
 
 ## Safe Write Path
 

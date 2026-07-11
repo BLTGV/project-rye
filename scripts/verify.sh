@@ -47,6 +47,7 @@ BEGIN
   IF to_regclass('rye.event_participants') IS NULL THEN v_missing := array_append(v_missing, 'event_participants'); END IF;
   IF to_regclass('rye.assertions') IS NULL THEN v_missing := array_append(v_missing, 'assertions'); END IF;
   IF to_regclass('rye.artifacts') IS NULL THEN v_missing := array_append(v_missing, 'artifacts'); END IF;
+  IF to_regclass('rye.node_domain_memberships') IS NULL THEN v_missing := array_append(v_missing, 'node_domain_memberships'); END IF;
 
   IF array_length(v_missing, 1) IS NOT NULL THEN
     RAISE EXCEPTION 'Missing core tables: %', array_to_string(v_missing, ', ');
@@ -75,6 +76,15 @@ BEGIN
     RAISE EXCEPTION 'mark_assertion_superseded function missing';
   END IF;
 
+  IF to_regprocedure('rye.agent_context_pack_with_token(text,text,text,text[])') IS NULL
+     OR to_regprocedure('rye.agent_search_nodes_with_token(text,text,text[],text,integer)') IS NULL
+     OR to_regprocedure('rye.agent_node_summary_with_token(text,uuid,text,integer)') IS NULL
+     OR to_regprocedure('rye.agent_submit_observation_with_token(text,jsonb)') IS NULL
+     OR to_regprocedure('rye.agent_create_candidate_with_token(text,jsonb,text)') IS NULL
+  THEN
+    RAISE EXCEPTION 'token-bound agent runtime function signature missing';
+  END IF;
+
   IF NOT EXISTS (
       SELECT 1
       FROM pg_class c
@@ -85,6 +95,36 @@ BEGIN
         AND c.relforcerowsecurity = true
   ) THEN
     RAISE EXCEPTION 'assertions RLS is not enabled+forced';
+  END IF;
+
+  IF NOT EXISTS (
+      SELECT 1
+      FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = v_schema
+        AND c.relname = 'node_domain_memberships'
+        AND c.relrowsecurity = true
+        AND c.relforcerowsecurity = true
+  ) THEN
+    RAISE EXCEPTION 'node_domain_memberships RLS is not enabled+forced';
+  END IF;
+
+  IF EXISTS (
+      SELECT 1
+      FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      CROSS JOIN LATERAL aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) acl
+      WHERE n.nspname = v_schema
+        AND p.proname IN (
+          'authenticate_agent_token',
+          'agent_get_context_pack',
+          'agent_submit_observation',
+          'agent_create_candidate'
+        )
+        AND acl.grantee = 0
+        AND acl.privilege_type = 'EXECUTE'
+  ) THEN
+    RAISE EXCEPTION 'raw identity-taking agent helper remains executable by PUBLIC';
   END IF;
 
   IF NOT EXISTS (
