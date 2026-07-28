@@ -33,7 +33,7 @@ every caller:
 - RLS and team/classification boundaries
 - append-only events
 - immutable assertion content
-- supersession and dispute semantics
+- candidate review and supersession semantics
 - current versus historical versus future-effective truth
 - candidate provenance and promotion traceability
 
@@ -102,24 +102,22 @@ Do not insert into `events` and `event_participants` separately.
 
 ## Write Assertions
 
-- Prefer `record_assertion(...)` for accepted assertions. It handles current,
-  historical, candidate, and future-effective modes consistently.
+- Use `record_assertion(...)` for accepted and candidate assertions. Pass a
+  basis and evidence unless the assertion is explicitly assumed.
 - For single-valued facts, use `assertion_key = 'default'` unless a plugin says
   otherwise.
 - For multi-valued facts, use stable domain keys in `assertion_key`.
-- Use `contest_assertion(...)` when the new claim contradicts accepted
-  knowledge and the correct answer is uncertain.
+- When the winner is uncertain, write the competing claim with
+  `status = 'candidate'`. Use `accept_assertion(...)` or
+  `reject_candidate(...)` after review.
 - Do not run direct `UPDATE assertions`.
 
 ## Plans and Future Assertions
 
 Separate **plans** from **future-effective truth**.
 
-- A plan is current-visible knowledge about intended future work. Store it as a
-  `*_plan` assertion or a plugin-specific plan helper.
 - A future assertion is the state Rye should answer on or after a future date.
-  Store it through `record_assertion(...)` with `p_effective_at` in the future,
-  or through a plugin helper that delegates to `record_assertion(...)`.
+  Store it through `schedule_assertion_change(...)`.
 
 Use current reads for "what is true now":
 
@@ -137,33 +135,30 @@ FROM rye.assertions_as_of('2026-10-16T00:00:00Z'::timestamptz)
 WHERE subject_node_id = '<node_uuid>'::uuid;
 ```
 
-For CRM/PM scheduling, prefer the plugin helpers:
-
-- `schedule_deal_stage_change(...)`
-- `schedule_task_status_change(...)`
-- `schedule_milestone_status_change(...)`
-
-These write both a current-visible plan assertion and a future-effective status
-or stage assertion. Do not treat a plan as already true.
+CRM/PM schedulers are retained only as thin compatibility wrappers around the
+generic helper.
 
 ## Knowledge Candidates and Promotion
 
-Use the candidate workflow when source material has plausible facts, tasks,
-decisions, risks, procedures, preferences, or semantic edges but the knowledge
-has not been accepted yet.
+Assertion candidates own uncertain claims. Structural candidate nodes remain
+for proposed tasks, edges, decisions, risks, procedures, preferences, context
+gaps, policy changes, scope changes, and plugin changes.
 
-1. Create proposed candidates with `create_knowledge_candidate(...)`.
-2. Link candidates to source evidence with `supported_by` and to import/run
+1. Create uncertain claims with `record_assertion(..., p_status := 'candidate')`.
+2. Review assertion candidates through `review_queue`.
+3. Accept or reject with `accept_assertion(...)` and
+   `reject_candidate(...)`.
+4. Create structural proposals with `create_knowledge_candidate(...)`.
+5. Link structural candidates to source evidence with `supported_by` and to import/run
    context with `derived_from` using the helper function parameters.
-3. Keep candidate status as `proposed` or `needs_review` until a user or trusted
+6. Keep structural candidate status as `proposed` or `needs_review` until a user or trusted
    reviewer accepts, rejects, marks duplicate, or asks for promotion.
-4. Promote accepted candidates only through:
-   - `promote_candidate_to_assertion(...)`
+7. Promote accepted structural candidates only through:
    - `promote_candidate_to_task(...)`
    - `promote_candidate_to_edge(...)`
-5. Store candidate provenance in promoted assertion/edge/task attrs. The helper
+8. Store candidate provenance in promoted edge/task attrs. The helper
    functions already preserve candidate and source refs.
-6. If source accounts or containers are still `needs_confirmation`, do not rely
+9. If source accounts or containers are still `needs_confirmation`, do not rely
    on their default context to promote knowledge. Use only item-level evidence
    and explicit reviewer decisions.
 
@@ -183,7 +178,7 @@ policy.
 ## Provenance
 
 - Log agent queries with `log_agent_query(agent_id, query, summary, node_ids)`.
-- Attach `source_event_id` to assertions when the fact came from an event.
+- Put assertion provenance in `assertion_evidence`.
 
 ## Safety
 

@@ -33,7 +33,7 @@ import { shortId, fmtDate, fmtNumber } from "../lib/format";
 import { useInstance } from "../lib/instance";
 
 const STATUS_OPTIONS = ["all", "proposed", "needs_review", "accepted", "rejected", "duplicate", "superseded"];
-const KIND_OPTIONS = ["all", "fact", "task", "edge", "decision", "procedure", "preference", "risk"];
+const KIND_OPTIONS = ["all", "task", "edge", "decision", "procedure", "preference", "risk", "context_gap", "policy_change", "scope_change", "plugin_change"];
 
 type TargetType = PromoteKnowledgeCandidateInput["target_type"];
 
@@ -1043,7 +1043,7 @@ function initialPromotionDraft(candidate: CandidateReviewRow) {
     subjectNodeId,
     assertionType:
       firstString(target.assertion_type) ??
-      (kind === "fact" ? "observation" : kind === "decision" ? "decision" : kind === "risk" ? "risk" : kind),
+      (kind === "decision" ? "decision" : kind === "risk" ? "risk" : kind),
     assertionKey:
       firstString(target.assertion_key, candidate.properties.normalized_key) ??
       `candidate_${shortId(candidate.id)}`,
@@ -1237,7 +1237,7 @@ function candidateKind(candidate: CandidateReviewRow): KnowledgeCandidateKind {
   const kind = candidate.properties.candidate_kind;
   return kind && KIND_OPTIONS.includes(kind)
     ? (kind as KnowledgeCandidateKind)
-    : "fact";
+    : "decision";
 }
 
 function candidateStatement(candidate: CandidateReviewRow): string {

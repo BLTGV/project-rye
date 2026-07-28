@@ -53,7 +53,8 @@ For assertion claims, include:
 - effective date or observed date when relevant
 - confidence inputs when useful
 
-Keep provenance connected through `source_event_id`; do not rely on claim JSON alone for provenance.
+Keep provenance connected through `assertion_evidence`; do not rely on claim
+JSON alone for provenance.
 
 ## Property Schema Checklist
 

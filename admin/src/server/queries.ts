@@ -318,8 +318,8 @@ export async function fetchDashboardKpis(sql: Sql): Promise<DashboardKpis> {
          (SELECT COUNT(*) FROM rye.edges)::int AS edges_total,
          (SELECT COUNT(*) FROM rye.events)::int AS events_total,
          (SELECT COUNT(*) FROM rye.assertions)::int AS assertions_total,
-         (SELECT COUNT(*) FROM rye.assertions WHERE superseded_at IS NULL)::int AS active_assertions,
-         (SELECT COUNT(*) FROM rye.active_disputes)::int AS disputed_subjects,
+         (SELECT COUNT(*) FROM rye.current_valid_assertions)::int AS active_assertions,
+         (SELECT COUNT(*) FROM rye.competing_candidates)::int AS disputed_subjects,
          (SELECT COUNT(DISTINCT properties->>'client') FROM rye.events
           WHERE event_type='quote_created' AND occurred_at > now() - interval '90 days')::int AS unique_clients_90d,
          COALESCE((SELECT SUM((properties->>'total_price')::numeric) FROM rye.events
@@ -503,10 +503,16 @@ export async function fetchNodeDetail(sql: Sql, nodeId: string) {
             SELECT id, node_type, label, properties, attrs, external_id, external_source,
                    created_at, archived_at FROM rye.nodes WHERE id = $1::uuid) n),
          'assertions', COALESCE((SELECT json_agg(a ORDER BY a.created_at DESC) FROM (
-            SELECT id, assertion_type, assertion_key, claim, confidence,
-                   effective_at, effective_to, source_event_id, attrs,
+            SELECT a.id, a.assertion_type, a.assertion_key, a.status, a.basis,
+                   a.classification, a.claim, a.confidence,
+                   a.effective_at, a.effective_to,
+                   (SELECT ae.event_id::text
+                    FROM rye.assertion_evidence ae
+                    WHERE ae.assertion_id = a.id AND ae.event_id IS NOT NULL
+                    ORDER BY ae.recorded_at, ae.id LIMIT 1) AS source_event_id,
+                   a.attrs,
                    created_at, superseded_at, superseded_by
-            FROM rye.assertions WHERE subject_node_id = $1::uuid) a), '[]'::json),
+            FROM rye.assertions a WHERE subject_node_id = $1::uuid) a), '[]'::json),
          'events', COALESCE((SELECT json_agg(ev ORDER BY ev.occurred_at DESC) FROM (
             SELECT e.id, e.event_type, e.summary, e.occurred_at, e.properties, e.actor_system, ep.role
             FROM rye.events e JOIN rye.event_participants ep ON ep.event_id = e.id
@@ -554,10 +560,11 @@ async function fetchNodeProvenanceSummary(sql: Sql, nodeId: string) {
   const rows = await sql.unsafe(
     withAdminCte() +
       `, assertion_events AS (
-         SELECT DISTINCT a.source_event_id
+         SELECT DISTINCT evidence.event_id AS source_event_id
          FROM rye.assertions a
+         JOIN rye.assertion_evidence evidence ON evidence.assertion_id = a.id
          WHERE a.subject_node_id = $1::uuid
-           AND a.source_event_id IS NOT NULL
+           AND evidence.event_id IS NOT NULL
        ),
        event_rows AS (
          SELECT e.id,
@@ -783,19 +790,25 @@ async function fetchSourceSummary(sql: Sql, nodeId: string): Promise<SourceSumma
 }
 
 export async function fetchActiveDisputes(sql: Sql, limit = 50) {
-  // Use the canonical rye.active_disputes view (single source of truth): it
-  // surfaces genuine contested assertions (attrs->'dispute', stamped by
-  // contest_assertion) and excludes append-only multi-valued logs.
+  // Keep the existing admin payload shape while reading the v2 candidate
+  // dispute surface.
   const rows = await sql.unsafe(
     withAdminCte() +
       `SELECT d.subject_node_id::text AS subject_node_id,
               n.label, n.node_type, d.assertion_type,
-              d.competing_assertions::int AS competing_claims,
+              d.candidate_count::int AS competing_claims,
               (SELECT json_agg(json_build_object(
                   'id', x->>'assertion_id', 'claim', x->'claim',
-                  'source_event_id', x->>'source_event_id', 'confidence', x->'confidence'))
-               FROM jsonb_array_elements(d.assertions) x) AS claims
-       FROM rye.active_disputes d
+                  'source_event_id', (
+                    SELECT ae.event_id::text
+                    FROM rye.assertion_evidence ae
+                    WHERE ae.assertion_id = (x->>'assertion_id')::uuid
+                      AND ae.event_id IS NOT NULL
+                    ORDER BY ae.recorded_at, ae.id LIMIT 1
+                  ),
+                  'confidence', x->'confidence'))
+               FROM jsonb_array_elements(d.candidates) x) AS claims
+       FROM rye.competing_candidates d
        JOIN rye.nodes n ON n.id = d.subject_node_id, cfg
        ORDER BY competing_claims DESC LIMIT $1`,
     [limit]
@@ -846,9 +859,9 @@ export async function fetchKnowledgeKpis(sql: Sql) {
          (SELECT COUNT(*) FROM rye.edges)::int AS edges_total,
          (SELECT COUNT(*) FROM rye.events)::int AS events_total,
          (SELECT COUNT(*) FROM rye.assertions)::int AS assertions_total,
-         (SELECT COUNT(*) FROM rye.assertions WHERE superseded_at IS NULL)::int AS active_assertions,
+         (SELECT COUNT(*) FROM rye.current_valid_assertions)::int AS active_assertions,
          (SELECT COUNT(*) FROM rye.assertions WHERE superseded_at IS NOT NULL)::int AS superseded_assertions,
-         (SELECT COUNT(*) FROM rye.active_disputes)::int AS disputed_subjects,
+         (SELECT COUNT(*) FROM rye.competing_candidates)::int AS disputed_subjects,
          (SELECT COUNT(*) FROM rye.nodes WHERE node_type='person')::int AS people_total,
          (SELECT COUNT(DISTINCT subject_node_id) FROM rye.assertions)::int AS subjects_total,
          (SELECT COUNT(*) FROM rye.artifacts)::int AS artifacts_total
@@ -885,7 +898,12 @@ export async function fetchAssertionComposition(sql: Sql) {
   return sql.unsafe(
     withAdminCte() +
       `SELECT assertion_type,
-              COUNT(*) FILTER (WHERE superseded_at IS NULL)::int AS active,
+              COUNT(*) FILTER (
+                WHERE status = 'accepted'
+                  AND superseded_at IS NULL
+                  AND (effective_at IS NULL OR effective_at <= now())
+                  AND (effective_to IS NULL OR effective_to > now())
+              )::int AS active,
               COUNT(*) FILTER (WHERE superseded_at IS NOT NULL)::int AS superseded,
               COUNT(*)::int AS total
        FROM rye.assertions, cfg
@@ -899,7 +917,12 @@ export async function fetchTopSubjects(sql: Sql, limit = 10) {
     withAdminCte() +
       `SELECT n.id::text AS id, n.label, n.node_type,
               COUNT(*)::int AS facts,
-              COUNT(*) FILTER (WHERE a.superseded_at IS NULL)::int AS active
+              COUNT(*) FILTER (
+                WHERE a.status = 'accepted'
+                  AND a.superseded_at IS NULL
+                  AND (a.effective_at IS NULL OR a.effective_at <= now())
+                  AND (a.effective_to IS NULL OR a.effective_to > now())
+              )::int AS active
        FROM rye.assertions a JOIN rye.nodes n ON n.id = a.subject_node_id, cfg
        GROUP BY 1,2,3 ORDER BY facts DESC, n.label LIMIT $1`,
     [limit]
@@ -957,7 +980,10 @@ export async function fetchKnowledgeMap(sql: Sql): Promise<KnowledgeMapResult> {
            a.created_at,
            a.superseded_at,
            a.superseded_by::text AS superseded_by,
-           a.source_event_id::text AS source_event_id,
+           (SELECT ae.event_id::text
+            FROM rye.assertion_evidence ae
+            WHERE ae.assertion_id = a.id AND ae.event_id IS NOT NULL
+            ORDER BY ae.recorded_at, ae.id LIMIT 1) AS source_event_id,
            COALESCE(a.claim->>'status_domain', a.claim->>'goal', a.claim->>'plugin_id', a.assertion_key) AS domain,
            COALESCE(
              a.claim->>'title',
@@ -979,7 +1005,8 @@ export async function fetchKnowledgeMap(sql: Sql): Promise<KnowledgeMapResult> {
            ) AS claimed_authority_at
          FROM rye.assertions a
          JOIN rye.nodes n ON n.id = a.subject_node_id
-         WHERE a.assertion_type IN (
+         WHERE a.status = 'accepted'
+           AND a.assertion_type IN (
            'process_document',
            'business_policy',
            'source_of_truth_policy',
@@ -1212,7 +1239,10 @@ export async function fetchKnowledgeMap(sql: Sql): Promise<KnowledgeMapResult> {
            a.effective_at,
            a.effective_to,
            a.created_at,
-           a.source_event_id::text AS source_event_id,
+           (SELECT ae.event_id::text
+            FROM rye.assertion_evidence ae
+            WHERE ae.assertion_id = a.id AND ae.event_id IS NOT NULL
+            ORDER BY ae.recorded_at, ae.id LIMIT 1) AS source_event_id,
            CASE
              WHEN nullif(a.claim->>'effective_at', '') IS NULL THEN a.effective_at
              ELSE (a.claim->>'effective_at')::timestamptz
@@ -1703,10 +1733,9 @@ export async function fetchCrmWorkspace(sql: Sql) {
            a.claim,
            a.effective_at,
            a.created_at
-         FROM rye.assertions a
+         FROM rye.current_valid_assertions a
          JOIN rye.nodes n ON n.id = a.subject_node_id
          WHERE a.assertion_type = 'source_of_truth_policy'
-           AND a.superseded_at IS NULL
            AND a.claim->>'status_domain' IN ('deal_stage', 'sales_next_action')
          ORDER BY a.effective_at NULLS FIRST, a.created_at DESC
        ),
@@ -1978,10 +2007,9 @@ export async function fetchPmWorkspace(sql: Sql) {
            a.claim,
            a.effective_at,
            a.created_at
-         FROM rye.assertions a
+         FROM rye.current_valid_assertions a
          JOIN rye.nodes n ON n.id = a.subject_node_id
          WHERE a.assertion_type = 'source_of_truth_policy'
-           AND a.superseded_at IS NULL
            AND a.claim->>'status_domain' IN ('project_task_status', 'project_milestone_status')
          ORDER BY a.effective_at NULLS FIRST, a.created_at DESC
        ),
@@ -2280,7 +2308,10 @@ export async function fetchNodeKnowledge(
            a.confidence,
            a.effective_at,
            a.effective_to,
-           a.source_event_id::text AS source_event_id,
+           (SELECT ae.event_id::text
+            FROM rye.assertion_evidence ae
+            WHERE ae.assertion_id = a.id AND ae.event_id IS NOT NULL
+            ORDER BY ae.recorded_at, ae.id LIMIT 1) AS source_event_id,
            a.attrs,
            a.created_at,
            a.superseded_at,
@@ -2291,11 +2322,18 @@ export async function fetchNodeKnowledge(
            candidate.label AS candidate_label,
            candidate.properties AS candidate_properties
          FROM rye.assertions a
-         LEFT JOIN rye.events source_event ON source_event.id = a.source_event_id
+         LEFT JOIN LATERAL (
+           SELECT e.id, e.event_type, e.summary
+           FROM rye.assertion_evidence ae
+           JOIN rye.events e ON e.id = ae.event_id
+           WHERE ae.assertion_id = a.id
+           ORDER BY ae.recorded_at, ae.id
+           LIMIT 1
+         ) source_event ON true
          LEFT JOIN rye.nodes candidate ON candidate.id::text = a.attrs->>'candidate_id'
          WHERE a.subject_node_id = $1::uuid
            AND a.assertion_type <> 'candidate_status'
-           AND COALESCE(a.attrs->>'record_mode', '') <> 'candidate'
+           AND a.status = 'accepted'
            AND ($3::boolean OR a.superseded_at IS NULL)
            AND ($6::boolean OR (
              (
@@ -2635,33 +2673,9 @@ export async function promoteKnowledgeCandidate(
   input: PromoteKnowledgeCandidateInput
 ): Promise<{ target_type: string; id: string }> {
   if (input.target_type === "assertion") {
-    const rows = await sql.unsafe(
-      withAdminCte() +
-        `SELECT rye.promote_candidate_to_assertion(
-           p_candidate_id    := $1::uuid,
-           p_subject_node_id := $2::uuid,
-           p_assertion_type  := $3::text,
-           p_assertion_key   := $4::text,
-           p_claim           := $5::jsonb,
-           p_effective_at    := $6::timestamptz,
-           p_effective_to    := $7::timestamptz,
-           p_confidence      := $8::numeric,
-           p_actor           := $9::text
-         )::text AS id
-         FROM cfg`,
-      [
-        candidateId,
-        input.subject_node_id,
-        input.assertion_type,
-        input.assertion_key ?? "default",
-        jsonParam(input.claim),
-        input.effective_at ?? null,
-        input.effective_to ?? null,
-        input.confidence ?? null,
-        input.actor ?? null,
-      ]
+    throw new Error(
+      "Fact promotion was removed in Rye Core Model v2; review assertion candidates with accept_assertion()"
     );
-    return { target_type: "assertion", id: rows[0]?.id as string };
   }
 
   if (input.target_type === "task") {
@@ -2834,13 +2848,18 @@ export async function acceptCrmStagePlanCandidate(
   const rows = await sql.unsafe(
     withAdminCte() +
       `, scheduled AS (
-         SELECT rye.schedule_deal_stage_change(
-           p_opp_id          := $2::uuid,
-           p_stage           := $3::text,
+         SELECT rye.schedule_assertion_change(
+           p_subject_node_id := $2::uuid,
+           p_subject_edge_id := NULL,
+           p_assertion_type  := 'deal_stage',
+           p_assertion_key   := 'default',
+           p_claim           := jsonb_build_object('stage', $3::text, 'reason', $5::text),
            p_effective_at    := $4::timestamptz,
            p_reason          := $5::text,
            p_actor           := $6::text,
-           p_plan_properties := $7::jsonb
+           p_basis           := 'reported',
+           p_confidence      := 1.0,
+           p_attrs           := jsonb_build_object('plan_properties', $7::jsonb)
          ) AS assertion_id
          FROM cfg
        ),
@@ -2910,13 +2929,18 @@ export async function acceptPmTaskPlanCandidate(
   const rows = await sql.unsafe(
     withAdminCte() +
       `, scheduled AS (
-         SELECT rye.schedule_task_status_change(
-           p_task_id         := $2::uuid,
-           p_status          := $3::text,
+         SELECT rye.schedule_assertion_change(
+           p_subject_node_id := $2::uuid,
+           p_subject_edge_id := NULL,
+           p_assertion_type  := 'task_status',
+           p_assertion_key   := 'default',
+           p_claim           := jsonb_build_object('status', $3::text, 'reason', $5::text),
            p_effective_at    := $4::timestamptz,
            p_reason          := $5::text,
            p_actor           := $6::text,
-           p_plan_properties := $7::jsonb
+           p_basis           := 'reported',
+           p_confidence      := 1.0,
+           p_attrs           := jsonb_build_object('plan_properties', $7::jsonb)
          ) AS assertion_id
          FROM cfg
        ),
@@ -2986,13 +3010,18 @@ export async function acceptPmMilestonePlanCandidate(
   const rows = await sql.unsafe(
     withAdminCte() +
       `, scheduled AS (
-         SELECT rye.schedule_milestone_status_change(
-           p_milestone_id    := $2::uuid,
-           p_status          := $3::text,
+         SELECT rye.schedule_assertion_change(
+           p_subject_node_id := $2::uuid,
+           p_subject_edge_id := NULL,
+           p_assertion_type  := 'milestone_status',
+           p_assertion_key   := 'default',
+           p_claim           := jsonb_build_object('status', $3::text, 'reason', $5::text),
            p_effective_at    := $4::timestamptz,
            p_reason          := $5::text,
            p_actor           := $6::text,
-           p_plan_properties := $7::jsonb
+           p_basis           := 'reported',
+           p_confidence      := 1.0,
+           p_attrs           := jsonb_build_object('plan_properties', $7::jsonb)
          ) AS assertion_id
          FROM cfg
        ),
@@ -3073,15 +3102,15 @@ export async function fetchReconKpis(sql: Sql): Promise<ReconKpis> {
          (SELECT COUNT(DISTINCT source_id) FROM rye.edges WHERE edge_type='resolves_to')::int AS resolved_refs,
          (SELECT COUNT(*) FROM rye.nodes n WHERE n.node_type='parcel_reference'
             AND NOT EXISTS (SELECT 1 FROM rye.edges e WHERE e.source_id = n.id AND e.edge_type='resolves_to'))::int AS unresolved_refs,
-         (SELECT COUNT(*) FROM rye.assertions WHERE assertion_type='lease' AND superseded_at IS NULL)::int AS active_leases,
-         (SELECT COUNT(*) FROM rye.assertions WHERE assertion_type='mineral_ownership' AND superseded_at IS NULL)::int AS active_ownership_claims,
-         (SELECT COUNT(DISTINCT claim->>'owner') FROM rye.assertions
-           WHERE assertion_type='mineral_ownership' AND superseded_at IS NULL AND claim ? 'owner')::int AS tracked_owners,
+         (SELECT COUNT(*) FROM rye.current_valid_assertions WHERE assertion_type='lease')::int AS active_leases,
+         (SELECT COUNT(*) FROM rye.current_valid_assertions WHERE assertion_type='mineral_ownership')::int AS active_ownership_claims,
+         (SELECT COUNT(DISTINCT claim->>'owner') FROM rye.current_valid_assertions
+           WHERE assertion_type='mineral_ownership' AND claim ? 'owner')::int AS tracked_owners,
          COALESCE((SELECT SUM(
             CASE WHEN (claim->>'net_mineral_acres') ~ '^[0-9.]+$'
                  THEN (claim->>'net_mineral_acres')::numeric ELSE 0 END)
-           FROM rye.assertions
-           WHERE assertion_type='mineral_ownership' AND superseded_at IS NULL),0)::float AS net_acres_under_mgmt
+           FROM rye.current_valid_assertions
+           WHERE assertion_type='mineral_ownership'),0)::float AS net_acres_under_mgmt
        FROM cfg`
   );
   return rows[0] as unknown as ReconKpis;
@@ -3094,8 +3123,8 @@ export async function fetchTopOwners(sql: Sql, limit = 10) {
               COUNT(*)::int AS claims,
               SUM(CASE WHEN (claim->>'net_mineral_acres') ~ '^[0-9.]+$'
                        THEN (claim->>'net_mineral_acres')::numeric ELSE 0 END)::float AS net_acres
-       FROM rye.assertions, cfg
-       WHERE assertion_type='mineral_ownership' AND superseded_at IS NULL AND claim ? 'owner'
+       FROM rye.current_valid_assertions, cfg
+       WHERE assertion_type='mineral_ownership' AND claim ? 'owner'
        GROUP BY 1 ORDER BY net_acres DESC NULLS LAST LIMIT $1`,
     [limit]
   );
@@ -3108,8 +3137,8 @@ export async function fetchTopLessees(sql: Sql, limit = 10) {
               COUNT(*)::int AS leases,
               AVG(CASE WHEN (claim->>'royalty') ~ '^[0-9.]+$'
                        THEN (claim->>'royalty')::numeric ELSE NULL END)::float AS avg_royalty
-       FROM rye.assertions, cfg
-       WHERE assertion_type='lease' AND superseded_at IS NULL AND claim ? 'lessee'
+       FROM rye.current_valid_assertions, cfg
+       WHERE assertion_type='lease' AND claim ? 'lessee'
        GROUP BY 1 ORDER BY leases DESC LIMIT $1`,
     [limit]
   );

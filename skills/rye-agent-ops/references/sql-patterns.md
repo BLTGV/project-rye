@@ -47,9 +47,12 @@ SELECT record_assertion(
   p_assertion_key   := 'default',
   p_subject_node_id := '<task_uuid>'::uuid,
   p_claim           := '{"status": "in_progress"}',
-  p_source_event_id := '<event_uuid>'::uuid,
   p_confidence      := 0.9,
-  p_mode            := 'current'
+  p_status          := 'accepted',
+  p_basis           := 'reported',
+  p_evidence        := ARRAY[
+    jsonb_build_object('kind', 'source', 'event_id', '<event_uuid>'::uuid)
+  ]
 );
 ```
 
@@ -91,8 +94,8 @@ It centralizes capability checks, idempotency, metadata shape, and audit rows:
 ```sql
 SELECT rye.agent_create_candidate(
   p_agent_id          := '<agent_uuid>'::uuid,
-  p_candidate_kind    := 'fact',
-  p_statement         := 'Acme account health is green after the renewal call.',
+  p_candidate_kind    := 'decision',
+  p_statement         := 'Review the Acme account health after the renewal call.',
   p_target_payload    := '{}'::jsonb,
   p_domain_keys       := ARRAY['account-updates'],
   p_source_scope      := 'slack:#sales',
@@ -122,14 +125,15 @@ domain.
 Generic future-effective assertion:
 
 ```sql
-SELECT record_assertion(
+SELECT schedule_assertion_change(
+  p_subject_node_id := '<scope_uuid>'::uuid,
+  p_subject_edge_id := NULL,
   p_assertion_type  := 'source_of_truth_policy',
   p_assertion_key   := 'status_domain:battery_dispatch_control_state',
-  p_subject_node_id := '<scope_uuid>'::uuid,
   p_claim           := '{"status_domain":"battery_dispatch_control_state","authoritative_source":"BatteryEMS-v2"}',
   p_effective_at    := '2026-10-15T00:00:00Z'::timestamptz,
   p_confidence      := 1.0,
-  p_mode            := 'current'
+  p_basis           := 'reported'
 );
 ```
 
@@ -149,57 +153,34 @@ FROM rye.assertions_as_of('2026-10-16T00:00:00Z'::timestamptz)
 WHERE subject_node_id = '<scope_uuid>'::uuid;
 ```
 
-## Store a plan separately from the future truth
-
-A plan must be visible today. The future truth should become active later.
-
-For CRM:
+## Schedule future truth
 
 ```sql
-SELECT schedule_deal_stage_change(
-  p_opp_id          := '<opportunity_uuid>'::uuid,
-  p_stage           := 'proposal',
+SELECT schedule_assertion_change(
+  p_subject_node_id := '<task_uuid>'::uuid,
+  p_subject_edge_id := NULL,
+  p_assertion_type  := 'task_status',
+  p_assertion_key   := 'default',
+  p_claim           := '{"status":"ready_for_review"}',
   p_effective_at    := '2026-07-15T00:00:00Z'::timestamptz,
-  p_reason          := 'Proposal package target',
-  p_actor           := 'agent:crm-planner',
-  p_plan_properties := '{"owner":"sales","risk":"legal review pending"}'
+  p_reason          := 'Review window opens',
+  p_actor           := 'agent:pm-planner',
+  p_basis           := 'reported'
 );
 ```
 
-For project management:
-
-```sql
-SELECT schedule_task_status_change(
-  p_task_id      := '<task_uuid>'::uuid,
-  p_status       := 'ready_for_review',
-  p_effective_at := '2026-07-15T00:00:00Z'::timestamptz,
-  p_reason       := 'Review window opens',
-  p_actor        := 'agent:pm-planner'
-);
-
-SELECT schedule_milestone_status_change(
-  p_milestone_id := '<milestone_uuid>'::uuid,
-  p_status       := 'launch_ready',
-  p_effective_at := '2026-08-01T00:00:00Z'::timestamptz,
-  p_reason       := 'Launch readiness target',
-  p_actor        := 'agent:pm-planner'
-);
-```
-
-These helpers create current-visible `*_plan` assertions and scheduled
-future-effective status/stage assertions. Do not infer that the planned future
-state is true today.
+Do not infer that the future state is true today.
 
 ## Multi-valued fact keying
 
 ```sql
-INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence)
-VALUES (
-  'ownership',
-  'owner:<owner_uuid>',
-  '<parcel_uuid>',
-  '{"owner_node_id": "<owner_uuid>", "fraction": "1/16"}',
-  0.95
+SELECT record_assertion(
+  p_assertion_type := 'ownership',
+  p_assertion_key := 'owner:<owner_uuid>',
+  p_subject_node_id := '<parcel_uuid>'::uuid,
+  p_claim := '{"owner_node_id":"<owner_uuid>","fraction":"1/16"}',
+  p_confidence := 0.95,
+  p_basis := 'assumed'
 );
 ```
 

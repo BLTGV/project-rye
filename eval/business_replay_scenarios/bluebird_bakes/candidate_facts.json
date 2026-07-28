@@ -210,7 +210,7 @@
     },
     {
       "id": "greenmart-opportunity-stage",
-      "kind": "fact",
+      "kind": "decision",
       "statement": "GreenMart frozen pastry pilot is reported as proposal sent.",
       "subject": "GreenMart frozen pastry pilot",
       "target_shape": "opportunity",
@@ -234,7 +234,7 @@
     },
     {
       "id": "greenmart-forecast",
-      "kind": "fact",
+      "kind": "decision",
       "statement": "GreenMart frozen pastry pilot is reported at $128,000 annualized forecast value with 70% probability.",
       "subject": "GreenMart frozen pastry pilot",
       "target_shape": "opportunity",
@@ -545,7 +545,7 @@
     },
     {
       "id": "lakeside-opportunity-stage",
-      "kind": "fact",
+      "kind": "decision",
       "statement": "Lakeside Coffee seasonal croissant program is reported as qualification.",
       "subject": "Lakeside Coffee seasonal croissant program",
       "target_shape": "opportunity",
@@ -569,7 +569,7 @@
     },
     {
       "id": "lakeside-forecast",
-      "kind": "fact",
+      "kind": "decision",
       "statement": "Lakeside Coffee seasonal croissant program is reported at $52,000 forecast value with 35% probability.",
       "subject": "Lakeside Coffee seasonal croissant program",
       "target_shape": "opportunity",

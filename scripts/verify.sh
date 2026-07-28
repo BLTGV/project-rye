@@ -46,20 +46,41 @@ BEGIN
   IF to_regclass('rye.events') IS NULL THEN v_missing := array_append(v_missing, 'events'); END IF;
   IF to_regclass('rye.event_participants') IS NULL THEN v_missing := array_append(v_missing, 'event_participants'); END IF;
   IF to_regclass('rye.assertions') IS NULL THEN v_missing := array_append(v_missing, 'assertions'); END IF;
+  IF to_regclass('rye.assertion_evidence') IS NULL THEN v_missing := array_append(v_missing, 'assertion_evidence'); END IF;
   IF to_regclass('rye.artifacts') IS NULL THEN v_missing := array_append(v_missing, 'artifacts'); END IF;
 
   IF array_length(v_missing, 1) IS NOT NULL THEN
     RAISE EXCEPTION 'Missing core tables: %', array_to_string(v_missing, ', ');
   END IF;
 
-  IF NOT EXISTS (
+  IF EXISTS (
+      SELECT required.column_name
+      FROM (VALUES
+          ('assertion_key'),
+          ('status'),
+          ('basis'),
+          ('classification'),
+          ('effective_to')
+      ) required(column_name)
+      WHERE NOT EXISTS (
+          SELECT 1
+          FROM information_schema.columns c
+          WHERE c.table_schema = v_schema
+            AND c.table_name = 'assertions'
+            AND c.column_name = required.column_name
+      )
+  ) THEN
+    RAISE EXCEPTION 'one or more Core Model v2 assertion columns are missing';
+  END IF;
+
+  IF EXISTS (
       SELECT 1
       FROM information_schema.columns
       WHERE table_schema = v_schema
         AND table_name = 'assertions'
-        AND column_name = 'assertion_key'
+        AND column_name = 'source_event_id'
   ) THEN
-    RAISE EXCEPTION 'assertions.assertion_key missing';
+    RAISE EXCEPTION 'removed assertions.source_event_id column is still present';
   END IF;
 
   IF to_regclass('rye.idx_assertions_active_unique') IS NULL
@@ -67,8 +88,33 @@ BEGIN
     RAISE EXCEPTION 'active assertion uniqueness index missing';
   END IF;
 
-  IF to_regprocedure('rye.supersede_assertion(uuid,text,uuid,uuid,jsonb,text,timestamp with time zone,uuid,numeric)') IS NULL THEN
+  IF to_regprocedure('rye.supersede_assertion(uuid,text,uuid,uuid,jsonb,text,timestamp with time zone,timestamp with time zone,numeric,text,jsonb[],jsonb)') IS NULL THEN
     RAISE EXCEPTION 'supersede_assertion function signature missing';
+  END IF;
+
+  IF to_regprocedure('rye.record_assertion(text,jsonb,uuid,uuid,text,timestamp with time zone,timestamp with time zone,numeric,text,text,jsonb[],text,jsonb)') IS NULL THEN
+    RAISE EXCEPTION 'record_assertion v2 function signature missing';
+  END IF;
+  IF to_regprocedure('rye.accept_assertion(uuid,jsonb[],text,text)') IS NULL THEN
+    RAISE EXCEPTION 'accept_assertion function missing';
+  END IF;
+  IF to_regprocedure('rye.reject_candidate(uuid,text,text)') IS NULL THEN
+    RAISE EXCEPTION 'reject_candidate function missing';
+  END IF;
+  IF to_regprocedure('rye.record_distillation(uuid,uuid,text,jsonb,uuid[],uuid[],text,text,uuid,numeric,jsonb)') IS NULL THEN
+    RAISE EXCEPTION 'record_distillation function missing';
+  END IF;
+  IF to_regprocedure('rye.resolve_knowledge_gap(uuid,uuid,text)') IS NULL THEN
+    RAISE EXCEPTION 'resolve_knowledge_gap function missing';
+  END IF;
+  IF to_regprocedure('rye.schedule_assertion_change(uuid,uuid,text,text,jsonb,timestamp with time zone,text,text,text,numeric,jsonb[],jsonb)') IS NULL THEN
+    RAISE EXCEPTION 'schedule_assertion_change function missing';
+  END IF;
+  IF to_regprocedure('rye.registry_value(text,uuid)') IS NULL THEN
+    RAISE EXCEPTION 'registry_value function missing';
+  END IF;
+  IF to_regprocedure('rye.effective_confidence(rye.assertions)') IS NULL THEN
+    RAISE EXCEPTION 'effective_confidence function missing';
   END IF;
 
   IF to_regprocedure('rye.mark_assertion_superseded(uuid,uuid)') IS NULL THEN
@@ -89,16 +135,80 @@ BEGIN
 
   IF NOT EXISTS (
       SELECT 1
+      FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = v_schema
+        AND c.relname = 'assertion_evidence'
+        AND c.relrowsecurity = true
+        AND c.relforcerowsecurity = true
+  ) THEN
+    RAISE EXCEPTION 'assertion_evidence RLS is not enabled+forced';
+  END IF;
+
+  IF NOT EXISTS (
+      SELECT 1
       FROM pg_policies
       WHERE schemaname = v_schema
         AND tablename = 'assertions'
         AND policyname = 'assertion_update_policy'
         AND coalesce(qual, '') LIKE '%app.write_path%'
         AND coalesce(qual, '') LIKE '%app.supersede_assertion_id%'
+        AND coalesce(qual, '') LIKE '%app.accept_assertion_id%'
+        AND coalesce(qual, '') LIKE '%app.classification_assertion_id%'
         AND coalesce(with_check, '') LIKE '%app.write_path%'
         AND coalesce(with_check, '') LIKE '%app.supersede_assertion_id%'
+        AND coalesce(with_check, '') LIKE '%app.accept_assertion_id%'
+        AND coalesce(with_check, '') LIKE '%app.classification_assertion_id%'
   ) THEN
-    RAISE EXCEPTION 'assertion_update_policy is not scoped to supersession context';
+    RAISE EXCEPTION 'assertion_update_policy is not scoped to v2 helper contexts';
+  END IF;
+
+  IF NOT EXISTS (
+      SELECT 1
+      FROM pg_policies
+      WHERE schemaname = v_schema
+        AND tablename = 'artifacts'
+        AND policyname = 'artifact_read_policy'
+        AND coalesce(qual, '') LIKE '%classification%'
+        AND coalesce(qual, '') LIKE '%role_classification_access%'
+  ) THEN
+    RAISE EXCEPTION 'artifact_read_policy does not enforce propagated digest classification';
+  END IF;
+
+  IF EXISTS (
+      SELECT required.view_name
+      FROM (VALUES
+          ('review_queue'),
+          ('stale_digests'),
+          ('open_gaps'),
+          ('assertion_support'),
+          ('competing_candidates'),
+          ('current_assertions_weighted')
+      ) required(view_name)
+      WHERE NOT EXISTS (
+          SELECT 1
+          FROM pg_class c
+          JOIN pg_namespace n ON n.oid = c.relnamespace
+          WHERE n.nspname = v_schema
+            AND c.relname = required.view_name
+            AND 'security_invoker=true' = ANY(coalesce(c.reloptions, '{}'::text[]))
+      )
+  ) THEN
+    RAISE EXCEPTION 'one or more Core Model v2 security_invoker views are missing';
+  END IF;
+
+  IF EXISTS (
+      SELECT 1
+      FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = v_schema
+        AND p.proname IN (
+            'contest_assertion',
+            'resolve_dispute',
+            'promote_candidate_to_assertion'
+        )
+  ) OR to_regclass('rye.active_disputes') IS NOT NULL THEN
+    RAISE EXCEPTION 'removed v1 dispute or fact-promotion surfaces are still installed';
   END IF;
 END
 $$;

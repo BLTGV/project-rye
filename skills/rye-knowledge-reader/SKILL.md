@@ -15,9 +15,10 @@ Read-only means no durable writes.
 Do not call:
 
 - `record_event`, `record_assertion`, `supersede_assertion`,
-  `mark_assertion_superseded`
+  `accept_assertion`, `reject_candidate`, `record_distillation`,
+  `schedule_assertion_change`, `mark_assertion_superseded`
 - `create_knowledge_candidate`, `set_candidate_status`,
-  `promote_candidate_to_assertion`, `promote_candidate_to_task`,
+  `promote_candidate_to_task`,
   `promote_candidate_to_edge`
 - `link_record`, `track_table`, `update_node_properties`
 - `INSERT`, `UPDATE`, `DELETE`, `TRUNCATE`, `ALTER`, `CREATE`, `DROP`
@@ -68,10 +69,9 @@ can reset before the read. Use `ROLLBACK`, not `COMMIT`, when wrapping reads.
    - Use this for a first pass before broad custom queries.
 
 4. **Read accepted current knowledge**
-   - Use `rye.current_valid_assertions` when available.
-   - On older Rye instances without `current_valid_assertions`, use
-     `rye.current_assertions` and state that temporal validity was not applied.
-   - Filter `superseded_at IS NULL`, temporal validity, and active nodes/edges.
+   - Use `rye.current_valid_assertions`.
+   - Do not reconstruct current knowledge with a bare
+     `superseded_at IS NULL` filter.
    - Treat accepted assertions, task nodes, and active graph edges as knowledge.
 
 5. **Read history**
@@ -81,10 +81,6 @@ can reset before the read. Use `ROLLBACK`, not `COMMIT`, when wrapping reads.
    - Use `superseded_at` for Rye belief replacement, not domain truth ending.
    - Future-effective assertions are accepted knowledge for a future as-of
      time, not current knowledge before their `effective_at`.
-   - Plan assertions such as `deal_stage_plan`, `task_status_plan`, and
-     `milestone_status_plan` are current-visible intentions. Do not report the
-     planned status/stage as already true unless the corresponding status/stage
-     assertion is valid for the requested time.
 
 6. **Read action status**
    - Task nodes use `node_type = 'task'`.
@@ -92,14 +88,15 @@ can reset before the read. Use `ROLLBACK`, not `COMMIT`, when wrapping reads.
    - Fall back to `nodes.properties->>'status'` when no status assertion exists.
 
 7. **Read candidate review state**
-   - Candidate nodes use `node_type = 'knowledge_candidate'`.
-   - Read current `candidate_status` assertions.
+   - Assertion candidates are in `rye.review_queue`.
+   - Structural candidate nodes use `node_type = 'knowledge_candidate'`.
+   - Read their current `candidate_status` assertions.
    - Proposed and `needs_review` candidates are not accepted knowledge.
-   - `accepted` candidates should have a promoted assertion, task, or edge.
+   - Accepted structural candidates should have a promoted task or edge.
 
 8. **Read provenance**
-   - Accepted assertions/tasks/edges store `attrs.candidate_id` and
-     `attrs.source_refs` when promoted through helpers.
+   - Read assertion provenance from `rye.assertion_support`.
+   - Promoted structural tasks/edges store candidate and source references.
    - Follow candidate edges:
      - `supported_by`: candidate -> source item
      - `derived_from`: candidate -> run/source/process
@@ -193,37 +190,20 @@ WHERE n.node_type = 'task'
 ORDER BY n.created_at DESC;
 ```
 
-Candidate queue:
+Assertion review queue:
 
 ```sql
-SELECT n.id, n.label,
-       n.properties->>'candidate_kind' AS candidate_kind,
-       st.claim->>'status' AS status,
-       st.claim->>'reason' AS status_reason,
-       n.properties->>'statement' AS statement,
-       n.properties->'target_payload' AS target_payload
-FROM rye.nodes n
-LEFT JOIN rye.current_valid_assertions st
-  ON st.subject_node_id = n.id
- AND st.assertion_type = 'candidate_status'
- AND st.assertion_key = 'default'
-WHERE n.node_type = 'knowledge_candidate'
-  AND n.archived_at IS NULL
-  AND coalesce(st.claim->>'status', 'missing') IN ('proposed', 'needs_review')
-ORDER BY n.created_at DESC;
+SELECT subject_ref, assertion_type, assertion_key, candidate_count, candidates
+FROM rye.review_queue
+ORDER BY candidate_count DESC, assertion_type, assertion_key;
 ```
 
-Promotion provenance for an assertion:
+Evidence for an assertion:
 
 ```sql
-SELECT a.id AS assertion_id,
-       a.assertion_type,
-       a.assertion_key,
-       a.claim,
-       a.attrs->>'candidate_id' AS candidate_id,
-       a.attrs->'source_refs' AS source_refs
-FROM rye.current_valid_assertions a
-WHERE a.id = '<assertion_id>'::uuid;
+SELECT *
+FROM rye.assertion_support
+WHERE assertion_id = '<assertion_id>'::uuid;
 ```
 
 ## Answer Shape

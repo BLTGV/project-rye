@@ -136,7 +136,7 @@ manifest_assertion AS (
         p_subject_node_id := upserted.id,
         p_assertion_key   := 'default',
         p_confidence      := 1.0,
-        p_mode            := 'current',
+        p_basis           := 'assumed',
         p_attrs           := jsonb_build_object('metadata_source', manifest.source_path, 'installer', './scripts/sync_plugin_metadata.sh')
     ) AS id
     FROM manifest, upserted
@@ -147,7 +147,7 @@ SELECT record_assertion(
     p_subject_node_id := upserted.id,
     p_assertion_key   := 'default',
     p_confidence      := 1.0,
-    p_mode            := 'current',
+    p_basis           := 'assumed',
     p_attrs           := jsonb_build_object('metadata_source', manifest.source_path, 'installer', './scripts/sync_plugin_metadata.sh')
 )
 FROM manifest, upserted, manifest_assertion;
@@ -210,7 +210,7 @@ manifest_assertion AS (
         p_subject_node_id := upserted.id,
         p_assertion_key   := 'default',
         p_confidence      := 1.0,
-        p_mode            := 'current',
+        p_basis           := 'assumed',
         p_attrs           := jsonb_build_object('metadata_source', manifest.source_path, 'installer', './scripts/sync_plugin_metadata.sh')
     ) AS id
     FROM manifest, upserted
@@ -225,7 +225,7 @@ SELECT record_assertion(
     p_subject_node_id := upserted.id,
     p_assertion_key   := 'default',
     p_confidence      := 1.0,
-    p_mode            := 'current',
+    p_basis           := 'assumed',
     p_attrs           := jsonb_build_object('metadata_source', manifest.source_path, 'installer', './scripts/sync_plugin_metadata.sh')
 )
 FROM manifest, upserted, manifest_assertion;

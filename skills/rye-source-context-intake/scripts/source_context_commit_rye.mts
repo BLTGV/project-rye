@@ -683,28 +683,23 @@ DECLARE
 BEGIN
   SELECT id, claim
   INTO v_existing_id, v_existing_claim
-  FROM rye.assertions
+  FROM rye.current_valid_assertions
   WHERE subject_node_id = v_subject_id
     AND assertion_type = ${sqlText(assertionType)}
     AND assertion_key = ${sqlText(assertionKey)}
-    AND superseded_at IS NULL
   LIMIT 1;
 
   IF v_existing_id IS NULL THEN
-    INSERT INTO rye.assertions (
-      assertion_type,
-      assertion_key,
-      subject_node_id,
-      claim,
-      source_event_id,
-      confidence
-    ) VALUES (
-      ${sqlText(assertionType)},
-      ${sqlText(assertionKey)},
-      v_subject_id,
-      v_claim,
-      v_event_id,
-      ${confidence == null ? "NULL" : String(confidence)}
+    PERFORM rye.record_assertion(
+      p_assertion_type := ${sqlText(assertionType)},
+      p_assertion_key := ${sqlText(assertionKey)},
+      p_subject_node_id := v_subject_id,
+      p_claim := v_claim,
+      p_confidence := ${confidence == null ? "NULL" : String(confidence)},
+      p_basis := 'reported',
+      p_evidence := ARRAY[
+        jsonb_build_object('kind', 'source', 'event_id', v_event_id)
+      ]
     );
   ELSIF v_existing_claim IS DISTINCT FROM v_claim THEN
     PERFORM rye.supersede_assertion(
@@ -714,8 +709,11 @@ BEGIN
       p_new_subject_edge_id := NULL,
       p_new_claim := v_claim,
       p_new_assertion_key := ${sqlText(assertionKey)},
-      p_new_source_event_id := v_event_id,
-      p_new_confidence := ${confidence == null ? "NULL" : String(confidence)}
+      p_new_confidence := ${confidence == null ? "NULL" : String(confidence)},
+      p_new_basis := 'reported',
+      p_new_evidence := ARRAY[
+        jsonb_build_object('kind', 'source', 'event_id', v_event_id)
+      ]
     );
   END IF;
 END

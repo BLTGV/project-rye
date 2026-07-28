@@ -845,13 +845,16 @@ function KnowledgePreview({ label, items }: { label: string; items: string[] }) 
 }
 
 const CANDIDATE_KINDS: KnowledgeCandidateKind[] = [
-  "fact",
   "task",
   "edge",
   "decision",
   "procedure",
   "preference",
   "risk",
+  "context_gap",
+  "policy_change",
+  "scope_change",
+  "plugin_change",
 ];
 
 function CandidateKnowledgePanel({
@@ -877,7 +880,7 @@ function CandidateKnowledgePanel({
   onSetStatus: (candidateId: string, status: KnowledgeCandidateStatus, reason: string) => void;
   onPromote: (candidateId: string, payload: PromoteKnowledgeCandidateInput) => void;
 }) {
-  const [kind, setKind] = useState<KnowledgeCandidateKind>("fact");
+  const [kind, setKind] = useState<KnowledgeCandidateKind>("decision");
   const [statement, setStatement] = useState("");
   const [confidence, setConfidence] = useState("");
   const candidates = knowledge?.candidates ?? [];
@@ -1086,7 +1089,7 @@ function candidateKind(candidate: KnowledgeCandidateRow): KnowledgeCandidateKind
   const kind = candidate.properties.candidate_kind;
   return CANDIDATE_KINDS.includes(kind as KnowledgeCandidateKind)
     ? (kind as KnowledgeCandidateKind)
-    : "fact";
+    : "decision";
 }
 
 function candidateStatement(candidate: KnowledgeCandidateRow): string {
@@ -1136,9 +1139,7 @@ function promotionPayloadForCandidate(
   const payloadClaim = asRecord(target.claim);
   const assertionType =
     firstString(target.assertion_type) ??
-    (kind === "fact"
-      ? "observation"
-      : kind === "decision"
+    (kind === "decision"
         ? "decision"
         : kind === "risk"
           ? "risk"

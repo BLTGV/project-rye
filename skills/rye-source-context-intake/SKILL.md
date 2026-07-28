@@ -30,7 +30,8 @@ or purpose the material supports.
 6. Only after confirmation should a source container supply default semantic
    context. Under onboarding scopes, prefer `expected_contexts` over hard
    context whitelists.
-7. Use a separate validated knowledge-update step to create arbitrary people/org/task/fact edges.
+7. Use a separate validated knowledge-update step to create domain nodes,
+   assertion candidates, tasks, and semantic edges.
 
 ## Post-Commit Next Steps
 
@@ -55,19 +56,18 @@ post-commit gate and report the next required human or agent action.
    - expected review contexts
    - default routing context, if any
    - facts that must never be inferred from this source
-5. Group proposed knowledge candidates by source container, review context,
-   candidate kind, status, and confidence. This is the candidate review queue.
-6. Do not promote candidates into accepted facts, tasks, or edges until review
-   chooses the candidate and target shape. Promotion belongs to the Rye
-   knowledge-promotion helpers, not to source intake.
+5. Group assertion candidates through `review_queue`. Group structural
+   candidates by source container, review context, kind, status, and confidence.
+6. Do not accept assertion candidates or promote structural candidates into
+   tasks or edges until review chooses the candidate and target shape.
 7. If the next step cannot be executed without user confirmation, create or
    return a concise confirmation packet instead of guessing.
 
 The default post-commit order is:
 
 1. Source inventory and confirmation worklist.
-2. Candidate review queue.
-3. Explicit promotion of accepted facts/tasks/edges.
+2. Assertion and structural candidate review queues.
+3. Explicit assertion acceptance or structural task/edge promotion.
 4. Dedupe/supersession review.
 5. Optional pruning or visibility changes for stale or low-signal source items.
 

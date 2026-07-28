@@ -82,13 +82,14 @@ SELECT record_event(
 );
 
 -- Initial assertion
-INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence)
+INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence, basis)
 SELECT
   'project_status',
   'default',
   n.id,
   '{"status": "active", "health": "on_track"}',
-  1.0
+  1.0,
+  'assumed'
 FROM nodes n
 WHERE n.label = 'Q1 Launch'
   AND NOT EXISTS (
