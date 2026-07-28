@@ -44,9 +44,9 @@ BEGIN
             'moved_from', v_old_stage,
             'reason', p_reason
         ),
-        p_source_event_id := v_event_id,
+        p_evidence         := ARRAY[jsonb_build_object('kind', 'source', 'event_id', v_event_id)],
+        p_basis            := 'reported',
         p_confidence := 1.0,
-        p_mode := 'current',
         p_attrs := jsonb_build_object('source', 'rye-crm', 'stage_change', true)
     );
 
@@ -66,15 +66,8 @@ SET search_path = rye, pg_catalog, public
 AS $$
 DECLARE
     v_current_stage text;
-    v_event_id uuid;
     v_pipeline text;
-    v_plan_key text;
-    v_scheduled_assertion_id uuid;
 BEGIN
-    IF p_effective_at <= now() THEN
-        RAISE EXCEPTION 'scheduled deal stage effective_at must be in the future';
-    END IF;
-
     IF NOT EXISTS (
         SELECT 1 FROM nodes
         WHERE id = p_opp_id
@@ -92,26 +85,11 @@ BEGIN
       AND assertion_key = 'default'
     LIMIT 1;
 
-    v_event_id := record_event(
-        p_event_type        := 'stage_change_scheduled',
-        p_summary           := format('Scheduled stage change: %s -> %s on %s', coalesce(v_current_stage, 'none'), p_stage, p_effective_at),
-        p_properties        := jsonb_build_object(
-            'from_stage', v_current_stage,
-            'to_stage', p_stage,
-            'effective_at', p_effective_at,
-            'reason', p_reason,
-            'plan_properties', coalesce(p_plan_properties, '{}'::jsonb)
-        ),
-        p_participant_ids   := ARRAY[p_opp_id],
-        p_participant_roles := ARRAY['subject'],
-        p_actor             := p_actor,
-        p_occurred_at       := now()
-    );
-
-    v_scheduled_assertion_id := record_assertion(
+    RETURN schedule_assertion_change(
+        p_subject_node_id := p_opp_id,
+        p_subject_edge_id := NULL,
         p_assertion_type := 'deal_stage',
         p_assertion_key := 'default',
-        p_subject_node_id := p_opp_id,
         p_claim := jsonb_build_object(
             'stage', p_stage,
             'pipeline', coalesce(v_pipeline, 'unknown'),
@@ -119,34 +97,15 @@ BEGIN
             'reason', p_reason
         ),
         p_effective_at := p_effective_at,
-        p_source_event_id := v_event_id,
+        p_reason := p_reason,
+        p_actor := p_actor,
+        p_basis := 'reported',
         p_confidence := 1.0,
-        p_mode := 'current',
-        p_attrs := jsonb_build_object('source', 'rye-crm', 'scheduled_change', true)
+        p_attrs := jsonb_build_object(
+            'source', 'rye-crm',
+            'plan_properties', coalesce(p_plan_properties, '{}'::jsonb)
+        )
     );
-
-    v_plan_key := 'deal_stage_plan:' || to_char(p_effective_at AT TIME ZONE 'UTC', 'YYYYMMDDHH24MISS');
-
-    PERFORM record_assertion(
-        p_assertion_type := 'deal_stage_plan',
-        p_assertion_key := v_plan_key,
-        p_subject_node_id := p_opp_id,
-        p_claim := jsonb_build_object(
-            'planned_stage', p_stage,
-            'current_stage_at_schedule', v_current_stage,
-            'effective_at', to_char(p_effective_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
-            'status', 'scheduled',
-            'scheduled_assertion_id', v_scheduled_assertion_id,
-            'reason', p_reason,
-            'properties', coalesce(p_plan_properties, '{}'::jsonb)
-        ),
-        p_source_event_id := v_event_id,
-        p_confidence := 1.0,
-        p_mode := 'current',
-        p_attrs := jsonb_build_object('source', 'rye-crm', 'plan', true)
-    );
-
-    RETURN v_scheduled_assertion_id;
 END;
 $$ LANGUAGE plpgsql;
 

@@ -77,7 +77,8 @@ BEGIN
         p_assertion_key := 'default',
         p_subject_node_id := v_opp_id,
         p_claim := jsonb_build_object('stage', v_default_stage, 'pipeline', p_pipeline_code),
-        p_source_event_id := coalesce(p_source_event_id, v_event_id),
+        p_evidence := ARRAY[jsonb_build_object('kind', 'source', 'event_id', coalesce(p_source_event_id, v_event_id))],
+        p_basis := 'reported',
         p_confidence := 1.0
     );
 

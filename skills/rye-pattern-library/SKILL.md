@@ -43,7 +43,7 @@ Good outputs include:
 | Preserve source evidence | Evidence-backed claim |
 | Attach parsed source material | Document or artifact reference |
 | Record who participated in something | Activity event |
-| Handle contradictory information | Dispute pattern |
+| Handle contradictory information | Candidate review pattern |
 | Load CSV/XLSX with lineage | Tabular intake boundary |
 
 ## Guardrails
@@ -52,7 +52,8 @@ Good outputs include:
 - Do not make customer-specific vocabulary part of this generic skill.
 - Do not put operational source data in Rye when a domain table should own it.
 - Do not insert into `events` and `event_participants` separately. Use `record_event()`.
-- Do not mutate assertion claims. Supersede or contest them.
+- Do not mutate assertion claims. Supersede accepted knowledge or create a
+  candidate for review.
 - Do not treat JSON Schema files as database enforcement unless the caller adds an explicit validation layer.
 
 ## Handoff

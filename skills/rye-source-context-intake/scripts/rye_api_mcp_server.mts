@@ -100,11 +100,11 @@ if (hasCapability("rye.observation.create")) {
 }
 
 if (hasCapability("rye.candidate.create")) {
-  registerTool("rye.propose_candidate_fact", {
-    title: "Propose Rye Candidate Fact",
-    description: "Create a candidate business fact for later human or authoritative review.",
+  registerTool("rye.propose_structural_candidate", {
+    title: "Propose Rye Structural Candidate",
+    description: "Create a proposed task, edge, decision, procedure, preference, risk, or context gap for later review.",
     inputSchema: {
-      candidate_kind: z.enum(["fact", "task", "edge", "decision", "procedure", "preference", "risk"]).default("fact").optional(),
+      candidate_kind: z.enum(["task", "edge", "decision", "procedure", "preference", "risk", "context_gap"]).default("decision").optional(),
       statement: z.string().min(1).max(4000),
       target_payload: z.record(z.string(), z.unknown()).optional(),
       domain_keys: z.array(z.string().min(1).max(120)).min(1).max(20),

@@ -18,13 +18,15 @@ BEGIN
     assertion_key,
     subject_node_id,
     claim,
-    confidence
+    confidence,
+    basis
   ) VALUES (
     'project_status',
     'default',
     v_node,
     '{"status": "active", "health": "on_track"}',
-    1.0
+    1.0,
+    'assumed'
   )
   RETURNING id INTO v_old;
 

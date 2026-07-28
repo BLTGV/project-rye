@@ -23,7 +23,7 @@ BEGIN
     -- Should see 4 enterprise opps (sales-east) + pipelines/public nodes, NOT west/smb opps
     SELECT count(*) INTO v_count
     FROM nodes
-    WHERE node_type = 'opportunity';
+    WHERE node_type = 'opportunity' AND coalesce(external_source,'') <> 'conformance:v2';
 
     IF v_count <> 4 THEN
         RAISE EXCEPTION 'S1-1a: team_member(sales-east) should see 4 opportunities, got %', v_count;
@@ -33,7 +33,7 @@ BEGIN
     SELECT coalesce(sum((ca.claim->>'amount')::numeric), 0) INTO v_total
     FROM current_assertions ca
     JOIN nodes n ON n.id = ca.subject_node_id
-    WHERE n.node_type = 'opportunity'
+    WHERE n.node_type = 'opportunity' AND coalesce(n.external_source,'') <> 'conformance:v2' AND coalesce(external_source,'') <> 'conformance:v2'
       AND ca.assertion_type = 'deal_value';
 
     IF v_total <> 2800000 THEN
@@ -44,7 +44,7 @@ BEGIN
     SELECT count(*) INTO v_neg_count
     FROM current_assertions ca
     JOIN nodes n ON n.id = ca.subject_node_id
-    WHERE n.node_type = 'opportunity'
+    WHERE n.node_type = 'opportunity' AND coalesce(n.external_source,'') <> 'conformance:v2' AND coalesce(external_source,'') <> 'conformance:v2'
       AND ca.assertion_type = 'deal_stage'
       AND ca.claim->>'stage' = 'negotiation';
 
@@ -84,7 +84,7 @@ DECLARE
 BEGIN
     -- Same 4 opps visible
     SELECT count(*) INTO v_count
-    FROM nodes WHERE node_type = 'opportunity';
+    FROM nodes WHERE node_type = 'opportunity' AND coalesce(external_source,'') <> 'conformance:v2';
 
     IF v_count <> 4 THEN
         RAISE EXCEPTION 'S1-1b: team_lead(sales-east) should see 4 opportunities, got %', v_count;
@@ -124,7 +124,7 @@ DECLARE
 BEGIN
     -- Should see all 12 opportunities
     SELECT count(*) INTO v_count
-    FROM nodes WHERE node_type = 'opportunity';
+    FROM nodes WHERE node_type = 'opportunity' AND coalesce(external_source,'') <> 'conformance:v2';
 
     IF v_count <> 12 THEN
         RAISE EXCEPTION 'S1-1c: deal_manager should see 12 opportunities, got %', v_count;
@@ -134,7 +134,7 @@ BEGIN
     SELECT coalesce(sum((ca.claim->>'amount')::numeric), 0) INTO v_total
     FROM current_assertions ca
     JOIN nodes n ON n.id = ca.subject_node_id
-    WHERE n.node_type = 'opportunity'
+    WHERE n.node_type = 'opportunity' AND coalesce(n.external_source,'') <> 'conformance:v2' AND coalesce(external_source,'') <> 'conformance:v2'
       AND ca.assertion_type = 'deal_value';
 
     IF v_total <> 5715000 THEN
@@ -173,7 +173,7 @@ DECLARE
 BEGIN
     -- Finance with sales teams can see opportunities
     SELECT count(*) INTO v_opp_count
-    FROM nodes WHERE node_type = 'opportunity';
+    FROM nodes WHERE node_type = 'opportunity' AND coalesce(external_source,'') <> 'conformance:v2';
 
     IF v_opp_count <> 12 THEN
         RAISE EXCEPTION 'S1-1d: finance (with sales teams) should see 12 opportunities, got %', v_opp_count;
@@ -184,7 +184,7 @@ BEGIN
     FROM current_assertions ca
     JOIN nodes n ON n.id = ca.subject_node_id
     WHERE ca.assertion_type = 'financial_terms'
-      AND n.node_type = 'opportunity';
+      AND n.node_type = 'opportunity' AND coalesce(n.external_source,'') <> 'conformance:v2' AND coalesce(external_source,'') <> 'conformance:v2';
 
     IF v_ft_count <> 4 THEN
         RAISE EXCEPTION 'S1-1d: finance should see 4 financial_terms on opportunities, got %', v_ft_count;
@@ -213,14 +213,14 @@ DECLARE
     v_ns_count int;
     v_total numeric;
 BEGIN
-    SELECT count(*) INTO v_opp_count FROM nodes WHERE node_type = 'opportunity';
+    SELECT count(*) INTO v_opp_count FROM nodes WHERE node_type = 'opportunity' AND coalesce(external_source,'') <> 'conformance:v2';
     SELECT count(*) INTO v_ft_count FROM current_assertions WHERE assertion_type = 'financial_terms';
     SELECT count(*) INTO v_ns_count FROM current_assertions WHERE assertion_type = 'negotiation_stance';
 
     SELECT coalesce(sum((ca.claim->>'amount')::numeric), 0) INTO v_total
     FROM current_assertions ca
     JOIN nodes n ON n.id = ca.subject_node_id
-    WHERE n.node_type = 'opportunity' AND ca.assertion_type = 'deal_value';
+    WHERE n.node_type = 'opportunity' AND coalesce(n.external_source,'') <> 'conformance:v2' AND coalesce(external_source,'') <> 'conformance:v2' AND ca.assertion_type = 'deal_value';
 
     IF v_opp_count <> 12 THEN
         RAISE EXCEPTION 'S1-1e: admin should see 12 opportunities, got %', v_opp_count;
@@ -282,9 +282,8 @@ DECLARE
 BEGIN
     -- Agent can insert ungated assertions on visible nodes
     -- Public/null-classified nodes are visible to everyone
-    INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence)
-    VALUES ('sentiment', 'agent-note', 'a0000001-0003-0001-0001-000000000001',
-            '{"sentiment":"agent-detected-positive"}', 0.6);
+    INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence, basis) VALUES ('sentiment', 'agent-note', 'a0000001-0003-0001-0001-000000000001',
+            '{"sentiment":"agent-detected-positive"}', 0.6, 'assumed');
 
     SELECT count(*) INTO v_count
     FROM assertions

@@ -653,29 +653,24 @@ event_ref AS (
       p_actor := ${sqlText(`agent:${input.agentId}`)}
     ) AS id
 )
-INSERT INTO rye.assertions (
-    assertion_type,
-    assertion_key,
-    subject_node_id,
-    claim,
-    source_event_id,
-    confidence
+SELECT rye.record_assertion(
+    p_assertion_type := ${sqlText(assertionTypeForRecord(input.record))},
+    p_assertion_key := ${sqlText(assertionKey)},
+    p_subject_node_id := (SELECT id FROM node_ref),
+    p_claim := ${sqlJson(JSON.stringify(claim))},
+    p_confidence := 1.0,
+    p_basis := 'observed',
+    p_evidence := ARRAY[
+      jsonb_build_object('kind', 'source', 'event_id', (SELECT id FROM event_ref))
+    ]
 )
-SELECT
-    ${sqlText(assertionTypeForRecord(input.record))},
-    ${sqlText(assertionKey)},
-    (SELECT id FROM node_ref),
-    ${sqlJson(JSON.stringify(claim))},
-    (SELECT id FROM event_ref),
-    1.0
 WHERE NOT EXISTS (
     SELECT 1
-    FROM rye.assertions
+    FROM rye.current_valid_assertions
     WHERE subject_node_id = (SELECT id FROM node_ref)
       AND assertion_type = ${sqlText(assertionTypeForRecord(input.record))}
       AND assertion_key = ${sqlText(assertionKey)}
       AND claim->>'payload_hash' = ${sqlText(claim.payload_hash)}
-      AND superseded_at IS NULL
 );`;
 }
 
@@ -968,29 +963,24 @@ event_ref AS (
       p_actor := ${sqlText(`agent:${agentId}`)}
     ) AS id
 )
-INSERT INTO rye.assertions (
-    assertion_type,
-    assertion_key,
-    subject_node_id,
-    claim,
-    source_event_id,
-    confidence
+SELECT rye.record_assertion(
+    p_assertion_type := ${sqlText(assertionTypeForRecord(record))},
+    p_assertion_key := ${sqlText(assertionKey)},
+    p_subject_node_id := (SELECT id FROM node_ref),
+    p_claim := ${sqlJson(JSON.stringify(claim))},
+    p_confidence := 1.0,
+    p_basis := 'observed',
+    p_evidence := ARRAY[
+      jsonb_build_object('kind', 'source', 'event_id', (SELECT id FROM event_ref))
+    ]
 )
-SELECT
-    ${sqlText(assertionTypeForRecord(record))},
-    ${sqlText(assertionKey)},
-    (SELECT id FROM node_ref),
-    ${sqlJson(JSON.stringify(claim))},
-    (SELECT id FROM event_ref),
-    1.0
 WHERE NOT EXISTS (
     SELECT 1
-    FROM rye.assertions
+    FROM rye.current_valid_assertions
     WHERE subject_node_id = (SELECT id FROM node_ref)
       AND assertion_type = ${sqlText(assertionTypeForRecord(record))}
       AND assertion_key = ${sqlText(assertionKey)}
       AND claim->>'payload_hash' = ${sqlText(claim.payload_hash)}
-      AND superseded_at IS NULL
 );`;
 
   await runPsql(target, ["-v", "ON_ERROR_STOP=1", "-c", sql], undefined, repoRoot);

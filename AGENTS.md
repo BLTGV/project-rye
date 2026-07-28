@@ -42,7 +42,7 @@ schema/
   migrations/
     0001_core.sql           — Core tables, indexes, RLS policies, views, triggers
     0002_functions.sql      — Core functions (supersession, merge, record_event, link_record, track_table, rye_catalog)
-    0004_agent_capabilities.sql — Agent INSERT policies, record_artifact(), assertion disputes
+    0004_agent_capabilities.sql — Agent INSERT policies, record_artifact(), classification propagation
     0005_function_fixes.sql — agent_node_summary, node_context, merge/create events, bulk link, CDC PK, link_record consistency
     0006_security_config.sql — Data-driven assertion type gating, role hierarchy, supporting table RLS
     0100_profile_crm.sql    — CRM profile (opportunities, pipelines, deal stages)
@@ -103,7 +103,9 @@ The `schema/` directory contains the executable SQL. The `design/` directory is 
 
 Supporting tables: `access_grants`, `field_classifications`, `node_source_map`, `node_merges`, `crm_code_counters`, `assertion_type_access`, `role_classification_access`.
 
-Views: `current_assertions` (non-superseded only), `node_context` (full node context with edges and assertions), `active_disputes` (subjects with competing active assertions).
+Views: `current_valid_assertions` (accepted and effective now), `node_context`
+(full node context), `review_queue`, `competing_candidates`, `stale_digests`,
+`open_gaps`, `assertion_support`, and `current_assertions_weighted`.
 
 ## Design Principles (Non-Negotiable)
 
@@ -124,10 +126,14 @@ Views: `current_assertions` (non-superseded only), `node_context` (full node con
 | `link_record(schema, table, id, node_type, label, properties)` | Connect a domain table row to the graph. Idempotent. |
 | `track_table(schema, table)` | Attach CDC trigger to a domain table for automatic change tracking |
 | `agent_node_summary(node_id, max_items)` | Compact context for a node (relationships, facts, activity) |
-| `supersede_assertion(old_id, ...)` | Replace a single-valued assertion with a new version |
+| `record_assertion(...)` | Write an accepted or candidate assertion with basis and evidence |
+| `accept_assertion(id, evidence, reason, actor)` | Accept a candidate on its existing tuple |
+| `reject_candidate(id, reason, actor)` | Close a candidate without accepting it |
+| `supersede_assertion(old_id, ...)` | Replace an accepted assertion on the same tuple |
+| `record_distillation(...)` | Write an inferred digest with derivation evidence |
+| `resolve_knowledge_gap(gap_id, answer_id, actor)` | Close a gap on its own tuple |
+| `schedule_assertion_change(...)` | Schedule a generic future-effective replacement |
 | `record_artifact(type, content, source_event_id, source_node_id, related_node_ids, location, content_hash)` | Create an artifact with optional dedup. Returns artifact UUID. |
-| `contest_assertion(existing_id, new_claim, source, confidence, reason)` | Record a competing claim without superseding the original |
-| `resolve_dispute(winning_assertion_id, reason, actor)` | Pick a winner and supersede all other competing assertions |
 | `link_records_batch(schema, table, ids[], type, labels[], properties[])` | Bulk domain table import. Returns uuid[]. |
 | `refresh_materialized_views()` | Refresh all profile matviews (CONCURRENTLY) |
 | `log_agent_query(agent_id, query, summary, node_ids)` | Audit log for agent reads |
@@ -143,8 +149,16 @@ Views: `current_assertions` (non-superseded only), `node_context` (full node con
 - **Human-readable codes** follow the format `{PREFIX}-{YYMM}-{SEQ}` (e.g., `OPP-2403-0042`, `TSK-2403-0187`).
 - **Temporal edges** use `effective_from`/`effective_to` instead of deletion.
 - **Soft delete** uses `archived_at` (null = active).
-- **Assertion supersession** is handled by `supersede_assertion()` which sets `superseded_at`/`superseded_by` on the old assertion and inserts the new one atomically.
-- **Assertion disputes:** When contradictory information arrives but you're uncertain which is correct, use `contest_assertion()` to record a competing claim without superseding the original. Use `resolve_dispute()` to pick a winner. Query `active_disputes` to find unresolved conflicts.
+- **Assertion lifecycle:** Assertions carry `status`, `basis`, and
+  `classification`. Competing claims are candidate rows on the normal tuple.
+  Review them through `review_queue`, `accept_assertion()`, and
+  `reject_candidate()`.
+- **Assertion evidence:** Provenance belongs in append-only
+  `assertion_evidence`; helper writes require evidence unless basis is
+  `assumed`.
+- **Assertion supersession:** `supersede_assertion()` is restricted to the
+  same subject, type, and key. Use `schedule_assertion_change()` for future
+  replacements.
 - **Artifact creation** uses `record_artifact()` — supports optional `content_hash` dedup to prevent re-processing the same source material.
 - **Event creation** always uses `record_event()` — never insert into `events` and `event_participants` separately.
 
@@ -155,14 +169,18 @@ Views: `current_assertions` (non-superseded only), `node_context` (full node con
 - Cascading visibility: edges require both endpoints visible; assertions require their subject visible.
 - Assertion-type gating is data-driven via `assertion_type_access` table. Types not in the table are unrestricted.
 - Field-level redaction strips sensitive JSONB keys via `redact_properties()` based on `role_classification_access` table.
-- Agent permissions are explicit: agents can INSERT nodes, edges, events, assertions, and artifacts. They cannot UPDATE or DELETE.
+- Agent permissions are explicit: agents can INSERT nodes, edges, events,
+  assertions, assertion evidence, and artifacts. Lifecycle updates happen only
+  through gated helpers.
 - Supporting tables (`access_grants`, `node_source_map`, `field_classifications`, config tables) have their own RLS policies.
 
 ## What Not To Do
 
 - Do not add columns to core tables to accommodate domain-specific needs. Use JSONB `properties` instead.
 - Do not create domain-specific tables that reference core tables. Use `link_record()` and `node_source_map` for integration.
-- Do not mutate assertion content. Use supersession.
+- Do not mutate assertion content, status, or basis. Use lifecycle helpers.
+- Do not write assertions without evidence unless the basis is explicitly
+  `assumed`.
 - Do not delete events. They are immutable.
 - Do not insert into `events` and `event_participants` separately. Use `record_event()`.
 - Do not use `INSERT INTO events ... RETURNING id` — it fails under RLS. Use `record_event()`.

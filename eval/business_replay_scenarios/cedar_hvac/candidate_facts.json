@@ -165,7 +165,7 @@
     },
     {
       "id": "fulton-stage-evidence",
-      "kind": "fact",
+      "kind": "decision",
       "statement": "Evidence says Fulton Dental rooftop unit replacement is at proposal sent and waiting for the Dominion rebate letter before contract review.",
       "subject": "Fulton Dental rooftop unit replacement",
       "target_shape": "opportunity",
@@ -219,7 +219,7 @@
     },
     {
       "id": "fulton-forecast-value",
-      "kind": "fact",
+      "kind": "decision",
       "statement": "Evidence says Fulton Dental should be forecast at $84,000 with 65% probability in the June forecast workbook.",
       "subject": "Fulton Dental rooftop unit replacement",
       "target_shape": "assertion",
@@ -385,7 +385,7 @@
     },
     {
       "id": "riverbend-stage-evidence",
-      "kind": "fact",
+      "kind": "decision",
       "statement": "Evidence says Riverbend Brewery controls upgrade is still in qualification and should wait for a walkthrough after tank cleaning before proposal work.",
       "subject": "Riverbend Brewery controls upgrade",
       "target_shape": "opportunity",
@@ -440,7 +440,7 @@
     },
     {
       "id": "riverbend-forecast-value",
-      "kind": "fact",
+      "kind": "decision",
       "statement": "Evidence says Riverbend Brewery controls upgrade is forecast at $46,500 with 40% probability in the June forecast workbook.",
       "subject": "Riverbend Brewery controls upgrade",
       "target_shape": "assertion",

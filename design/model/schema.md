@@ -126,22 +126,27 @@ Append-only claims about nodes or edges. When a newer fact contradicts an older 
 | `id` | `uuid` | Primary key |
 | `assertion_type` | `text NOT NULL` | Fact category |
 | `assertion_key` | `text NOT NULL DEFAULT 'default'` | Active uniqueness key (`'default'` for singleton facts) |
+| `status` | `text NOT NULL` | `candidate` or `accepted` |
+| `basis` | `text NOT NULL` | `observed`, `reported`, `inferred`, `assumed`, or `unknown` |
+| `classification` | `text` | Assertion-level visibility classification |
 | `subject_node_id` | `uuid` | FK to `nodes.id` |
 | `subject_edge_id` | `uuid` | FK to `edges.id` |
 | `subject_ref` | `text GENERATED` | Normalized subject id used for uniqueness (`n:<uuid>` or `e:<uuid>`) |
 | `claim` | `jsonb NOT NULL` | The actual fact content, GIN-indexed |
 | `asserted_at` | `timestamptz NOT NULL DEFAULT now()` | When we recorded this belief |
 | `effective_at` | `timestamptz` | When it became true in reality |
+| `effective_to` | `timestamptz` | Exclusive end of the effective window |
 | `superseded_at` | `timestamptz` | When a newer assertion replaced it |
 | `superseded_by` | `uuid` | FK to `assertions.id` (deferrable, initially deferred) |
-| `source_event_id` | `uuid` | FK to `events.id` — provenance |
-| `confidence` | `numeric CHECK (confidence BETWEEN 0 AND 1)` | Confidence score |
+| `confidence` | `numeric CHECK (confidence BETWEEN 0 AND 1)` | Stored confidence prior |
 | `attrs` | `jsonb NOT NULL DEFAULT '{}'` | System metadata |
 | `created_at` | `timestamptz NOT NULL DEFAULT now()` | Row creation |
 
 Check constraint: at least one of `subject_node_id` or `subject_edge_id` must be set.
 
-An immutability trigger prevents updates to any column except `superseded_at` and `superseded_by`. Active rows are uniquely constrained on `(subject_ref, assertion_type, assertion_key)`. See [Functions Reference](/docs/model/functions/).
+Provenance is stored in `assertion_evidence`. The accepted active index
+preserves effective-window scheduling semantics. See
+[Functions Reference](/docs/model/functions/).
 
 ### 3.6 `artifacts` — Extracted Content
 
@@ -372,6 +377,9 @@ CREATE TABLE assertions (
     id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     assertion_type  text NOT NULL,
     assertion_key   text NOT NULL DEFAULT 'default',
+    status          text NOT NULL DEFAULT 'accepted',
+    basis           text NOT NULL DEFAULT 'unknown',
+    classification text,
     subject_node_id uuid REFERENCES nodes(id),
     subject_edge_id uuid REFERENCES edges(id),
     subject_ref     text GENERATED ALWAYS AS (
@@ -380,9 +388,9 @@ CREATE TABLE assertions (
     claim           jsonb NOT NULL,
     asserted_at     timestamptz NOT NULL DEFAULT now(),
     effective_at    timestamptz,
+    effective_to    timestamptz,
     superseded_at   timestamptz,
     superseded_by   uuid REFERENCES assertions(id) DEFERRABLE INITIALLY DEFERRED,
-    source_event_id uuid REFERENCES events(id),
     confidence      numeric CHECK (confidence BETWEEN 0 AND 1),
     attrs           jsonb NOT NULL DEFAULT '{}',
     created_at      timestamptz NOT NULL DEFAULT now(),
@@ -401,8 +409,25 @@ CREATE INDEX idx_assertions_claim      ON assertions USING gin (claim);
 CREATE INDEX idx_assertions_asserted   ON assertions (asserted_at);
 CREATE INDEX idx_assertions_effective  ON assertions (effective_at);
 CREATE UNIQUE INDEX idx_assertions_active_unique
-                                        ON assertions (subject_ref, assertion_type, assertion_key)
-                                        WHERE superseded_at IS NULL;
+    ON assertions (
+        subject_ref,
+        assertion_type,
+        assertion_key,
+        coalesce(effective_at, '-infinity'::timestamptz),
+        coalesce(effective_to, 'infinity'::timestamptz)
+    )
+    WHERE superseded_at IS NULL AND status = 'accepted';
+
+CREATE TABLE assertion_evidence (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    assertion_id uuid NOT NULL REFERENCES assertions(id),
+    kind text NOT NULL,
+    event_id uuid REFERENCES events(id),
+    source_assertion_id uuid REFERENCES assertions(id),
+    witness_node_id uuid REFERENCES nodes(id),
+    recorded_at timestamptz NOT NULL DEFAULT now(),
+    attrs jsonb NOT NULL DEFAULT '{}'
+);
 
 
 -- ============================================================================

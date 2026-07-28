@@ -73,9 +73,9 @@ BEGIN
         p_claim           := p_claim,
         p_effective_at    := p_effective_at,
         p_effective_to    := p_effective_to,
-        p_source_event_id := v_event_id,
+        p_evidence         := ARRAY[jsonb_build_object('kind', 'source', 'event_id', v_event_id)],
+        p_basis            := 'reported',
         p_confidence      := 1.0,
-        p_mode            := 'current',
         p_attrs           := jsonb_build_object('policy_event_id', v_event_id)
     );
 

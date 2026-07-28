@@ -28,7 +28,10 @@ BEGIN
        OR NEW.subject_edge_id IS DISTINCT FROM OLD.subject_edge_id
        OR NEW.asserted_at IS DISTINCT FROM OLD.asserted_at
        OR NEW.effective_at IS DISTINCT FROM OLD.effective_at
-       OR NEW.source_event_id IS DISTINCT FROM OLD.source_event_id
+       OR NEW.effective_to IS DISTINCT FROM OLD.effective_to
+       OR NEW.status IS DISTINCT FROM OLD.status
+       OR NEW.basis IS DISTINCT FROM OLD.basis
+       OR NEW.classification IS DISTINCT FROM OLD.classification
        OR NEW.confidence IS DISTINCT FROM OLD.confidence
        OR NEW.attrs IS DISTINCT FROM OLD.attrs
        OR NEW.created_at IS DISTINCT FROM OLD.created_at
@@ -84,8 +87,11 @@ CREATE OR REPLACE FUNCTION supersede_assertion(
     p_new_claim jsonb,
     p_new_assertion_key text DEFAULT NULL,
     p_new_effective_at timestamptz DEFAULT NULL,
-    p_new_source_event_id uuid DEFAULT NULL,
-    p_new_confidence numeric DEFAULT NULL
+    p_new_effective_to timestamptz DEFAULT NULL,
+    p_new_confidence numeric DEFAULT NULL,
+    p_new_basis text DEFAULT NULL,
+    p_new_evidence jsonb[] DEFAULT NULL,
+    p_new_attrs jsonb DEFAULT NULL
 ) RETURNS uuid
 SET search_path = rye, pg_catalog
 AS $$
@@ -122,6 +128,16 @@ BEGIN
     v_assertion_key := coalesce(nullif(trim(p_new_assertion_key), ''), v_old.assertion_key);
     v_subject_node_id := coalesce(p_new_subject_node_id, v_old.subject_node_id);
     v_subject_edge_id := coalesce(p_new_subject_edge_id, v_old.subject_edge_id);
+
+    IF v_assertion_type IS DISTINCT FROM v_old.assertion_type
+       OR v_assertion_key IS DISTINCT FROM v_old.assertion_key
+       OR v_subject_node_id IS DISTINCT FROM v_old.subject_node_id
+       OR v_subject_edge_id IS DISTINCT FROM v_old.subject_edge_id
+    THEN
+        RAISE EXCEPTION
+            'Cross-tuple supersession is not allowed; subject, assertion_type, and assertion_key must match';
+    END IF;
+
     v_new_id := gen_random_uuid();
 
     PERFORM mark_assertion_superseded(p_old_assertion_id, v_new_id);
@@ -134,8 +150,11 @@ BEGIN
         subject_edge_id,
         claim,
         effective_at,
-        source_event_id,
-        confidence
+        effective_to,
+        confidence,
+        basis,
+        classification,
+        attrs
     ) VALUES (
         v_new_id,
         v_assertion_type,
@@ -144,8 +163,11 @@ BEGIN
         v_subject_edge_id,
         p_new_claim,
         coalesce(p_new_effective_at, v_old.effective_at),
-        p_new_source_event_id,
-        p_new_confidence
+        coalesce(p_new_effective_to, v_old.effective_to),
+        coalesce(p_new_confidence, v_old.confidence),
+        coalesce(p_new_basis, v_old.basis),
+        v_old.classification,
+        coalesce(p_new_attrs, v_old.attrs)
     );
 
     RETURN v_new_id;
@@ -227,17 +249,15 @@ BEGIN
 
     FOR v_assertion IN
         SELECT *
-        FROM assertions
+        FROM current_valid_assertions
         WHERE subject_node_id = p_duplicate_id
-          AND superseded_at IS NULL
     LOOP
         SELECT id
         INTO v_replacement_id
-        FROM assertions
+        FROM current_valid_assertions
         WHERE subject_node_id = p_canonical_id
           AND assertion_type = v_assertion.assertion_type
           AND assertion_key = v_assertion.assertion_key
-          AND superseded_at IS NULL
         LIMIT 1;
 
         IF v_replacement_id IS NULL THEN
@@ -248,7 +268,10 @@ BEGIN
                 subject_edge_id,
                 claim,
                 effective_at,
-                source_event_id,
+                effective_to,
+                status,
+                basis,
+                classification,
                 confidence,
                 attrs
             ) VALUES (
@@ -258,11 +281,22 @@ BEGIN
                 v_assertion.subject_edge_id,
                 v_assertion.claim,
                 v_assertion.effective_at,
-                v_assertion.source_event_id,
+                v_assertion.effective_to,
+                v_assertion.status,
+                v_assertion.basis,
+                v_assertion.classification,
                 v_assertion.confidence,
                 v_assertion.attrs
             )
             RETURNING id INTO v_replacement_id;
+
+            PERFORM append_assertion_evidence(
+                v_replacement_id,
+                ARRAY[jsonb_build_object(
+                    'kind', 'derivation',
+                    'source_assertion_id', v_assertion.id
+                )]
+            );
         END IF;
 
         PERFORM mark_assertion_superseded(v_assertion.id, v_replacement_id);
@@ -368,7 +402,7 @@ SELECT jsonb_build_object(
                 a.claim,
                 a.confidence,
                 a.asserted_at
-            FROM current_assertions a
+            FROM current_valid_assertions a
             WHERE a.subject_node_id = p_node_id
             ORDER BY a.confidence DESC NULLS LAST, a.asserted_at DESC
             LIMIT p_max_items
@@ -579,7 +613,7 @@ SELECT jsonb_build_object(
     ),
     'assertion_types', (
         SELECT coalesce(jsonb_object_agg(assertion_type, cnt), '{}'::jsonb)
-        FROM (SELECT assertion_type, count(*) AS cnt FROM current_assertions GROUP BY assertion_type ORDER BY cnt DESC) t
+        FROM (SELECT assertion_type, count(*) AS cnt FROM current_valid_assertions GROUP BY assertion_type ORDER BY cnt DESC) t
     ),
     'event_types', (
         SELECT coalesce(jsonb_object_agg(event_type, cnt), '{}'::jsonb)
@@ -596,7 +630,7 @@ SELECT jsonb_build_object(
     'totals', jsonb_build_object(
         'nodes', (SELECT count(*) FROM nodes WHERE archived_at IS NULL),
         'edges', (SELECT count(*) FROM edges WHERE archived_at IS NULL),
-        'assertions', (SELECT count(*) FROM current_assertions),
+        'assertions', (SELECT count(*) FROM current_valid_assertions),
         'events', (SELECT count(*) FROM events)
     )
 );

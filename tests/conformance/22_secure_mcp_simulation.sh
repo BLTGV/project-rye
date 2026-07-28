@@ -89,13 +89,13 @@ if [[ "$read_tools" != *"rye.get_context_pack"* || "$read_tools" != *"rye.list_d
   exit 1
 fi
 
-if [[ "$read_tools" == *"rye.propose_candidate_fact"* || "$read_tools" == *"rye.submit_observation"* ]]; then
+if [[ "$read_tools" == *"rye.propose_structural_candidate"* || "$read_tools" == *"rye.submit_observation"* ]]; then
   echo "Read-only MCP agent exposed write tools" >&2
   echo "$read_tools" >&2
   exit 1
 fi
 
-if [[ "$candidate_tools" != *"rye.propose_candidate_fact"* || "$candidate_tools" != *"rye.submit_observation"* ]]; then
+if [[ "$candidate_tools" != *"rye.propose_structural_candidate"* || "$candidate_tools" != *"rye.submit_observation"* ]]; then
   echo "Candidate MCP agent did not expose expected candidate tools" >&2
   echo "$candidate_tools" >&2
   exit 1

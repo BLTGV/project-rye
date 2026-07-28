@@ -278,9 +278,8 @@ DECLARE
     v_rows int;
 BEGIN
     -- 1. Agent CAN insert ungated assertions
-    INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence)
-    VALUES ('sentiment', 'agent-r6-test', 'a0000001-0003-0001-0001-000000000001',
-            '{"sentiment":"agent-tested"}', 0.5)
+    INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence, basis) VALUES ('sentiment', 'agent-r6-test', 'a0000001-0003-0001-0001-000000000001',
+            '{"sentiment":"agent-tested"}', 0.5, 'assumed')
     RETURNING id INTO v_assertion_id;
 
     IF v_assertion_id IS NULL THEN
@@ -487,9 +486,8 @@ BEGIN
     -- team_member cannot INSERT financial_terms
     v_blocked := false;
     BEGIN
-        INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence)
-        VALUES ('financial_terms', 'test', 'a0000001-0005-0001-0001-000000000001',
-                '{"payment_terms":"net-30"}', 0.8);
+        INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence, basis) VALUES ('financial_terms', 'test', 'a0000001-0005-0001-0001-000000000001',
+                '{"payment_terms":"net-30"}', 0.8, 'assumed');
     EXCEPTION WHEN OTHERS THEN
         v_blocked := true;
     END;
@@ -500,9 +498,8 @@ BEGIN
     -- team_member cannot INSERT compensation
     v_blocked := false;
     BEGIN
-        INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence)
-        VALUES ('compensation', 'test', 'a0000001-0003-0001-0001-000000000001',
-                '{"salary":100000}', 0.8);
+        INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence, basis) VALUES ('compensation', 'test', 'a0000001-0003-0001-0001-000000000001',
+                '{"salary":100000}', 0.8, 'assumed');
     EXCEPTION WHEN OTHERS THEN
         v_blocked := true;
     END;
@@ -513,15 +510,13 @@ BEGIN
     -- deal_manager CAN insert financial_terms but NOT compensation
     SET LOCAL "app.current_role" = 'deal_manager';
 
-    INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence)
-    VALUES ('financial_terms', 'r8-test', 'a0000001-0005-0001-0001-000000000001',
-            '{"payment_terms":"net-60"}', 0.9);
+    INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence, basis) VALUES ('financial_terms', 'r8-test', 'a0000001-0005-0001-0001-000000000001',
+            '{"payment_terms":"net-60"}', 0.9, 'assumed');
 
     v_blocked := false;
     BEGIN
-        INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence)
-        VALUES ('compensation', 'r8-test', 'a0000001-0003-0001-0001-000000000001',
-                '{"salary":200000}', 0.8);
+        INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence, basis) VALUES ('compensation', 'r8-test', 'a0000001-0003-0001-0001-000000000001',
+                '{"salary":200000}', 0.8, 'assumed');
     EXCEPTION WHEN OTHERS THEN
         v_blocked := true;
     END;

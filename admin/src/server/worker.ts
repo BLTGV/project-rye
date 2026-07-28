@@ -63,13 +63,16 @@ app.use("*", async (c, next) => {
 const uuidSchema = z.string().uuid();
 
 const candidateKindSchema = z.enum([
-  "fact",
   "task",
   "edge",
   "decision",
   "procedure",
   "preference",
   "risk",
+  "context_gap",
+  "policy_change",
+  "scope_change",
+  "plugin_change",
 ]);
 
 const candidateStatusSchema = z.enum([

@@ -71,7 +71,7 @@ BEGIN
     )
     RETURNING id INTO v_referral_source;
     PERFORM create_knowledge_candidate(
-        'fact',
+        'context_gap',
         'Referral TEST-102 eligibility is verified according to one log excerpt; keep candidate until human review.',
         '{"status_domain": "eligibility_check_status", "domain_fact_kind": "referral_status"}',
         ARRAY[v_referral_scope],
@@ -127,7 +127,7 @@ BEGIN
     )
     RETURNING id INTO v_manufacturing_source;
     PERFORM create_knowledge_candidate(
-        'fact',
+        'context_gap',
         'Order TEST-Q771 is ready for production according to the ERP export; keep candidate until order-level review.',
         '{"status_domain": "quote_status", "domain_fact_kind": "order_status"}',
         ARRAY[v_manufacturing_scope],
@@ -183,7 +183,7 @@ BEGIN
     )
     RETURNING id INTO v_permit_source;
     PERFORM create_knowledge_candidate(
-        'fact',
+        'context_gap',
         'Permit TEST-P445 is approved according to one email attachment; keep candidate until PermitCore review.',
         '{"status_domain": "permit_review_status", "domain_fact_kind": "permit_status"}',
         ARRAY[v_permit_scope],
@@ -278,11 +278,11 @@ BEGIN
      AND st.claim->>'status' = 'proposed'
     WHERE n.node_type = 'knowledge_candidate'
       AND n.properties->>'created_by' = 'test:onboarding-scenarios'
-      AND n.properties->>'candidate_kind' = 'fact'
+      AND n.properties->>'candidate_kind' = 'context_gap'
       AND n.properties->'target_payload' ? 'domain_fact_kind';
 
     IF v_candidate_count <> 3 THEN
-        RAISE EXCEPTION 'Expected 3 domain fact candidates, got %', v_candidate_count;
+        RAISE EXCEPTION 'Expected 3 domain review-gap candidates, got %', v_candidate_count;
     END IF;
 
     IF EXISTS (

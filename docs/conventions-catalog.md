@@ -7,7 +7,12 @@ Types are open conventions — write a new value and it exists, no migration req
 - **Node types** (`node_type`): `person`, `org`, `project`, `task`, `opportunity`, `pipeline`, `ticket`, `parcel`, `document`, `incident`, `release`, `component`, `product`
 - **Edge types** (`edge_type`): `employs`, `assigned_to`, `project_member`, `blocks`, `depends_on`, `regarding`, `applied_to`, `targets`, `references`, `affects`, `triggered_by`, `contains`, `impacted`, `owns`, `adjacent_to`
 - **Assertion types** (`assertion_type`): `project_status`, `task_status`, `deal_stage`, `health_score`, `churn_risk`, `sentiment`, `ownership`, `title_opinion`, `interview_feedback`, `candidate_stage`, `ticket_status`, `decision_status`
-- **Event types** (`event_type`): `meeting`, `phone_call`, `email`, `escalation`, `incident_update`, `interview`, `agent_query`, `domain_change`, `task_created`, `status_change`, `comment`, `time_log`, `dispute_raised`, `dispute_resolved`, `opportunity_created`, `node_merge`, `node_properties_updated`
+- **Event types** (`event_type`): `meeting`, `phone_call`, `email`,
+  `escalation`, `incident_update`, `interview`, `agent_query`,
+  `domain_change`, `task_created`, `status_change`, `comment`, `time_log`,
+  `assertion_accepted`, `candidate_rejected`, `distillation`,
+  `knowledge_gap_resolved`, `opportunity_created`, `node_merge`, and
+  `node_properties_updated`
 
 Onboarding and plugin metadata add convention-owned infrastructure types:
 
@@ -136,14 +141,14 @@ same key to coexist without making future knowledge current too early.
 
 ## Assertion Write Convention
 
-- Prefer `record_assertion(...)` for accepted assertions. It handles current,
-  historical, candidate, and future-effective writes consistently.
+- Use `record_assertion(...)` for accepted and candidate assertions. Pass
+  `status`, `basis`, and `evidence`. Evidence is required unless the basis is
+  `assumed`.
 - Assertion content is immutable after insert. Only lifecycle metadata and
   effective-window narrowing may be updated by Rye helper functions.
-- Use `supersede_assertion(...)` only when replacing a known assertion by id and
-  you do not need future-scheduling behavior.
-- Use `contest_assertion(...)` when contradictory information arrives but you're uncertain which is correct. Both claims coexist until resolved.
-- Use `resolve_dispute(...)` to pick a winner among competing assertions.
+- Use `accept_assertion(...)` and `reject_candidate(...)` for review.
+- Use `supersede_assertion(...)` only for a same-subject, same-type,
+  same-key replacement by id.
 - Do not run direct `UPDATE assertions` — RLS blocks it outside the supersession function context.
 
 ## Future Assertion And Planning Pattern
@@ -151,58 +156,49 @@ same key to coexist without making future knowledge current too early.
 Use this pattern when an accepted future change should be visible for planning
 but not treated as current truth.
 
-1. Store the plan as current-visible knowledge.
-   - Examples: `deal_stage_plan`, `task_status_plan`,
-     `milestone_status_plan`.
-   - Include owner, target/effective date, status, dependencies, risks, and
-     the scheduled assertion id when available.
-2. Store the future truth as a future-effective assertion.
+1. Store the future truth as a future-effective assertion.
    - Use the same `assertion_key` as the current fact it will replace.
    - Set `effective_at` to the cutover date.
-   - Let `record_assertion(...)` close the current row's `effective_to`.
-3. Read current truth from `current_valid_assertions`.
-4. Read future or historical truth from `assertions_as_of(...)`.
-
-Use CRM/PM helpers when available:
-
-- `schedule_deal_stage_change(...)`
-- `schedule_task_status_change(...)`
-- `schedule_milestone_status_change(...)`
+   - Call `schedule_assertion_change(...)`; it closes the current row's
+     `effective_to`.
+2. Read current truth from `current_valid_assertions`.
+3. Read future or historical truth from `assertions_as_of(...)`.
 
 Do not report a plan as already true. A plan says "we intend this"; the
 future-effective assertion says "Rye should answer this as true at that time."
 
-## Assertion Dispute Convention
+## Candidate Review Convention
 
 When new information contradicts an existing assertion but the correct answer is uncertain:
 
-1. Call `contest_assertion(existing_id, new_claim, source, confidence, reason)`.
-2. The competing assertion uses `assertion_key = 'contested:<source>'` so both coexist.
-3. A `dispute_raised` event is recorded for audit.
-4. Query `active_disputes` to find all unresolved conflicts.
-5. Call `resolve_dispute(winning_assertion_id, reason, actor)` to resolve.
-6. A `dispute_resolved` event is recorded. Losers are superseded. If the winner had a `contested:` key, it's promoted to `default`.
+1. Insert the new claim with `status = 'candidate'` and the normal domain key.
+2. Put every provenance link in `assertion_evidence`.
+3. Query `review_queue`; use `competing_candidates` for tuples with multiple
+   candidates.
+4. Call `accept_assertion(...)` on the winner.
+5. Call `reject_candidate(...)` on candidates ruled out.
 
-```sql
--- Contest an existing ownership assertion
-SELECT contest_assertion(
-    p_existing_assertion_id := '<assertion_uuid>',
-    p_new_claim             := '{"fraction": 0.125}',
-    p_source                := 'county_filing_2024_0892',
-    p_confidence            := 0.7,
-    p_reason                := 'County filing shows different fraction'
-);
+Candidates remain invisible to operational reads throughout review.
 
--- Find unresolved disputes
-SELECT * FROM active_disputes;
+## Evidence Convention
 
--- Resolve in favor of the contested assertion
-SELECT resolve_dispute(
-    p_winning_assertion_id := '<contested_assertion_uuid>',
-    p_reason               := 'Confirmed by title examiner',
-    p_actor                := 'user:alice'
-);
-```
+- `source` and `corroboration` evidence reference events.
+- `derivation` evidence references source assertions.
+- Set `witness_node_id` when the source has an identifiable witness.
+- Repeated evidence from one witness is auditable but does not increase
+  effective confidence.
+- Evidence rows are append-only and inherit visibility from both ends.
+- Derivations inherit the maximum source classification and reject
+  mixed-access sources.
+
+## Registry and Confidence Convention
+
+- Store defaults as accepted `registry_entry` assertions.
+- Resolve `half_life:<assertion_type>`, `basis_prior:<basis>`, and
+  `digest_facets:<node_type>` with `registry_value(key, scope)`.
+- Precedence is scope override, plugin default, then core default.
+- Read calculated belief from `current_assertions_weighted`.
+- Never overwrite stored confidence to represent decay or corroboration.
 
 ## Artifact Convention
 
@@ -210,6 +206,8 @@ SELECT resolve_dispute(
 - Pass `p_content_hash` to prevent duplicate artifacts from the same source material.
 - If a matching artifact exists (same type and content hash), returns the existing ID.
 - Agents can create artifacts (INSERT is allowed for all roles).
+- Digest narrative artifacts inherit and enforce the linked digest assertion's
+  classification.
 
 ```sql
 SELECT record_artifact(
@@ -328,10 +326,15 @@ All views must use `security_invoker = true` (PostgreSQL 15+) so that RLS polici
 
 | View | Purpose |
 |---|---|
-| `current_assertions` | Non-superseded assertions only |
+| `current_valid_assertions` | Accepted, live, effective-now assertions |
+| `current_assertions_weighted` | Current assertions with effective confidence |
 | `node_context` | Full node context with edges and assertions |
 | `nodes_secure` | Nodes with field-level redaction applied |
-| `active_disputes` | Subjects with competing active assertions |
+| `review_queue` | Live candidates grouped by assertion tuple |
+| `competing_candidates` | Tuples with more than one live candidate |
+| `stale_digests` | Digests invalidated by newer knowledge or displaced sources |
+| `open_gaps` | Accepted unresolved knowledge gaps |
+| `assertion_support` | Visible evidence bundle |
 
 ## Materialized View Convention
 

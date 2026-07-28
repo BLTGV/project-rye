@@ -707,13 +707,16 @@ export interface NodeDetail {
 }
 
 export type KnowledgeCandidateKind =
-  | "fact"
   | "task"
   | "edge"
   | "decision"
   | "procedure"
   | "preference"
-  | "risk";
+  | "risk"
+  | "context_gap"
+  | "policy_change"
+  | "scope_change"
+  | "plugin_change";
 
 export type KnowledgeCandidateStatus =
   | "proposed"

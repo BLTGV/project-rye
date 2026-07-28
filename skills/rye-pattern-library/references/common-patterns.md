@@ -66,11 +66,20 @@ Contract:
 
 Good fits: status, stage, health, priority, current title opinion.
 
-Initial insert:
+Initial write:
 
 ```sql
-INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence)
-VALUES ('<state_type>', 'default', '<node_uuid>', '{"state": "new"}', 1.0);
+SELECT record_assertion(
+  p_assertion_type := '<state_type>',
+  p_assertion_key := 'default',
+  p_subject_node_id := '<node_uuid>'::uuid,
+  p_claim := '{"state":"new"}',
+  p_confidence := 1.0,
+  p_basis := 'reported',
+  p_evidence := ARRAY[
+    jsonb_build_object('kind', 'source', 'event_id', '<event_uuid>'::uuid)
+  ]
+);
 ```
 
 Replacement:
@@ -83,8 +92,11 @@ SELECT supersede_assertion(
   p_new_subject_edge_id  := NULL,
   p_new_claim            := '{"state": "reviewed"}',
   p_new_assertion_key    := 'default',
-  p_new_source_event_id  := '<event_uuid>',
-  p_new_confidence       := 1.0
+  p_new_confidence       := 1.0,
+  p_new_basis            := 'reported',
+  p_new_evidence         := ARRAY[
+    jsonb_build_object('kind', 'source', 'event_id', '<event_uuid>'::uuid)
+  ]
 );
 ```
 
@@ -114,7 +126,7 @@ Contract:
 
 - create or reuse an artifact with `record_artifact()`
 - record an event for the extraction, review, or import
-- insert assertions with `source_event_id`
+- pass source or derivation rows through `p_evidence`
 - include source identifiers in the assertion claim, not just in the artifact
 - use `confidence` to reflect extraction or review quality
 
@@ -157,16 +169,17 @@ SELECT record_event(
 );
 ```
 
-## Dispute Pattern
+## Candidate Review Pattern
 
 Use when new information conflicts with an existing assertion and the winner is not known.
 
 Contract:
 
-- do not supersede the existing assertion yet
-- call `contest_assertion()`
-- review unresolved conflicts through `active_disputes`
-- call `resolve_dispute()` when a winner is chosen
+- do not supersede the accepted assertion yet
+- write the competing assertion with `status = 'candidate'`
+- review it through `review_queue` and `competing_candidates`
+- call `accept_assertion()` for the winner
+- call `reject_candidate()` for candidates ruled out
 
 This is for uncertainty. If the new value is known to be correct, use normal supersession.
 

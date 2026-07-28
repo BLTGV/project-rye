@@ -230,7 +230,7 @@ Required next-step report:
   ],
   "candidate_review_queue": {
     "proposed": 84,
-    "by_kind": { "fact": 58, "task": 26 },
+    "by_kind": { "decision": 58, "task": 26 },
     "by_source_container": []
   },
   "blocked_until_user_confirms": [

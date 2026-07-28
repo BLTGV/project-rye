@@ -1,7 +1,7 @@
 -- Helper-created assertions must carry provenance.
 -- create_task / create_opportunity anchor their initial status/stage
 -- assertions to the creation event (or a caller-supplied source event),
--- so no helper path writes an assertion with NULL source_event_id.
+-- so no helper path writes an assertion without source evidence.
 
 SET search_path = rye, public, pg_catalog;
 
@@ -40,17 +40,18 @@ BEGIN
         p_properties := '{"suite": "conformance"}'
     );
 
-    SELECT a.source_event_id, e.event_type
+    SELECT ae.event_id, e.event_type
     INTO v_source_event, v_event_type
     FROM assertions a
-    LEFT JOIN events e ON e.id = a.source_event_id
+    JOIN assertion_evidence ae ON ae.assertion_id = a.id AND ae.kind = 'source'
+    JOIN events e ON e.id = ae.event_id
     WHERE a.subject_node_id = v_opp
       AND a.assertion_type = 'deal_stage'
       AND a.assertion_key = 'default'
       AND a.superseded_at IS NULL;
 
     IF v_source_event IS NULL THEN
-        RAISE EXCEPTION 'Expected create_opportunity initial deal_stage assertion to have source_event_id';
+        RAISE EXCEPTION 'Expected create_opportunity initial deal_stage assertion to have source evidence';
     END IF;
 
     IF v_event_type <> 'opportunity_created' THEN
@@ -62,17 +63,18 @@ BEGIN
         p_assigned_to_id := v_owner
     );
 
-    SELECT a.source_event_id, e.event_type
+    SELECT ae.event_id, e.event_type
     INTO v_source_event, v_event_type
     FROM assertions a
-    LEFT JOIN events e ON e.id = a.source_event_id
+    JOIN assertion_evidence ae ON ae.assertion_id = a.id AND ae.kind = 'source'
+    JOIN events e ON e.id = ae.event_id
     WHERE a.subject_node_id = v_task
       AND a.assertion_type = 'task_status'
       AND a.assertion_key = 'default'
       AND a.superseded_at IS NULL;
 
     IF v_source_event IS NULL THEN
-        RAISE EXCEPTION 'Expected create_task initial task_status assertion to have source_event_id';
+        RAISE EXCEPTION 'Expected create_task initial task_status assertion to have source evidence';
     END IF;
 
     IF v_event_type <> 'task_created' THEN
@@ -93,11 +95,12 @@ BEGIN
 
     IF NOT EXISTS (
         SELECT 1
-        FROM assertions
-        WHERE subject_node_id = v_task
-          AND assertion_type = 'task_status'
-          AND assertion_key = 'default'
-          AND source_event_id = v_external_event
+        FROM assertions a
+        JOIN assertion_evidence ae ON ae.assertion_id = a.id
+        WHERE a.subject_node_id = v_task
+          AND a.assertion_type = 'task_status'
+          AND a.assertion_key = 'default'
+          AND ae.event_id = v_external_event
     ) THEN
         RAISE EXCEPTION 'Expected caller-supplied source event on create_task initial assertion';
     END IF;
@@ -111,11 +114,12 @@ BEGIN
 
     IF NOT EXISTS (
         SELECT 1
-        FROM assertions
-        WHERE subject_node_id = v_opp
-          AND assertion_type = 'deal_stage'
-          AND assertion_key = 'default'
-          AND source_event_id = v_external_event
+        FROM assertions a
+        JOIN assertion_evidence ae ON ae.assertion_id = a.id
+        WHERE a.subject_node_id = v_opp
+          AND a.assertion_type = 'deal_stage'
+          AND a.assertion_key = 'default'
+          AND ae.event_id = v_external_event
     ) THEN
         RAISE EXCEPTION 'Expected caller-supplied source event on create_opportunity initial assertion';
     END IF;

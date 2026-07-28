@@ -95,6 +95,7 @@ AS $$
 DECLARE
     v_candidate_id uuid;
     v_assertion_id uuid;
+    v_event_id uuid;
 BEGIN
     v_candidate_id := pg_temp.bb_candidate_uuid(p_candidate_key);
     IF v_candidate_id IS NULL THEN
@@ -102,25 +103,46 @@ BEGIN
     END IF;
 
     SELECT id INTO v_assertion_id
-    FROM rye.assertions
+    FROM rye.current_valid_assertions
     WHERE subject_node_id = p_subject_id
       AND assertion_type = p_assertion_type
       AND assertion_key = p_assertion_key
       AND attrs->>'candidate_id' = v_candidate_id::text
-      AND superseded_at IS NULL
     LIMIT 1;
 
     IF v_assertion_id IS NULL THEN
-        v_assertion_id := rye.promote_candidate_to_assertion(
-            p_candidate_id    := v_candidate_id,
+        v_event_id := rye.record_event(
+            p_event_type := 'assertion_candidate_recorded',
+            p_summary := 'Bluebird replay assertion candidate recorded',
+            p_properties := jsonb_build_object('candidate_id', v_candidate_id),
+            p_participant_ids := ARRAY[v_candidate_id, p_subject_id],
+            p_participant_roles := ARRAY['review_candidate', 'subject'],
+            p_actor := 'bluebird_graph_builder'
+        );
+        v_assertion_id := rye.record_assertion(
+            p_assertion_type := p_assertion_type,
             p_subject_node_id := p_subject_id,
-            p_assertion_type  := p_assertion_type,
-            p_assertion_key   := p_assertion_key,
-            p_claim           := p_claim,
-            p_effective_at    := p_effective_at,
-            p_effective_to    := p_effective_to,
-            p_confidence      := p_confidence,
-            p_actor           := 'bluebird_graph_builder'
+            p_assertion_key := p_assertion_key,
+            p_claim := p_claim,
+            p_effective_at := p_effective_at,
+            p_effective_to := p_effective_to,
+            p_confidence := p_confidence,
+            p_status := 'candidate',
+            p_basis := 'reported',
+            p_evidence := ARRAY[jsonb_build_object('kind', 'source', 'event_id', v_event_id)],
+            p_attrs := jsonb_build_object('candidate_id', v_candidate_id)
+        );
+        PERFORM rye.accept_assertion(
+            v_assertion_id,
+            NULL,
+            'Accepted by Bluebird replay adjudication',
+            'bluebird_graph_builder'
+        );
+        PERFORM rye.set_candidate_status(
+            v_candidate_id,
+            'accepted',
+            'Accepted as assertion ' || v_assertion_id,
+            'bluebird_graph_builder'
         );
     END IF;
 
@@ -197,13 +219,16 @@ BEGIN
         'scenario', 'bluebird_bakes'
     );
 
-    v_assertion_id := rye.schedule_deal_stage_change(
-        p_opp_id          := p_opp_id,
-        p_stage           := p_stage,
-        p_effective_at    := p_effective_at,
-        p_reason          := p_reason,
-        p_actor           := 'bluebird_graph_builder',
-        p_plan_properties := v_plan_props
+    v_assertion_id := rye.schedule_assertion_change(
+        p_subject_node_id := p_opp_id,
+        p_subject_edge_id := NULL,
+        p_assertion_type := 'deal_stage',
+        p_assertion_key := 'default',
+        p_claim := jsonb_build_object('stage', p_stage, 'reason', p_reason),
+        p_effective_at := p_effective_at,
+        p_reason := p_reason,
+        p_actor := 'bluebird_graph_builder',
+        p_attrs := v_plan_props
     );
 
     PERFORM rye.set_candidate_status(v_candidate_id, 'accepted', 'Promoted to scheduled deal stage assertion ' || v_assertion_id::text, 'bluebird_graph_builder');
@@ -234,13 +259,16 @@ BEGIN
         'scenario', 'bluebird_bakes'
     );
 
-    v_assertion_id := rye.schedule_task_status_change(
-        p_task_id         := p_task_id,
-        p_status          := p_status,
-        p_effective_at    := p_effective_at,
-        p_reason          := p_reason,
-        p_actor           := 'bluebird_graph_builder',
-        p_plan_properties := v_plan_props
+    v_assertion_id := rye.schedule_assertion_change(
+        p_subject_node_id := p_task_id,
+        p_subject_edge_id := NULL,
+        p_assertion_type := 'task_status',
+        p_assertion_key := 'default',
+        p_claim := jsonb_build_object('status', p_status, 'reason', p_reason),
+        p_effective_at := p_effective_at,
+        p_reason := p_reason,
+        p_actor := 'bluebird_graph_builder',
+        p_attrs := v_plan_props
     );
 
     PERFORM rye.set_candidate_status(v_candidate_id, 'accepted', 'Promoted to scheduled task status assertion ' || v_assertion_id::text, 'bluebird_graph_builder');
@@ -271,13 +299,16 @@ BEGIN
         'scenario', 'bluebird_bakes'
     );
 
-    v_assertion_id := rye.schedule_milestone_status_change(
-        p_milestone_id    := p_milestone_id,
-        p_status          := p_status,
-        p_effective_at    := p_effective_at,
-        p_reason          := p_reason,
-        p_actor           := 'bluebird_graph_builder',
-        p_plan_properties := v_plan_props
+    v_assertion_id := rye.schedule_assertion_change(
+        p_subject_node_id := p_milestone_id,
+        p_subject_edge_id := NULL,
+        p_assertion_type := 'milestone_status',
+        p_assertion_key := 'default',
+        p_claim := jsonb_build_object('status', p_status, 'reason', p_reason),
+        p_effective_at := p_effective_at,
+        p_reason := p_reason,
+        p_actor := 'bluebird_graph_builder',
+        p_attrs := v_plan_props
     );
 
     PERFORM rye.set_candidate_status(v_candidate_id, 'accepted', 'Promoted to scheduled milestone status assertion ' || v_assertion_id::text, 'bluebird_graph_builder');
@@ -442,7 +473,7 @@ BEGIN
     FOR r IN SELECT candidate, review FROM _bb_candidates LOOP
         v_candidate_key := r.candidate->>'id';
         v_raw_kind := r.candidate->>'kind';
-        v_kind := CASE v_raw_kind WHEN 'source_policy' THEN 'policy_change' WHEN 'future_plan' THEN 'fact' WHEN 'decision' THEN 'decision' WHEN 'procedure' THEN 'procedure' WHEN 'risk' THEN 'risk' WHEN 'task' THEN 'task' WHEN 'edge' THEN 'edge' ELSE 'fact' END;
+        v_kind := CASE v_raw_kind WHEN 'source_policy' THEN 'policy_change' WHEN 'future_plan' THEN 'decision' WHEN 'decision' THEN 'decision' WHEN 'procedure' THEN 'procedure' WHEN 'risk' THEN 'risk' WHEN 'task' THEN 'task' WHEN 'edge' THEN 'edge' ELSE 'decision' END;
         v_decision := coalesce(r.review->>'decision', 'needs_review');
         SELECT coalesce(array_agg(src.ref), '{}'::text[]) INTO v_source_refs FROM jsonb_array_elements_text(coalesce(r.candidate->'source_refs', '[]'::jsonb)) AS src(ref);
         SELECT coalesce(array_agg(sr.item_id ORDER BY refs.ord), '{}'::uuid[]) INTO v_source_node_ids FROM unnest(v_source_refs) WITH ORDINALITY AS refs(ref, ord) JOIN _bb_source_ref sr ON sr.ref = refs.ref;
@@ -547,7 +578,21 @@ BEGIN
         PERFORM pg_temp.bb_upsert_edge('contains', v_review_project, v_review_task, jsonb_build_object('added_from', 'needs_more_evidence SME decision'), jsonb_build_object('scenario', 'bluebird_bakes'));
         PERFORM pg_temp.bb_upsert_edge('regarding', v_review_task, pg_temp.bb_candidate_uuid(r.candidate_key), jsonb_build_object('context', 'evidence_gap_candidate'), jsonb_build_object('scenario', 'bluebird_bakes'));
         v_event := rye.record_event('review_requested', 'Verify: ' || r.needed_evidence, jsonb_build_object('candidate_id', r.candidate_key, 'needed_evidence', r.needed_evidence, 'scenario', 'bluebird_bakes'), ARRAY[v_review_task, pg_temp.bb_candidate_uuid(r.candidate_key)], ARRAY['task', 'candidate'], 'bluebird_graph_builder');
-        PERFORM rye.record_assertion('task_status', jsonb_build_object('status', 'needs_review', 'reason', 'SME requested source-of-truth evidence before promotion'), v_review_task, NULL, 'default', NULL, NULL, v_event, 1.0, 'current', NULL, jsonb_build_object('candidate_id', pg_temp.bb_candidate_uuid(r.candidate_key), 'scenario', 'bluebird_bakes'));
+        PERFORM rye.record_assertion(
+            'task_status',
+            jsonb_build_object('status', 'needs_review', 'reason', 'SME requested source-of-truth evidence before promotion'),
+            v_review_task,
+            NULL,
+            'default',
+            NULL,
+            NULL,
+            1.0,
+            'accepted',
+            'reported',
+            ARRAY[jsonb_build_object('kind', 'source', 'event_id', v_event)],
+            NULL,
+            jsonb_build_object('candidate_id', pg_temp.bb_candidate_uuid(r.candidate_key), 'scenario', 'bluebird_bakes')
+        );
     END LOOP;
 END $$;
 

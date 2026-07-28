@@ -65,11 +65,10 @@ Ownership is an assertion, not a static property, because it changes over time a
 
 ```sql
 -- Record that John Smith owns 1/16 mineral interest
-INSERT INTO assertions (assertion_type, subject_node_id, claim, confidence, source_event_id)
-VALUES (
-    'ownership',
-    (SELECT id FROM nodes WHERE properties @> '{"tmp_normalized": "45-2-31"}'),
-    '{
+SELECT record_assertion(
+    p_assertion_type := 'ownership',
+    p_subject_node_id := (SELECT id FROM nodes WHERE properties @> '{"tmp_normalized": "45-2-31"}'),
+    p_claim := '{
         "owner_node_id": "<john_smith_uuid>",
         "fraction": "1/16",
         "decimal": 0.0625,
@@ -78,8 +77,11 @@ VALUES (
         "basis": "deed_book_123_page_456",
         "type": "mineral"
     }',
-    0.95,
-    '<title_run_event_uuid>'
+    p_confidence := 0.95,
+    p_basis := 'reported',
+    p_evidence := ARRAY[
+      jsonb_build_object('kind', 'source', 'event_id', '<title_run_event_uuid>'::uuid)
+    ]
 );
 ```
 
@@ -101,8 +103,11 @@ SELECT supersede_assertion(
         "conveyed_from": "<john_smith_uuid>",
         "conveyance_date": "2019-06-15"
     }',
-    p_new_source_event_id := '<new_title_run_event_uuid>',
-    p_new_confidence := 0.98
+    p_new_confidence := 0.98,
+    p_new_basis := 'reported',
+    p_new_evidence := ARRAY[
+      jsonb_build_object('kind', 'source', 'event_id', '<new_title_run_event_uuid>'::uuid)
+    ]
 );
 ```
 
@@ -113,18 +118,20 @@ Both the old belief and the new one are preserved. An agent can show the full ow
 ## 4. Title Opinions
 
 ```sql
-INSERT INTO assertions (assertion_type, subject_node_id, claim, confidence, source_event_id)
-VALUES (
-    'title_opinion',
-    (SELECT id FROM nodes WHERE properties @> '{"tmp_normalized": "45-2-31"}'),
-    '{
+SELECT record_assertion(
+    p_assertion_type := 'title_opinion',
+    p_subject_node_id := (SELECT id FROM nodes WHERE properties @> '{"tmp_normalized": "45-2-31"}'),
+    p_claim := '{
         "quality": "marketable",
         "exceptions": ["Outstanding mortgage - Book 200 Page 100"],
         "attorney": "Jane Doe, Esq.",
         "opinion_date": "2024-03-20"
     }',
-    0.95,
-    '<title_review_event_uuid>'
+    p_confidence := 0.95,
+    p_basis := 'reported',
+    p_evidence := ARRAY[
+      jsonb_build_object('kind', 'source', 'event_id', '<title_review_event_uuid>'::uuid)
+    ]
 );
 ```
 

@@ -8,96 +8,30 @@ All functions include a `SET search_path` clause in their definition for schema 
 
 ## 1. Assertion Immutability Guard
 
-Assertions are append-only. Only the `superseded_at` and `superseded_by` columns may be updated (by the supersession function). All other columns are immutable after insert.
-
-```sql
-CREATE FUNCTION assertions_immutable_guard() RETURNS trigger AS $$
-BEGIN
-    IF NEW.claim IS DISTINCT FROM OLD.claim
-       OR NEW.assertion_type IS DISTINCT FROM OLD.assertion_type
-       OR NEW.subject_node_id IS DISTINCT FROM OLD.subject_node_id
-       OR NEW.subject_edge_id IS DISTINCT FROM OLD.subject_edge_id
-       OR NEW.asserted_at IS DISTINCT FROM OLD.asserted_at
-       OR NEW.effective_at IS DISTINCT FROM OLD.effective_at
-       OR NEW.source_event_id IS DISTINCT FROM OLD.source_event_id
-       OR NEW.confidence IS DISTINCT FROM OLD.confidence
-    THEN
-        RAISE EXCEPTION 'Assertion content is immutable. Only superseded_at and superseded_by may be updated.';
-    END IF;
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER trg_assertions_immutable
-    BEFORE UPDATE ON assertions
-    FOR EACH ROW
-    EXECUTE FUNCTION assertions_immutable_guard();
-```
+Assertions are append-only. Content, basis, subject, key, and effective start
+are immutable. Gated helpers may narrow `effective_to`, transition a candidate
+to accepted, propagate classification, or set supersession metadata.
 
 ---
 
 ## 2. Assertion Supersession
 
-Supersedes an existing assertion and creates a replacement in a single transaction. The update path is function-scoped (for example using `app.write_path` and `app.supersede_assertion_id` session flags set by the function).
+Supersedes an existing accepted assertion and creates a replacement in one
+transaction. The replacement must use the same subject, type, and key.
 
 ```sql
-CREATE FUNCTION supersede_assertion(
-    p_old_assertion_id uuid,
-    p_new_assertion_type text,
-    p_new_subject_node_id uuid,
-    p_new_subject_edge_id uuid,
-    p_new_claim jsonb,
-    p_new_assertion_key text DEFAULT NULL,
-    p_new_effective_at timestamptz DEFAULT NULL,
-    p_new_source_event_id uuid DEFAULT NULL,
-    p_new_confidence numeric DEFAULT NULL
-) RETURNS uuid AS $$
-DECLARE
-    v_old assertions;
-    v_new_id uuid;
-BEGIN
-    PERFORM set_config('app.write_path', 'supersede_assertion', true);
-    PERFORM set_config('app.supersede_assertion_id', p_old_assertion_id::text, true);
-
-    SELECT * INTO v_old
-    FROM assertions
-    WHERE id = p_old_assertion_id
-    FOR UPDATE;
-
-    IF NOT FOUND THEN
-        RAISE EXCEPTION 'Assertion % not found', p_old_assertion_id;
-    END IF;
-
-    IF v_old.superseded_at IS NOT NULL THEN
-        RAISE EXCEPTION 'Assertion % is already superseded', p_old_assertion_id;
-    END IF;
-
-    -- Create the new assertion
-    v_new_id := gen_random_uuid();
-
-    -- Supersede old assertion first to avoid active-key uniqueness conflicts.
-    UPDATE assertions
-    SET superseded_at = now(),
-        superseded_by = v_new_id
-    WHERE id = p_old_assertion_id
-      AND superseded_at IS NULL;
-
-    -- Create replacement assertion with the pre-generated id.
-    INSERT INTO assertions (
-        id, assertion_type, assertion_key, subject_node_id, subject_edge_id,
-        claim, effective_at, source_event_id, confidence
-    ) VALUES (
-        v_new_id,
-        coalesce(p_new_assertion_type, v_old.assertion_type),
-        coalesce(nullif(trim(p_new_assertion_key), ''), v_old.assertion_key),
-        coalesce(p_new_subject_node_id, v_old.subject_node_id),
-        coalesce(p_new_subject_edge_id, v_old.subject_edge_id),
-        p_new_claim, p_new_effective_at, p_new_source_event_id, p_new_confidence
-    );
-
-    RETURN v_new_id;
-END;
-$$ LANGUAGE plpgsql;
+SELECT supersede_assertion(
+    p_old_assertion_id := '<assertion_uuid>',
+    p_new_assertion_type := 'task_status',
+    p_new_subject_node_id := '<task_uuid>',
+    p_new_subject_edge_id := NULL,
+    p_new_claim := '{"status":"done"}',
+    p_new_assertion_key := 'default',
+    p_new_basis := 'reported',
+    p_new_evidence := ARRAY[
+      jsonb_build_object('kind', 'source', 'event_id', '<event_uuid>'::uuid)
+    ]
+);
 ```
 
 ---
@@ -417,70 +351,15 @@ If `p_content_hash` is provided and a matching artifact of the same type already
 
 ---
 
-## 12. Assertion Disputes
+## 12. Candidate Review
 
-### contest_assertion — Record a competing claim without superseding
+Write uncertain claims as assertion rows with `status = 'candidate'` and the
+normal subject, type, and key. Review `review_queue`; use
+`competing_candidates` for tuples with multiple candidates.
 
-When new information contradicts an existing assertion but you're not certain it should replace it, use `contest_assertion()`. It creates a competing assertion alongside the original — both remain active with different `assertion_key` values. A `dispute_raised` event is recorded.
-
-```sql
-CREATE FUNCTION contest_assertion(
-    p_existing_assertion_id uuid,
-    p_new_claim jsonb,
-    p_source text,
-    p_confidence numeric DEFAULT NULL,
-    p_reason text DEFAULT NULL,
-    p_source_event_id uuid DEFAULT NULL,
-    p_actor text DEFAULT NULL
-) RETURNS uuid;
-```
-
-Usage:
-
-```sql
--- A county filing contradicts the recorded ownership fraction
-SELECT contest_assertion(
-    p_existing_assertion_id := '<current_ownership_assertion_uuid>',
-    p_new_claim             := '{"fraction": 0.125, "basis": "county filing 2024-0892"}',
-    p_source                := 'county_filing_2024_0892',
-    p_confidence            := 0.7,
-    p_reason                := 'County filing shows different fraction than original title opinion'
-);
-```
-
-The competing assertion uses `assertion_key = 'contested:<source>'` so it doesn't violate the active uniqueness constraint. Use the `active_disputes` view to find all nodes with competing assertions.
-
-### resolve_dispute — Pick a winner and supersede losers
-
-```sql
-CREATE FUNCTION resolve_dispute(
-    p_winning_assertion_id uuid,
-    p_reason text DEFAULT NULL,
-    p_actor text DEFAULT NULL
-) RETURNS uuid;
-```
-
-Usage:
-
-```sql
--- After review, the county filing is correct
-SELECT resolve_dispute(
-    p_winning_assertion_id := '<contested_assertion_uuid>',
-    p_reason               := 'County filing confirmed by title examiner',
-    p_actor                := 'user:alice'
-);
-```
-
-This supersedes all other active assertions for the same (subject, type). If the winner has a `contested:` key, it's promoted to a clean `default` assertion. A `dispute_resolved` event is recorded.
-
-### active_disputes — View competing assertions
-
-```sql
-SELECT * FROM active_disputes
-WHERE subject_node_id = '<node_uuid>';
-```
-
-Returns rows where a subject has multiple active assertions of the same type, with all competing claims aggregated.
+Call `accept_assertion()` for the selected claim. It supersedes an accepted
+incumbent on the same tuple. Call `reject_candidate()` with a reason for claims
+ruled out.
 
 ---
 
