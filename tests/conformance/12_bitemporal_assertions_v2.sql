@@ -137,3 +137,56 @@ BEGIN
     END IF;
 END;
 $$;
+
+-- Backdated correction: superseded row remains answerable for effective
+-- times its successor does not govern (regression from blind scenario eval).
+DO $$
+DECLARE
+    v_node uuid;
+    v_old uuid;
+    v_new uuid;
+    v_found int;
+BEGIN
+    INSERT INTO nodes (node_type, label, external_id, external_source)
+    VALUES ('project', 'V2 Backdated Correction Subject', gen_random_uuid()::text, 'conformance:v2')
+    RETURNING id INTO v_node;
+
+    -- Old truth: no effective window, believed since ingestion.
+    v_old := record_assertion(
+        p_assertion_type := 'policy_threshold',
+        p_assertion_key := 'default',
+        p_subject_node_id := v_node,
+        p_claim := '{"threshold": 10000}',
+        p_basis := 'assumed'
+    );
+
+    -- Correction learned later: reality changed 2026-05-01.
+    v_new := record_assertion(
+        p_assertion_type := 'policy_threshold',
+        p_assertion_key := 'default',
+        p_subject_node_id := v_node,
+        p_claim := '{"threshold": 5000}',
+        p_basis := 'assumed',
+        p_status := 'candidate',
+        p_effective_at := '2026-05-01'
+    );
+    PERFORM accept_assertion(v_new, p_reason := 'backdated correction test');
+
+    -- Current-effective query returns the new value...
+    SELECT count(*) INTO v_found FROM assertions_as_of(now(), now()) a
+    WHERE a.subject_node_id = v_node AND a.claim->>'threshold' = '5000';
+    IF v_found <> 1 THEN
+        RAISE EXCEPTION 'Backdated correction: current value wrong (got % rows)', v_found;
+    END IF;
+
+    -- ...and the pre-correction effective time returns the OLD value under
+    -- current knowledge, even though the old row is superseded.
+    SELECT count(*) INTO v_found FROM assertions_as_of('2026-04-15'::timestamptz, now()) a
+    WHERE a.subject_node_id = v_node AND a.claim->>'threshold' = '10000';
+    IF v_found <> 1 THEN
+        RAISE EXCEPTION 'Backdated correction: historical value unqueryable (got % rows)', v_found;
+    END IF;
+
+    RAISE NOTICE 'PASS: backdated correction keeps history answerable';
+END;
+$$;

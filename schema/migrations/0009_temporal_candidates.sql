@@ -155,6 +155,17 @@ AS $$
       AND (
           a.superseded_at IS NULL
           OR a.superseded_at > coalesce(p_known_as_of, p_effective)
+          -- Backdated correction: a superseded row still answers effective
+          -- times its successor does not govern. Without this, correcting a
+          -- fact with a later effective_at retires the old truth in
+          -- knowledge-time and history before the correction becomes
+          -- unqueryable (found by blind scenario evaluation, issue #7).
+          OR EXISTS (
+              SELECT 1 FROM assertions s
+              WHERE s.id = a.superseded_by
+                AND s.effective_at IS NOT NULL
+                AND s.effective_at > p_effective
+          )
       );
 $$ LANGUAGE sql STABLE;
 
