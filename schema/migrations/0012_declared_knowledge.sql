@@ -185,9 +185,9 @@ BEGIN
         p_assertion_key   := 'default',
         p_subject_node_id := v_series_id,
         p_claim           := jsonb_build_object('purpose', p_purpose),
-        p_source_event_id := v_event_id,
+        p_evidence         := ARRAY[jsonb_build_object('kind', 'source', 'event_id', v_event_id)],
+        p_basis            := 'reported',
         p_confidence      := 1.0,
-        p_mode            := 'current',
         p_attrs           := jsonb_build_object('declared_series_event_id', v_event_id)
     );
 
@@ -196,9 +196,9 @@ BEGIN
         p_assertion_key   := 'default',
         p_subject_node_id := v_series_id,
         p_claim           := jsonb_build_object('profile', coalesce(nullif(trim(p_profile), ''), 'sitrep')),
-        p_source_event_id := v_event_id,
+        p_evidence         := ARRAY[jsonb_build_object('kind', 'source', 'event_id', v_event_id)],
+        p_basis            := 'reported',
         p_confidence      := 1.0,
-        p_mode            := 'current',
         p_attrs           := jsonb_build_object('declared_series_event_id', v_event_id)
     );
 
@@ -207,9 +207,9 @@ BEGIN
         p_assertion_key   := 'default',
         p_subject_node_id := v_series_id,
         p_claim           := coalesce(p_cadence, '{}'::jsonb),
-        p_source_event_id := v_event_id,
+        p_evidence         := ARRAY[jsonb_build_object('kind', 'source', 'event_id', v_event_id)],
+        p_basis            := 'reported',
         p_confidence      := 1.0,
-        p_mode            := 'current',
         p_attrs           := jsonb_build_object('declared_series_event_id', v_event_id)
     );
 
@@ -417,9 +417,9 @@ BEGIN
         p_assertion_key   := 'default',
         p_subject_node_id := v_instance_id,
         p_claim           := jsonb_build_object('status', 'received'),
-        p_source_event_id := v_event_id,
+        p_evidence         := ARRAY[jsonb_build_object('kind', 'source', 'event_id', v_event_id)],
+        p_basis            := 'reported',
         p_confidence      := 1.0,
-        p_mode            := 'current',
         p_attrs           := jsonb_build_object('declared_instance_event_id', v_event_id, 'series_id', p_series_id)
     );
 
@@ -434,7 +434,7 @@ CREATE OR REPLACE FUNCTION record_declared_statement(
     p_target_payload jsonb DEFAULT '{}'::jsonb,
     p_confidence numeric DEFAULT NULL,
     p_review_required boolean DEFAULT true,
-    p_candidate_kind text DEFAULT 'fact',
+    p_candidate_kind text DEFAULT 'decision',
     p_subject_node_id uuid DEFAULT NULL,
     p_subject_edge_id uuid DEFAULT NULL,
     p_assertion_type text DEFAULT NULL,
@@ -458,10 +458,9 @@ DECLARE
 BEGIN
     v_actor := coalesce(p_actor, current_setting('app.current_user_id', true));
     v_statement_type := coalesce(nullif(trim(p_statement_type), ''), 'current_fact');
-    v_candidate_kind := lower(coalesce(nullif(trim(p_candidate_kind), ''), 'fact'));
+    v_candidate_kind := lower(coalesce(nullif(trim(p_candidate_kind), ''), 'decision'));
 
     IF NOT (v_candidate_kind = ANY(ARRAY[
-        'fact',
         'task',
         'edge',
         'decision',
@@ -471,10 +470,9 @@ BEGIN
         'context_gap',
         'policy_change',
         'scope_change',
-        'plugin_change',
-        'dispute'
+        'plugin_change'
     ])) THEN
-        v_candidate_kind := 'fact';
+        RAISE EXCEPTION 'Unsupported structural candidate kind: %', p_candidate_kind;
     END IF;
 
     IF nullif(trim(p_statement), '') IS NULL THEN
@@ -586,9 +584,9 @@ BEGIN
             'status', CASE WHEN coalesce(p_review_required, true) THEN 'needs_review' ELSE 'captured' END,
             'review_required', coalesce(p_review_required, true)
         ),
-        p_source_event_id := v_event_id,
+        p_evidence         := ARRAY[jsonb_build_object('kind', 'source', 'event_id', v_event_id)],
+        p_basis            := 'reported',
         p_confidence      := 1.0,
-        p_mode            := 'current',
         p_attrs           := jsonb_build_object('declared_statement_event_id', v_event_id, 'instance_id', p_instance_id)
     );
 
@@ -865,7 +863,7 @@ CREATE OR REPLACE FUNCTION promote_declared_statement_to_assertion(
     p_subject_node_id uuid DEFAULT NULL,
     p_subject_edge_id uuid DEFAULT NULL,
     p_assertion_key text DEFAULT 'default',
-    p_mode text DEFAULT 'current',
+    p_status text DEFAULT 'accepted',
     p_effective_at timestamptz DEFAULT NULL,
     p_effective_to timestamptz DEFAULT NULL,
     p_confidence numeric DEFAULT NULL,
@@ -955,9 +953,10 @@ BEGIN
         p_claim             := p_claim,
         p_effective_at      := p_effective_at,
         p_effective_to      := p_effective_to,
-        p_source_event_id   := v_event_id,
+        p_evidence         := ARRAY[jsonb_build_object('kind', 'source', 'event_id', v_event_id)],
+        p_basis            := 'reported',
         p_confidence        := coalesce(p_confidence, (v_statement.properties->>'confidence')::numeric),
-        p_mode              := p_mode,
+        p_status            := p_status,
         p_attrs             := jsonb_build_object(
             'declared_statement_id', p_statement_id,
             'declared_instance_id', v_instance_id,
@@ -975,9 +974,9 @@ BEGIN
             'assertion_type', p_assertion_type,
             'assertion_key', coalesce(nullif(trim(p_assertion_key), ''), 'default')
         ),
-        p_source_event_id := v_event_id,
+        p_evidence         := ARRAY[jsonb_build_object('kind', 'source', 'event_id', v_event_id)],
+        p_basis            := 'reported',
         p_confidence      := 1.0,
-        p_mode            := 'current',
         p_attrs           := jsonb_build_object('declared_statement_event_id', v_event_id, 'instance_id', v_instance_id)
     );
 

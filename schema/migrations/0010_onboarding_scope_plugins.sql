@@ -38,7 +38,6 @@ BEGIN
     v_created_by := coalesce(p_created_by, current_setting('app.current_user_id', true));
 
     IF NOT (v_kind = ANY(ARRAY[
-        'fact',
         'task',
         'edge',
         'decision',
@@ -48,8 +47,7 @@ BEGIN
         'context_gap',
         'policy_change',
         'scope_change',
-        'plugin_change',
-        'dispute'
+        'plugin_change'
     ])) THEN
         RAISE EXCEPTION 'Unsupported candidate kind: %', p_candidate_kind;
     END IF;
@@ -203,9 +201,9 @@ BEGIN
         p_assertion_key   := 'default',
         p_subject_node_id := v_scope_id,
         p_claim           := jsonb_build_object('status', 'proposed'),
-        p_source_event_id := v_event_id,
+        p_evidence         := ARRAY[jsonb_build_object('kind', 'source', 'event_id', v_event_id)],
+        p_basis            := 'reported',
         p_confidence      := 1.0,
-        p_mode            := 'current',
         p_attrs           := jsonb_build_object('onboarding_event_id', v_event_id)
     );
 
@@ -214,9 +212,9 @@ BEGIN
         p_assertion_key   := 'default',
         p_subject_node_id := v_scope_id,
         p_claim           := jsonb_build_object('purpose', p_purpose),
-        p_source_event_id := v_event_id,
+        p_evidence         := ARRAY[jsonb_build_object('kind', 'source', 'event_id', v_event_id)],
+        p_basis            := 'reported',
         p_confidence      := 1.0,
-        p_mode            := 'current',
         p_attrs           := jsonb_build_object('onboarding_event_id', v_event_id)
     );
 
@@ -225,9 +223,9 @@ BEGIN
         p_assertion_key   := 'default',
         p_subject_node_id := v_scope_id,
         p_claim           := coalesce(p_boundary, '{}'::jsonb),
-        p_source_event_id := v_event_id,
+        p_evidence         := ARRAY[jsonb_build_object('kind', 'source', 'event_id', v_event_id)],
+        p_basis            := 'reported',
         p_confidence      := 1.0,
-        p_mode            := 'current',
         p_attrs           := jsonb_build_object('onboarding_event_id', v_event_id)
     );
 
@@ -237,9 +235,9 @@ BEGIN
             p_assertion_key   := 'default',
             p_subject_node_id := v_scope_id,
             p_claim           := jsonb_build_object('owner', p_owner),
-            p_source_event_id := v_event_id,
+            p_evidence         := ARRAY[jsonb_build_object('kind', 'source', 'event_id', v_event_id)],
+        p_basis            := 'reported',
             p_confidence      := 1.0,
-            p_mode            := 'current',
             p_attrs           := jsonb_build_object('onboarding_event_id', v_event_id)
         );
     END IF;
@@ -300,9 +298,9 @@ BEGIN
         p_assertion_key   := p_assertion_key,
         p_subject_node_id := p_scope_id,
         p_claim           := p_claim,
-        p_source_event_id := v_event_id,
+        p_evidence         := ARRAY[jsonb_build_object('kind', 'source', 'event_id', v_event_id)],
+        p_basis            := 'reported',
         p_confidence      := 1.0,
-        p_mode            := 'current',
         p_attrs           := jsonb_build_object('policy_event_id', v_event_id)
     );
 
@@ -410,9 +408,9 @@ BEGIN
             'enabled', true,
             'manifest', coalesce(p_manifest, '{}'::jsonb)
         ),
-        p_source_event_id := v_event_id,
+        p_evidence         := ARRAY[jsonb_build_object('kind', 'source', 'event_id', v_event_id)],
+        p_basis            := 'reported',
         p_confidence      := 1.0,
-        p_mode            := 'current',
         p_attrs           := jsonb_build_object('plugin_event_id', v_event_id)
     );
 
@@ -553,9 +551,9 @@ BEGIN
         p_assertion_key   := 'default',
         p_subject_node_id := p_scope_id,
         p_claim           := jsonb_build_object('status', 'active'),
-        p_source_event_id := v_event_id,
+        p_evidence         := ARRAY[jsonb_build_object('kind', 'source', 'event_id', v_event_id)],
+        p_basis            := 'reported',
         p_confidence      := 1.0,
-        p_mode            := 'current',
         p_attrs           := jsonb_build_object('activation_event_id', v_event_id)
     );
 

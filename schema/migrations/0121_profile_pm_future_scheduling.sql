@@ -53,9 +53,9 @@ BEGIN
             'moved_from', v_old_status,
             'reason', p_reason
         ),
-        p_source_event_id := v_event_id,
+        p_evidence         := ARRAY[jsonb_build_object('kind', 'source', 'event_id', v_event_id)],
+        p_basis            := 'reported',
         p_confidence := 1.0,
-        p_mode := 'current',
         p_attrs := jsonb_build_object('source', 'rye-project-management', 'status_change', true)
     );
 
@@ -75,15 +75,8 @@ SET search_path = rye, pg_catalog, public
 AS $$
 DECLARE
     v_current_status text;
-    v_event_id uuid;
-    v_plan_key text;
-    v_scheduled_assertion_id uuid;
     v_task_code text;
 BEGIN
-    IF p_effective_at <= now() THEN
-        RAISE EXCEPTION 'scheduled task status effective_at must be in the future';
-    END IF;
-
     SELECT properties->>'code'
     INTO v_task_code
     FROM nodes
@@ -103,60 +96,27 @@ BEGIN
       AND assertion_key = 'default'
     LIMIT 1;
 
-    v_event_id := record_event(
-        p_event_type        := 'task_status_change_scheduled',
-        p_summary           := format('%s: scheduled status change %s -> %s on %s', v_task_code, coalesce(v_current_status, 'none'), p_status, p_effective_at),
-        p_properties        := jsonb_build_object(
-            'entity_code', v_task_code,
-            'from_status', v_current_status,
-            'to_status', p_status,
-            'effective_at', p_effective_at,
-            'reason', p_reason,
-            'plan_properties', coalesce(p_plan_properties, '{}'::jsonb)
-        ),
-        p_participant_ids   := ARRAY[p_task_id],
-        p_participant_roles := ARRAY['subject'],
-        p_actor             := p_actor
-    );
-
-    v_scheduled_assertion_id := record_assertion(
+    RETURN schedule_assertion_change(
+        p_subject_node_id := p_task_id,
+        p_subject_edge_id := NULL,
         p_assertion_type := 'task_status',
         p_assertion_key := 'default',
-        p_subject_node_id := p_task_id,
         p_claim := jsonb_build_object(
             'status', p_status,
             'planned_from', v_current_status,
             'reason', p_reason
         ),
         p_effective_at := p_effective_at,
-        p_source_event_id := v_event_id,
+        p_reason := p_reason,
+        p_actor := p_actor,
+        p_basis := 'reported',
         p_confidence := 1.0,
-        p_mode := 'current',
-        p_attrs := jsonb_build_object('source', 'rye-project-management', 'scheduled_change', true)
+        p_attrs := jsonb_build_object(
+            'source', 'rye-project-management',
+            'entity_code', v_task_code,
+            'plan_properties', coalesce(p_plan_properties, '{}'::jsonb)
+        )
     );
-
-    v_plan_key := 'task_status_plan:' || to_char(p_effective_at AT TIME ZONE 'UTC', 'YYYYMMDDHH24MISS');
-
-    PERFORM record_assertion(
-        p_assertion_type := 'task_status_plan',
-        p_assertion_key := v_plan_key,
-        p_subject_node_id := p_task_id,
-        p_claim := jsonb_build_object(
-            'planned_status', p_status,
-            'current_status_at_schedule', v_current_status,
-            'effective_at', to_char(p_effective_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
-            'status', 'scheduled',
-            'scheduled_assertion_id', v_scheduled_assertion_id,
-            'reason', p_reason,
-            'properties', coalesce(p_plan_properties, '{}'::jsonb)
-        ),
-        p_source_event_id := v_event_id,
-        p_confidence := 1.0,
-        p_mode := 'current',
-        p_attrs := jsonb_build_object('source', 'rye-project-management', 'plan', true)
-    );
-
-    RETURN v_scheduled_assertion_id;
 END;
 $$ LANGUAGE plpgsql;
 
@@ -172,15 +132,8 @@ SET search_path = rye, pg_catalog, public
 AS $$
 DECLARE
     v_current_status text;
-    v_event_id uuid;
     v_milestone_code text;
-    v_plan_key text;
-    v_scheduled_assertion_id uuid;
 BEGIN
-    IF p_effective_at <= now() THEN
-        RAISE EXCEPTION 'scheduled milestone status effective_at must be in the future';
-    END IF;
-
     SELECT properties->>'code'
     INTO v_milestone_code
     FROM nodes
@@ -200,60 +153,27 @@ BEGIN
       AND assertion_key = 'default'
     LIMIT 1;
 
-    v_event_id := record_event(
-        p_event_type        := 'milestone_status_change_scheduled',
-        p_summary           := format('%s: scheduled milestone status %s -> %s on %s', v_milestone_code, coalesce(v_current_status, 'none'), p_status, p_effective_at),
-        p_properties        := jsonb_build_object(
-            'entity_code', v_milestone_code,
-            'from_status', v_current_status,
-            'to_status', p_status,
-            'effective_at', p_effective_at,
-            'reason', p_reason,
-            'plan_properties', coalesce(p_plan_properties, '{}'::jsonb)
-        ),
-        p_participant_ids   := ARRAY[p_milestone_id],
-        p_participant_roles := ARRAY['subject'],
-        p_actor             := p_actor
-    );
-
-    v_scheduled_assertion_id := record_assertion(
+    RETURN schedule_assertion_change(
+        p_subject_node_id := p_milestone_id,
+        p_subject_edge_id := NULL,
         p_assertion_type := 'milestone_status',
         p_assertion_key := 'default',
-        p_subject_node_id := p_milestone_id,
         p_claim := jsonb_build_object(
             'status', p_status,
             'planned_from', v_current_status,
             'reason', p_reason
         ),
         p_effective_at := p_effective_at,
-        p_source_event_id := v_event_id,
+        p_reason := p_reason,
+        p_actor := p_actor,
+        p_basis := 'reported',
         p_confidence := 1.0,
-        p_mode := 'current',
-        p_attrs := jsonb_build_object('source', 'rye-project-management', 'scheduled_change', true)
+        p_attrs := jsonb_build_object(
+            'source', 'rye-project-management',
+            'entity_code', v_milestone_code,
+            'plan_properties', coalesce(p_plan_properties, '{}'::jsonb)
+        )
     );
-
-    v_plan_key := 'milestone_status_plan:' || to_char(p_effective_at AT TIME ZONE 'UTC', 'YYYYMMDDHH24MISS');
-
-    PERFORM record_assertion(
-        p_assertion_type := 'milestone_status_plan',
-        p_assertion_key := v_plan_key,
-        p_subject_node_id := p_milestone_id,
-        p_claim := jsonb_build_object(
-            'planned_status', p_status,
-            'current_status_at_schedule', v_current_status,
-            'effective_at', to_char(p_effective_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
-            'status', 'scheduled',
-            'scheduled_assertion_id', v_scheduled_assertion_id,
-            'reason', p_reason,
-            'properties', coalesce(p_plan_properties, '{}'::jsonb)
-        ),
-        p_source_event_id := v_event_id,
-        p_confidence := 1.0,
-        p_mode := 'current',
-        p_attrs := jsonb_build_object('source', 'rye-project-management', 'plan', true)
-    );
-
-    RETURN v_scheduled_assertion_id;
 END;
 $$ LANGUAGE plpgsql;
 

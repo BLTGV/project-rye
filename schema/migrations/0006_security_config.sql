@@ -32,8 +32,24 @@ CREATE POLICY assertion_read_policy ON assertions
     FOR SELECT
     USING (
         (
-            subject_node_id IS NULL
-            OR EXISTS (SELECT 1 FROM nodes WHERE id = assertions.subject_node_id)
+            (subject_node_id IS NOT NULL
+             AND EXISTS (SELECT 1 FROM nodes WHERE id = assertions.subject_node_id))
+            OR
+            (subject_edge_id IS NOT NULL
+             AND EXISTS (SELECT 1 FROM edges WHERE id = assertions.subject_edge_id))
+        )
+        AND (
+            classification IS NULL
+            OR classification = 'public'
+            OR classification = ANY(
+                CASE current_setting('app.current_role', true)
+                    WHEN 'admin' THEN ARRAY['public', 'internal', 'confidential', 'restricted']
+                    WHEN 'deal_manager' THEN ARRAY['public', 'internal', 'confidential']
+                    WHEN 'team_lead' THEN ARRAY['public', 'internal', 'confidential']
+                    WHEN 'team_member' THEN ARRAY['public', 'internal']
+                    ELSE ARRAY['public']
+                END
+            )
         )
         AND (
             NOT EXISTS (

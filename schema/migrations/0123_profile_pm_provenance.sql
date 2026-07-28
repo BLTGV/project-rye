@@ -83,7 +83,8 @@ BEGIN
         p_assertion_key := 'default',
         p_subject_node_id := v_task_id,
         p_claim := '{"status": "backlog"}'::jsonb,
-        p_source_event_id := coalesce(p_source_event_id, v_event_id),
+        p_evidence := ARRAY[jsonb_build_object('kind', 'source', 'event_id', coalesce(p_source_event_id, v_event_id))],
+        p_basis := 'reported',
         p_confidence := 1.0
     );
 

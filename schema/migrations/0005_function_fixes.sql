@@ -62,7 +62,7 @@ SELECT jsonb_build_object(
                 a.claim,
                 a.confidence,
                 a.asserted_at
-            FROM current_assertions a
+            FROM current_valid_assertions a
             WHERE a.subject_node_id = p_node_id
             ORDER BY a.confidence DESC NULLS LAST, a.asserted_at DESC
             LIMIT p_max_items
@@ -131,7 +131,7 @@ SELECT
             'asserted_at', a.asserted_at,
             'confidence', a.confidence
         )), '[]'::json)
-        FROM current_assertions a
+        FROM current_valid_assertions a
         WHERE a.subject_node_id = n.id
     ) AS current_assertions
 FROM nodes n
@@ -214,17 +214,15 @@ BEGIN
 
     FOR v_assertion IN
         SELECT *
-        FROM assertions
+        FROM current_valid_assertions
         WHERE subject_node_id = p_duplicate_id
-          AND superseded_at IS NULL
     LOOP
         SELECT id
         INTO v_replacement_id
-        FROM assertions
+        FROM current_valid_assertions
         WHERE subject_node_id = p_canonical_id
           AND assertion_type = v_assertion.assertion_type
           AND assertion_key = v_assertion.assertion_key
-          AND superseded_at IS NULL
         LIMIT 1;
 
         IF v_replacement_id IS NULL THEN
@@ -235,7 +233,10 @@ BEGIN
                 subject_edge_id,
                 claim,
                 effective_at,
-                source_event_id,
+                effective_to,
+                status,
+                basis,
+                classification,
                 confidence,
                 attrs
             ) VALUES (
@@ -245,11 +246,22 @@ BEGIN
                 v_assertion.subject_edge_id,
                 v_assertion.claim,
                 v_assertion.effective_at,
-                v_assertion.source_event_id,
+                v_assertion.effective_to,
+                v_assertion.status,
+                v_assertion.basis,
+                v_assertion.classification,
                 v_assertion.confidence,
                 v_assertion.attrs
             )
             RETURNING id INTO v_replacement_id;
+
+            PERFORM append_assertion_evidence(
+                v_replacement_id,
+                ARRAY[jsonb_build_object(
+                    'kind', 'derivation',
+                    'source_assertion_id', v_assertion.id
+                )]
+            );
         END IF;
 
         PERFORM mark_assertion_superseded(v_assertion.id, v_replacement_id);

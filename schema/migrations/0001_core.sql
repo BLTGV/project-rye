@@ -92,6 +92,11 @@ CREATE TABLE IF NOT EXISTS assertions (
     id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     assertion_type  text NOT NULL,
     assertion_key   text NOT NULL DEFAULT 'default',
+    status           text NOT NULL DEFAULT 'accepted'
+                     CHECK (status IN ('candidate', 'accepted')),
+    basis            text NOT NULL DEFAULT 'unknown'
+                     CHECK (basis IN ('observed', 'reported', 'inferred', 'assumed', 'unknown')),
+    classification   text,
     subject_node_id uuid REFERENCES nodes(id),
     subject_edge_id uuid REFERENCES edges(id),
     subject_ref     text GENERATED ALWAYS AS (
@@ -100,9 +105,9 @@ CREATE TABLE IF NOT EXISTS assertions (
     claim           jsonb NOT NULL,
     asserted_at     timestamptz NOT NULL DEFAULT now(),
     effective_at    timestamptz,
+    effective_to    timestamptz,
     superseded_at   timestamptz,
     superseded_by   uuid REFERENCES assertions(id) DEFERRABLE INITIALLY DEFERRED,
-    source_event_id uuid REFERENCES events(id),
     confidence      numeric CHECK (confidence BETWEEN 0 AND 1),
     attrs           jsonb NOT NULL DEFAULT '{}',
     created_at      timestamptz NOT NULL DEFAULT now(),
@@ -121,10 +126,44 @@ CREATE INDEX IF NOT EXISTS idx_assertions_edge      ON assertions (subject_edge_
 CREATE INDEX IF NOT EXISTS idx_assertions_claim     ON assertions USING gin (claim);
 CREATE INDEX IF NOT EXISTS idx_assertions_asserted  ON assertions (asserted_at);
 CREATE INDEX IF NOT EXISTS idx_assertions_effective ON assertions (effective_at);
+CREATE INDEX IF NOT EXISTS idx_assertions_current_subject_asserted
+    ON assertions (subject_ref, asserted_at)
+    WHERE superseded_at IS NULL AND status = 'accepted';
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_assertions_active_unique
-    ON assertions (subject_ref, assertion_type, assertion_key)
-    WHERE superseded_at IS NULL;
+    ON assertions (
+        subject_ref,
+        assertion_type,
+        assertion_key,
+        coalesce(effective_at, '-infinity'::timestamptz),
+        coalesce(effective_to, 'infinity'::timestamptz)
+    )
+    WHERE superseded_at IS NULL AND status = 'accepted';
+
+CREATE TABLE IF NOT EXISTS assertion_evidence (
+    id                  uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    assertion_id        uuid NOT NULL REFERENCES assertions(id),
+    kind                text NOT NULL
+                        CHECK (kind IN ('source', 'corroboration', 'derivation')),
+    event_id            uuid REFERENCES events(id),
+    source_assertion_id uuid REFERENCES assertions(id),
+    witness_node_id     uuid REFERENCES nodes(id),
+    recorded_at         timestamptz NOT NULL DEFAULT now(),
+    attrs               jsonb NOT NULL DEFAULT '{}',
+    CHECK (
+        ((kind = 'derivation') = (source_assertion_id IS NOT NULL))
+        AND ((kind <> 'derivation') = (event_id IS NOT NULL))
+    )
+);
+
+CREATE INDEX IF NOT EXISTS idx_assertion_evidence_assertion
+    ON assertion_evidence (assertion_id);
+CREATE INDEX IF NOT EXISTS idx_assertion_evidence_source_assertion
+    ON assertion_evidence (source_assertion_id)
+    WHERE source_assertion_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_assertion_evidence_event
+    ON assertion_evidence (event_id)
+    WHERE event_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS artifacts (
     id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -224,11 +263,18 @@ CREATE TRIGGER trg_nodes_classification_check
     FOR EACH ROW
     EXECUTE FUNCTION enforce_classification_with_teams();
 
-CREATE OR REPLACE VIEW current_assertions
+CREATE OR REPLACE VIEW current_valid_assertions
 WITH (security_invoker = true) AS
 SELECT *
 FROM assertions
-WHERE superseded_at IS NULL;
+WHERE status = 'accepted'
+  AND superseded_at IS NULL
+  AND (effective_at IS NULL OR effective_at <= now())
+  AND (effective_to IS NULL OR effective_to > now());
+
+CREATE OR REPLACE VIEW current_assertions
+WITH (security_invoker = true) AS
+SELECT * FROM current_valid_assertions;
 
 CREATE OR REPLACE VIEW node_context
 WITH (security_invoker = true) AS
@@ -262,13 +308,15 @@ SELECT
             'assertion_key', a.assertion_key,
             'claim', a.claim,
             'asserted_at', a.asserted_at,
-            'confidence', a.confidence
+            'confidence', a.confidence,
+            'basis', a.basis,
+            'classification', a.classification
         )) FILTER (WHERE a.id IS NOT NULL),
         '[]'::json
     ) AS current_assertions
 FROM nodes n
 LEFT JOIN edges eo ON eo.source_id = n.id AND eo.archived_at IS NULL
 LEFT JOIN edges ei ON ei.target_id = n.id AND ei.archived_at IS NULL
-LEFT JOIN current_assertions a ON a.subject_node_id = n.id
+LEFT JOIN current_valid_assertions a ON a.subject_node_id = n.id
 WHERE n.archived_at IS NULL
 GROUP BY n.id, n.node_type, n.label, n.properties;

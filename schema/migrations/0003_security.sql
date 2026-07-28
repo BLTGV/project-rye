@@ -7,6 +7,7 @@ ALTER TABLE edges               ENABLE ROW LEVEL SECURITY;
 ALTER TABLE events              ENABLE ROW LEVEL SECURITY;
 ALTER TABLE event_participants  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE assertions          ENABLE ROW LEVEL SECURITY;
+ALTER TABLE assertion_evidence  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE artifacts           ENABLE ROW LEVEL SECURITY;
 
 ALTER TABLE nodes               FORCE ROW LEVEL SECURITY;
@@ -14,6 +15,7 @@ ALTER TABLE edges               FORCE ROW LEVEL SECURITY;
 ALTER TABLE events              FORCE ROW LEVEL SECURITY;
 ALTER TABLE event_participants  FORCE ROW LEVEL SECURITY;
 ALTER TABLE assertions          FORCE ROW LEVEL SECURITY;
+ALTER TABLE assertion_evidence  FORCE ROW LEVEL SECURITY;
 ALTER TABLE artifacts           FORCE ROW LEVEL SECURITY;
 
 -- Nodes
@@ -107,8 +109,24 @@ CREATE POLICY assertion_read_policy ON assertions
     FOR SELECT
     USING (
         (
-            subject_node_id IS NULL
-            OR EXISTS (SELECT 1 FROM nodes WHERE id = assertions.subject_node_id)
+            (subject_node_id IS NOT NULL
+             AND EXISTS (SELECT 1 FROM nodes WHERE id = assertions.subject_node_id))
+            OR
+            (subject_edge_id IS NOT NULL
+             AND EXISTS (SELECT 1 FROM edges WHERE id = assertions.subject_edge_id))
+        )
+        AND (
+            classification IS NULL
+            OR classification = 'public'
+            OR classification = ANY(
+                CASE current_setting('app.current_role', true)
+                    WHEN 'admin' THEN ARRAY['public', 'internal', 'confidential', 'restricted']
+                    WHEN 'deal_manager' THEN ARRAY['public', 'internal', 'confidential']
+                    WHEN 'team_lead' THEN ARRAY['public', 'internal', 'confidential']
+                    WHEN 'team_member' THEN ARRAY['public', 'internal']
+                    ELSE ARRAY['public']
+                END
+            )
         )
         AND (
             CASE assertion_type
@@ -147,6 +165,56 @@ DROP POLICY IF EXISTS assertion_delete_policy ON assertions;
 CREATE POLICY assertion_delete_policy ON assertions
     FOR DELETE
     USING (false);
+
+-- Assertion evidence is append-only and visible only when both referenced
+-- ends (plus an optional witness) are visible.
+DROP POLICY IF EXISTS assertion_evidence_read_policy ON assertion_evidence;
+CREATE POLICY assertion_evidence_read_policy ON assertion_evidence
+    FOR SELECT
+    USING (
+        EXISTS (SELECT 1 FROM assertions a WHERE a.id = assertion_evidence.assertion_id)
+        AND (
+            (event_id IS NOT NULL AND EXISTS (
+                SELECT 1 FROM events e WHERE e.id = assertion_evidence.event_id
+            ))
+            OR
+            (source_assertion_id IS NOT NULL AND EXISTS (
+                SELECT 1 FROM assertions a WHERE a.id = assertion_evidence.source_assertion_id
+            ))
+        )
+        AND (
+            witness_node_id IS NULL
+            OR EXISTS (SELECT 1 FROM nodes n WHERE n.id = assertion_evidence.witness_node_id)
+        )
+    );
+
+DROP POLICY IF EXISTS assertion_evidence_insert_policy ON assertion_evidence;
+CREATE POLICY assertion_evidence_insert_policy ON assertion_evidence
+    FOR INSERT
+    WITH CHECK (
+        EXISTS (SELECT 1 FROM assertions a WHERE a.id = assertion_evidence.assertion_id)
+        AND (
+            (event_id IS NOT NULL AND EXISTS (
+                SELECT 1 FROM events e WHERE e.id = assertion_evidence.event_id
+            ))
+            OR
+            (source_assertion_id IS NOT NULL AND EXISTS (
+                SELECT 1 FROM assertions a WHERE a.id = assertion_evidence.source_assertion_id
+            ))
+        )
+        AND (
+            witness_node_id IS NULL
+            OR EXISTS (SELECT 1 FROM nodes n WHERE n.id = assertion_evidence.witness_node_id)
+        )
+    );
+
+DROP POLICY IF EXISTS assertion_evidence_update_policy ON assertion_evidence;
+CREATE POLICY assertion_evidence_update_policy ON assertion_evidence
+    FOR UPDATE USING (false) WITH CHECK (false);
+
+DROP POLICY IF EXISTS assertion_evidence_delete_policy ON assertion_evidence;
+CREATE POLICY assertion_evidence_delete_policy ON assertion_evidence
+    FOR DELETE USING (false);
 
 -- Event participants
 DROP POLICY IF EXISTS ep_read_policy ON event_participants;
