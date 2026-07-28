@@ -282,9 +282,8 @@ DECLARE
 BEGIN
     -- Agent can insert ungated assertions on visible nodes
     -- Public/null-classified nodes are visible to everyone
-    INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence)
-    VALUES ('sentiment', 'agent-note', 'a0000001-0003-0001-0001-000000000001',
-            '{"sentiment":"agent-detected-positive"}', 0.6);
+    INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence, basis) VALUES ('sentiment', 'agent-note', 'a0000001-0003-0001-0001-000000000001',
+            '{"sentiment":"agent-detected-positive"}', 0.6, 'assumed');
 
     SELECT count(*) INTO v_count
     FROM assertions

@@ -223,74 +223,74 @@ INSERT INTO edges (edge_type, source_id, target_id, properties) VALUES
     ('primary_contact', 'a0000001-0005-0001-0001-000000000010', 'a0000001-0003-0001-0001-000000000006', '{}');
 
 -- Deal stage assertions (varied stages for aggregate testing)
-INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence) VALUES
-    ('deal_stage', 'default', 'a0000001-0005-0001-0001-000000000001', '{"stage":"negotiation","pipeline":"ENT"}', 1.0),
-    ('deal_stage', 'default', 'a0000001-0005-0001-0001-000000000002', '{"stage":"proposal","pipeline":"ENT"}', 1.0),
-    ('deal_stage', 'default', 'a0000001-0005-0001-0001-000000000003', '{"stage":"discovery","pipeline":"ENT"}', 1.0),
-    ('deal_stage', 'default', 'a0000001-0005-0001-0001-000000000004', '{"stage":"negotiation","pipeline":"ENT"}', 1.0),
-    ('deal_stage', 'default', 'a0000001-0005-0001-0001-000000000005', '{"stage":"proposal","pipeline":"MID"}', 1.0),
-    ('deal_stage', 'default', 'a0000001-0005-0001-0001-000000000006', '{"stage":"negotiation","pipeline":"MID"}', 1.0),
-    ('deal_stage', 'default', 'a0000001-0005-0001-0001-000000000007', '{"stage":"prospecting","pipeline":"MID"}', 1.0),
-    ('deal_stage', 'default', 'a0000001-0005-0001-0001-000000000008', '{"stage":"discovery","pipeline":"MID"}', 1.0),
-    ('deal_stage', 'default', 'a0000001-0005-0001-0001-000000000009', '{"stage":"proposal","pipeline":"SMB"}', 1.0),
-    ('deal_stage', 'default', 'a0000001-0005-0001-0001-000000000010', '{"stage":"negotiation","pipeline":"SMB"}', 1.0),
-    ('deal_stage', 'default', 'a0000001-0005-0001-0001-000000000011', '{"stage":"prospecting","pipeline":"SMB"}', 1.0),
-    ('deal_stage', 'default', 'a0000001-0005-0001-0001-000000000012', '{"stage":"discovery","pipeline":"SMB"}', 1.0);
+INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence, basis) VALUES
+    ('deal_stage', 'default', 'a0000001-0005-0001-0001-000000000001', '{"stage":"negotiation","pipeline":"ENT"}', 1.0, 'assumed'),
+    ('deal_stage', 'default', 'a0000001-0005-0001-0001-000000000002', '{"stage":"proposal","pipeline":"ENT"}', 1.0, 'assumed'),
+    ('deal_stage', 'default', 'a0000001-0005-0001-0001-000000000003', '{"stage":"discovery","pipeline":"ENT"}', 1.0, 'assumed'),
+    ('deal_stage', 'default', 'a0000001-0005-0001-0001-000000000004', '{"stage":"negotiation","pipeline":"ENT"}', 1.0, 'assumed'),
+    ('deal_stage', 'default', 'a0000001-0005-0001-0001-000000000005', '{"stage":"proposal","pipeline":"MID"}', 1.0, 'assumed'),
+    ('deal_stage', 'default', 'a0000001-0005-0001-0001-000000000006', '{"stage":"negotiation","pipeline":"MID"}', 1.0, 'assumed'),
+    ('deal_stage', 'default', 'a0000001-0005-0001-0001-000000000007', '{"stage":"prospecting","pipeline":"MID"}', 1.0, 'assumed'),
+    ('deal_stage', 'default', 'a0000001-0005-0001-0001-000000000008', '{"stage":"discovery","pipeline":"MID"}', 1.0, 'assumed'),
+    ('deal_stage', 'default', 'a0000001-0005-0001-0001-000000000009', '{"stage":"proposal","pipeline":"SMB"}', 1.0, 'assumed'),
+    ('deal_stage', 'default', 'a0000001-0005-0001-0001-000000000010', '{"stage":"negotiation","pipeline":"SMB"}', 1.0, 'assumed'),
+    ('deal_stage', 'default', 'a0000001-0005-0001-0001-000000000011', '{"stage":"prospecting","pipeline":"SMB"}', 1.0, 'assumed'),
+    ('deal_stage', 'default', 'a0000001-0005-0001-0001-000000000012', '{"stage":"discovery","pipeline":"SMB"}', 1.0, 'assumed');
 
 -- Deal value assertions
-INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence) VALUES
-    ('deal_value', 'default', 'a0000001-0005-0001-0001-000000000001', '{"amount":"500000"}', 0.9),
-    ('deal_value', 'default', 'a0000001-0005-0001-0001-000000000002', '{"amount":"1200000"}', 0.85),
-    ('deal_value', 'default', 'a0000001-0005-0001-0001-000000000003', '{"amount":"300000"}', 0.7),
-    ('deal_value', 'default', 'a0000001-0005-0001-0001-000000000004', '{"amount":"800000"}', 0.8),
-    ('deal_value', 'default', 'a0000001-0005-0001-0001-000000000005', '{"amount":"150000"}', 0.75),
-    ('deal_value', 'default', 'a0000001-0005-0001-0001-000000000006', '{"amount":"2000000"}', 0.6),
-    ('deal_value', 'default', 'a0000001-0005-0001-0001-000000000007', '{"amount":"200000"}', 0.5),
-    ('deal_value', 'default', 'a0000001-0005-0001-0001-000000000008', '{"amount":"450000"}', 0.65),
-    ('deal_value', 'default', 'a0000001-0005-0001-0001-000000000009', '{"amount":"25000"}', 0.9),
-    ('deal_value', 'default', 'a0000001-0005-0001-0001-000000000010', '{"amount":"35000"}', 0.85),
-    ('deal_value', 'default', 'a0000001-0005-0001-0001-000000000011', '{"amount":"15000"}', 0.8),
-    ('deal_value', 'default', 'a0000001-0005-0001-0001-000000000012', '{"amount":"40000"}', 0.75);
+INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence, basis) VALUES
+    ('deal_value', 'default', 'a0000001-0005-0001-0001-000000000001', '{"amount":"500000"}', 0.9, 'assumed'),
+    ('deal_value', 'default', 'a0000001-0005-0001-0001-000000000002', '{"amount":"1200000"}', 0.85, 'assumed'),
+    ('deal_value', 'default', 'a0000001-0005-0001-0001-000000000003', '{"amount":"300000"}', 0.7, 'assumed'),
+    ('deal_value', 'default', 'a0000001-0005-0001-0001-000000000004', '{"amount":"800000"}', 0.8, 'assumed'),
+    ('deal_value', 'default', 'a0000001-0005-0001-0001-000000000005', '{"amount":"150000"}', 0.75, 'assumed'),
+    ('deal_value', 'default', 'a0000001-0005-0001-0001-000000000006', '{"amount":"2000000"}', 0.6, 'assumed'),
+    ('deal_value', 'default', 'a0000001-0005-0001-0001-000000000007', '{"amount":"200000"}', 0.5, 'assumed'),
+    ('deal_value', 'default', 'a0000001-0005-0001-0001-000000000008', '{"amount":"450000"}', 0.65, 'assumed'),
+    ('deal_value', 'default', 'a0000001-0005-0001-0001-000000000009', '{"amount":"25000"}', 0.9, 'assumed'),
+    ('deal_value', 'default', 'a0000001-0005-0001-0001-000000000010', '{"amount":"35000"}', 0.85, 'assumed'),
+    ('deal_value', 'default', 'a0000001-0005-0001-0001-000000000011', '{"amount":"15000"}', 0.8, 'assumed'),
+    ('deal_value', 'default', 'a0000001-0005-0001-0001-000000000012', '{"amount":"40000"}', 0.75, 'assumed');
 
 -- Win probability assertions
-INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence) VALUES
-    ('win_probability', 'default', 'a0000001-0005-0001-0001-000000000001', '{"probability":"0.70"}', 0.8),
-    ('win_probability', 'default', 'a0000001-0005-0001-0001-000000000002', '{"probability":"0.55"}', 0.7),
-    ('win_probability', 'default', 'a0000001-0005-0001-0001-000000000003', '{"probability":"0.30"}', 0.6),
-    ('win_probability', 'default', 'a0000001-0005-0001-0001-000000000004', '{"probability":"0.65"}', 0.75),
-    ('win_probability', 'default', 'a0000001-0005-0001-0001-000000000005', '{"probability":"0.50"}', 0.7),
-    ('win_probability', 'default', 'a0000001-0005-0001-0001-000000000006', '{"probability":"0.40"}', 0.5),
-    ('win_probability', 'default', 'a0000001-0005-0001-0001-000000000007', '{"probability":"0.20"}', 0.4),
-    ('win_probability', 'default', 'a0000001-0005-0001-0001-000000000008', '{"probability":"0.35"}', 0.55),
-    ('win_probability', 'default', 'a0000001-0005-0001-0001-000000000009', '{"probability":"0.80"}', 0.9),
-    ('win_probability', 'default', 'a0000001-0005-0001-0001-000000000010', '{"probability":"0.75"}', 0.85),
-    ('win_probability', 'default', 'a0000001-0005-0001-0001-000000000011', '{"probability":"0.15"}', 0.5),
-    ('win_probability', 'default', 'a0000001-0005-0001-0001-000000000012', '{"probability":"0.45"}', 0.6);
+INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence, basis) VALUES
+    ('win_probability', 'default', 'a0000001-0005-0001-0001-000000000001', '{"probability":"0.70"}', 0.8, 'assumed'),
+    ('win_probability', 'default', 'a0000001-0005-0001-0001-000000000002', '{"probability":"0.55"}', 0.7, 'assumed'),
+    ('win_probability', 'default', 'a0000001-0005-0001-0001-000000000003', '{"probability":"0.30"}', 0.6, 'assumed'),
+    ('win_probability', 'default', 'a0000001-0005-0001-0001-000000000004', '{"probability":"0.65"}', 0.75, 'assumed'),
+    ('win_probability', 'default', 'a0000001-0005-0001-0001-000000000005', '{"probability":"0.50"}', 0.7, 'assumed'),
+    ('win_probability', 'default', 'a0000001-0005-0001-0001-000000000006', '{"probability":"0.40"}', 0.5, 'assumed'),
+    ('win_probability', 'default', 'a0000001-0005-0001-0001-000000000007', '{"probability":"0.20"}', 0.4, 'assumed'),
+    ('win_probability', 'default', 'a0000001-0005-0001-0001-000000000008', '{"probability":"0.35"}', 0.55, 'assumed'),
+    ('win_probability', 'default', 'a0000001-0005-0001-0001-000000000009', '{"probability":"0.80"}', 0.9, 'assumed'),
+    ('win_probability', 'default', 'a0000001-0005-0001-0001-000000000010', '{"probability":"0.75"}', 0.85, 'assumed'),
+    ('win_probability', 'default', 'a0000001-0005-0001-0001-000000000011', '{"probability":"0.15"}', 0.5, 'assumed'),
+    ('win_probability', 'default', 'a0000001-0005-0001-0001-000000000012', '{"probability":"0.45"}', 0.6, 'assumed');
 
 -- Financial terms (role-gated: deal_manager, finance, admin only)
-INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence) VALUES
+INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence, basis) VALUES
     ('financial_terms', 'default', 'a0000001-0005-0001-0001-000000000001',
-     '{"discount_pct":10,"payment_terms":"net-30","prepay_required":false}', 0.95),
+     '{"discount_pct":10,"payment_terms":"net-30","prepay_required":false}', 0.95, 'assumed'),
     ('financial_terms', 'default', 'a0000001-0005-0001-0001-000000000002',
-     '{"discount_pct":15,"payment_terms":"net-60","prepay_required":false}', 0.9),
+     '{"discount_pct":15,"payment_terms":"net-60","prepay_required":false}', 0.9, 'assumed'),
     ('financial_terms', 'default', 'a0000001-0005-0001-0001-000000000006',
-     '{"discount_pct":20,"payment_terms":"net-90","prepay_required":true}', 0.85),
+     '{"discount_pct":20,"payment_terms":"net-90","prepay_required":true}', 0.85, 'assumed'),
     ('financial_terms', 'default', 'a0000001-0005-0001-0001-000000000010',
-     '{"discount_pct":0,"payment_terms":"net-15","prepay_required":false}', 0.95);
+     '{"discount_pct":0,"payment_terms":"net-15","prepay_required":false}', 0.95, 'assumed');
 
 -- Negotiation stance (role-gated: deal_manager, admin only)
-INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence) VALUES
+INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence, basis) VALUES
     ('negotiation_stance', 'default', 'a0000001-0005-0001-0001-000000000001',
-     '{"stance":"flexible on timeline, firm on price"}', 0.7),
+     '{"stance":"flexible on timeline, firm on price"}', 0.7, 'assumed'),
     ('negotiation_stance', 'default', 'a0000001-0005-0001-0001-000000000006',
-     '{"stance":"budget constrained, open to phased deployment"}', 0.65);
+     '{"stance":"budget constrained, open to phased deployment"}', 0.65, 'assumed');
 
 -- Sentiment assertions (ungated)
-INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence) VALUES
-    ('sentiment', 'default', 'a0000001-0003-0001-0001-000000000001', '{"sentiment":"positive","notes":"enthusiastic about platform"}', 0.8),
-    ('sentiment', 'default', 'a0000001-0003-0001-0001-000000000002', '{"sentiment":"neutral","notes":"evaluating competitors"}', 0.7),
-    ('sentiment', 'default', 'a0000001-0003-0001-0001-000000000003', '{"sentiment":"positive","notes":"ready to move forward"}', 0.85),
-    ('sentiment', 'default', 'a0000001-0003-0001-0001-000000000004', '{"sentiment":"cautious","notes":"concerned about timeline"}', 0.6);
+INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence, basis) VALUES
+    ('sentiment', 'default', 'a0000001-0003-0001-0001-000000000001', '{"sentiment":"positive","notes":"enthusiastic about platform"}', 0.8, 'assumed'),
+    ('sentiment', 'default', 'a0000001-0003-0001-0001-000000000002', '{"sentiment":"neutral","notes":"evaluating competitors"}', 0.7, 'assumed'),
+    ('sentiment', 'default', 'a0000001-0003-0001-0001-000000000003', '{"sentiment":"positive","notes":"ready to move forward"}', 0.85, 'assumed'),
+    ('sentiment', 'default', 'a0000001-0003-0001-0001-000000000004', '{"sentiment":"cautious","notes":"concerned about timeline"}', 0.6, 'assumed');
 
 -- CRM activity events (40+ across deals)
 DO $$
@@ -442,14 +442,12 @@ BEGIN
         ;
 
         -- task_status assertion
-        INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence)
-        VALUES ('task_status', 'default', v_task_id,
-                jsonb_build_object('status', v_statuses[i]), 1.0);
+        INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence, basis) VALUES ('task_status', 'default', v_task_id,
+                jsonb_build_object('status', v_statuses[i]), 1.0, 'assumed');
 
         -- estimate assertion
-        INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence)
-        VALUES ('estimate', 'default', v_task_id,
-                jsonb_build_object('hours', 2 + (i % 16), 'points', 1 + (i % 8)), 0.9);
+        INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence, basis) VALUES ('estimate', 'default', v_task_id,
+                jsonb_build_object('hours', 2 + (i % 16), 'points', 1 + (i % 8)), 0.9, 'assumed');
 
         -- project contains edge
         INSERT INTO edges (edge_type, source_id, target_id, properties)
@@ -649,8 +647,7 @@ BEGIN
         ;
 
         -- Ticket status assertion
-        INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence)
-        VALUES ('ticket_status', 'default', v_ticket_id,
+        INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence, basis) VALUES ('ticket_status', 'default', v_ticket_id,
                 jsonb_build_object(
                     'status', CASE
                         WHEN i % 5 = 0 THEN 'resolved'
@@ -659,12 +656,11 @@ BEGIN
                         WHEN i % 5 = 3 THEN 'open'
                         ELSE 'reopened'
                     END
-                ), 1.0);
+                ), 1.0, 'assumed');
 
         -- Severity assertion
-        INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence)
-        VALUES ('severity', 'default', v_ticket_id,
-                jsonb_build_object('level', v_severities[i]), 1.0);
+        INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence, basis) VALUES ('severity', 'default', v_ticket_id,
+                jsonb_build_object('level', v_severities[i]), 1.0, 'assumed');
 
         -- Link ticket to customer org
         INSERT INTO edges (edge_type, source_id, target_id, properties)
@@ -779,52 +775,52 @@ INSERT INTO edges (edge_type, source_id, target_id, properties) VALUES
     ('advises', 'd0000001-0002-0001-0001-000000000007', 'd0000001-0001-0001-0001-000000000003', '{"scope":"M&A"}');
 
 -- Valuation assertions (gated via restricted node)
-INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence) VALUES
+INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence, basis) VALUES
     ('valuation', 'default', 'd0000001-0001-0001-0001-000000000001',
-     '{"amount":"120000000","method":"DCF","date":"2026-01-15"}', 0.75),
+     '{"amount":"120000000","method":"DCF","date":"2026-01-15"}', 0.75, 'assumed'),
     ('valuation', 'default', 'd0000001-0001-0001-0001-000000000002',
-     '{"amount":"250000000","method":"comparable","date":"2026-01-20"}', 0.7),
+     '{"amount":"250000000","method":"comparable","date":"2026-01-20"}', 0.7, 'assumed'),
     ('valuation', 'default', 'd0000001-0001-0001-0001-000000000003',
-     '{"amount":"85000000","method":"DCF","date":"2026-02-01"}', 0.8);
+     '{"amount":"85000000","method":"DCF","date":"2026-02-01"}', 0.8, 'assumed');
 
 -- Financial terms on M&A targets
-INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence) VALUES
+INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence, basis) VALUES
     ('financial_terms', 'default', 'd0000001-0001-0001-0001-000000000001',
-     '{"offer_range":"100M-130M","earnout":"15M over 3yr","structure":"cash+stock"}', 0.6),
+     '{"offer_range":"100M-130M","earnout":"15M over 3yr","structure":"cash+stock"}', 0.6, 'assumed'),
     ('financial_terms', 'default', 'd0000001-0001-0001-0001-000000000002',
-     '{"offer_range":"220M-270M","earnout":"30M over 2yr","structure":"all-cash"}', 0.55);
+     '{"offer_range":"220M-270M","earnout":"30M over 2yr","structure":"all-cash"}', 0.55, 'assumed');
 
 -- Negotiation stance on M&A
-INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence) VALUES
+INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence, basis) VALUES
     ('negotiation_stance', 'default', 'd0000001-0001-0001-0001-000000000001',
-     '{"stance":"willing to sell, wants retention packages for key staff"}', 0.65),
+     '{"stance":"willing to sell, wants retention packages for key staff"}', 0.65, 'assumed'),
     ('negotiation_stance', 'default', 'd0000001-0001-0001-0001-000000000002',
-     '{"stance":"exploring options, not committed, board divided"}', 0.5);
+     '{"stance":"exploring options, not committed, board divided"}', 0.5, 'assumed');
 
 -- Compensation assertions (hr_admin/admin only)
-INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence) VALUES
+INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence, basis) VALUES
     ('compensation', 'default', 'd0000001-0002-0001-0001-000000000001',
-     '{"base":450000,"bonus_target":"40%","equity":"2.5% vested","retention_risk":"medium"}', 0.8),
+     '{"base":450000,"bonus_target":"40%","equity":"2.5% vested","retention_risk":"medium"}', 0.8, 'assumed'),
     ('compensation', 'default', 'd0000001-0002-0001-0001-000000000003',
-     '{"base":520000,"bonus_target":"50%","equity":"5% vested","retention_risk":"high"}', 0.75),
+     '{"base":520000,"bonus_target":"50%","equity":"5% vested","retention_risk":"high"}', 0.75, 'assumed'),
     ('compensation', 'default', 'd0000001-0002-0001-0001-000000000005',
-     '{"base":350000,"bonus_target":"35%","equity":"8% vested","retention_risk":"low"}', 0.85);
+     '{"base":350000,"bonus_target":"35%","equity":"8% vested","retention_risk":"low"}', 0.85, 'assumed');
 
 -- Retention risk (ungated but on restricted nodes, so still hidden by node visibility)
-INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence) VALUES
+INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence, basis) VALUES
     ('retention_risk', 'default', 'd0000001-0002-0001-0001-000000000001',
-     '{"risk":"medium","key_factor":"wants CTO title post-merger"}', 0.7),
+     '{"risk":"medium","key_factor":"wants CTO title post-merger"}', 0.7, 'assumed'),
     ('retention_risk', 'default', 'd0000001-0002-0001-0001-000000000002',
-     '{"risk":"high","key_factor":"has competing offer"}', 0.8),
+     '{"risk":"high","key_factor":"has competing offer"}', 0.8, 'assumed'),
     ('retention_risk', 'default', 'd0000001-0002-0001-0001-000000000005',
-     '{"risk":"low","key_factor":"founder, mission-aligned"}', 0.9);
+     '{"risk":"low","key_factor":"founder, mission-aligned"}', 0.9, 'assumed');
 
 -- IP portfolio
-INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence) VALUES
+INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence, basis) VALUES
     ('ip_portfolio', 'default', 'd0000001-0001-0001-0001-000000000001',
-     '{"patents":12,"pending":5,"trade_secrets":"substantial","estimated_value":"15M"}', 0.7),
+     '{"patents":12,"pending":5,"trade_secrets":"substantial","estimated_value":"15M"}', 0.7, 'assumed'),
     ('ip_portfolio', 'default', 'd0000001-0001-0001-0001-000000000003',
-     '{"patents":8,"pending":3,"trade_secrets":"moderate","estimated_value":"10M"}', 0.65);
+     '{"patents":8,"pending":3,"trade_secrets":"moderate","estimated_value":"10M"}', 0.65, 'assumed');
 
 -- M&A events (meetings, due diligence reviews, legal reviews)
 DO $$
@@ -922,15 +918,15 @@ INSERT INTO edges (edge_type, source_id, target_id, properties) VALUES
     ('affiliated_with', 'e0000001-0001-0001-0001-000000000006', 'a0000001-0002-0001-0001-000000000003', '{"source":"linkedin"}');
 
 -- Assertions on duplicates (each copy has own assertions, including supersession chains)
-INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence) VALUES
-    ('lead_score', 'default', 'e0000001-0001-0001-0001-000000000001', '{"score":85}', 0.9),
-    ('lead_score', 'default', 'e0000001-0001-0001-0001-000000000002', '{"score":72}', 0.7),
-    ('lead_score', 'default', 'e0000001-0001-0001-0001-000000000003', '{"score":60}', 0.8),
-    ('lead_score', 'default', 'e0000001-0001-0001-0001-000000000004', '{"score":55}', 0.6),
-    ('lead_score', 'default', 'e0000001-0001-0001-0001-000000000005', '{"score":90}', 0.95),
-    ('lead_score', 'default', 'e0000001-0001-0001-0001-000000000006', '{"score":88}', 0.85),
-    ('contact_info', 'default', 'e0000001-0001-0001-0001-000000000001', '{"preferred":"email"}', 0.9),
-    ('contact_info', 'default', 'e0000001-0001-0001-0001-000000000002', '{"preferred":"phone"}', 0.8);
+INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence, basis) VALUES
+    ('lead_score', 'default', 'e0000001-0001-0001-0001-000000000001', '{"score":85}', 0.9, 'assumed'),
+    ('lead_score', 'default', 'e0000001-0001-0001-0001-000000000002', '{"score":72}', 0.7, 'assumed'),
+    ('lead_score', 'default', 'e0000001-0001-0001-0001-000000000003', '{"score":60}', 0.8, 'assumed'),
+    ('lead_score', 'default', 'e0000001-0001-0001-0001-000000000004', '{"score":55}', 0.6, 'assumed'),
+    ('lead_score', 'default', 'e0000001-0001-0001-0001-000000000005', '{"score":90}', 0.95, 'assumed'),
+    ('lead_score', 'default', 'e0000001-0001-0001-0001-000000000006', '{"score":88}', 0.85, 'assumed'),
+    ('contact_info', 'default', 'e0000001-0001-0001-0001-000000000001', '{"preferred":"email"}', 0.9, 'assumed'),
+    ('contact_info', 'default', 'e0000001-0001-0001-0001-000000000002', '{"preferred":"phone"}', 0.8, 'assumed');
 
 -- Events on duplicates
 DO $$

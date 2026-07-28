@@ -108,7 +108,7 @@ if [[ "$domains_json" == *"secret_internal_note"* ]]; then
 fi
 
 candidate_body='{
-  "candidate_kind":"fact",
+  "candidate_kind":"decision",
   "statement":"Brightline account health is green per account owner confirmation.",
   "domain_keys":["api-account-updates"],
   "source_scope":"slack:#api-sales",
@@ -144,7 +144,7 @@ candidate_id_2="$(json_get "$candidate_json_2" "id")"
 denied_candidate_status="$(status_code \
   -H "Authorization: Bearer ${candidate_token}" \
   -H "Content-Type: application/json" \
-  -d '{"candidate_kind":"fact","statement":"Title work is complete.","domain_keys":["api-title-diligence"]}' \
+  -d '{"candidate_kind":"decision","statement":"Title work is complete.","domain_keys":["api-title-diligence"]}' \
   "${BASE_URL}/api/candidates")"
 [[ "$denied_candidate_status" == "403" ]] || {
   echo "Expected ungranted candidate domain 403, got $denied_candidate_status" >&2

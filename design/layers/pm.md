@@ -249,15 +249,23 @@ BEGIN
             p_new_subject_edge_id := NULL,
             p_new_claim := jsonb_build_object(
                 'status', p_new_status, 'moved_from', v_old_status, 'reason', p_reason),
-            p_new_source_event_id := v_event_id,
-            p_new_confidence := 1.0
+            p_new_confidence := 1.0,
+            p_new_basis := 'reported',
+            p_new_evidence := ARRAY[
+              jsonb_build_object('kind', 'source', 'event_id', v_event_id)
+            ]
         );
     ELSE
-        INSERT INTO assertions (assertion_type, subject_node_id, claim, source_event_id, confidence)
-        VALUES ('task_status', p_task_id,
-            jsonb_build_object('status', p_new_status, 'reason', p_reason),
-            v_event_id, 1.0)
-        RETURNING id INTO v_new_assertion_id;
+        v_new_assertion_id := record_assertion(
+            p_assertion_type := 'task_status',
+            p_subject_node_id := p_task_id,
+            p_claim := jsonb_build_object('status', p_new_status, 'reason', p_reason),
+            p_confidence := 1.0,
+            p_basis := 'reported',
+            p_evidence := ARRAY[
+              jsonb_build_object('kind', 'source', 'event_id', v_event_id)
+            ]
+        );
     END IF;
 
     RETURN v_new_assertion_id;

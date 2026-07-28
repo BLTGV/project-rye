@@ -190,9 +190,8 @@ BEGIN
     END IF;
 
     -- Agent can insert assertions (on visible nodes)
-    INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence)
-    VALUES ('progress', 'agent-check', 'b0000001-0003-0001-0001-000000000001',
-            '{"percent":"75"}', 0.7);
+    INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence, basis) VALUES ('progress', 'agent-check', 'b0000001-0003-0001-0001-000000000001',
+            '{"percent":"75"}', 0.7, 'assumed');
 
     SELECT count(*) INTO v_count
     FROM assertions

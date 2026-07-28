@@ -106,7 +106,7 @@ BEGIN
         p_instance_id      := v_instance,
         p_statement        := 'Example Client is a current customer.',
         p_statement_type   := 'current_fact',
-        p_candidate_kind   := 'fact',
+        p_candidate_kind   := 'decision',
         p_assertion_type   := 'customer_status',
         p_assertion_key    := 'default',
         p_claim            := '{"status": "current_customer"}',

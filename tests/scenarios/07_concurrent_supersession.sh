@@ -29,8 +29,8 @@ INSERT INTO nodes (id, node_type, label, properties)
 VALUES ('f0000001-cccc-cccc-cccc-000000000001', 'test_concurrency', 'Concurrent Supersession Target', '{\"suite\":\"scenarios\"}')
 ON CONFLICT (id) DO NOTHING;
 
-INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence)
-SELECT 'test_status', 'default', 'f0000001-cccc-cccc-cccc-000000000001', '{\"version\": 1}', 1.0
+INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence, basis)
+SELECT 'test_status', 'default', 'f0000001-cccc-cccc-cccc-000000000001', '{\"version\": 1}', 1.0, 'assumed'
 WHERE NOT EXISTS (
     SELECT 1 FROM current_assertions
     WHERE subject_node_id = 'f0000001-cccc-cccc-cccc-000000000001'
@@ -73,8 +73,11 @@ SELECT supersede_assertion(
     '{\"version\": REPLACE_VERSION}'::jsonb,
     'default',
     NULL::timestamptz,
-    NULL::uuid,
-    0.9
+    NULL::timestamptz,
+    0.9,
+    'assumed',
+    NULL::jsonb[],
+    NULL::jsonb
 );
 "
 

@@ -42,15 +42,37 @@ Junction table linking events to the nodes involved, with a role for each.
 
 **Key columns:** `event_id`, `node_id`, `role` (how the node participated). Unique on `(event_id, node_id, role)` — a node can participate in the same event in multiple roles.
 
-#### `assertions` — Time-Versioned Facts
+#### `assertions` — Temporal Knowledge
 
-Append-only claims about nodes or edges. When a newer fact contradicts an older one, the old assertion is superseded — never mutated.
+Append-only claims about nodes or edges. Candidates await review. Accepted
+assertions can be superseded but their content never changes.
 
-**Why it exists:** Facts change. A customer's health score shifts, a deal advances to a new stage, a title opinion is revised. Traditional systems overwrite the old value. Rye preserves both the old belief and the new one, with timestamps and provenance. This enables point-in-time reconstruction, contradiction detection, and audit trails.
+**Why it exists:** Knowledge changes and arrives with different certainty.
+Rye preserves past beliefs, competing candidates, effective time, knowledge
+time, and classification.
 
-**Key columns:** `assertion_type` (fact category), `assertion_key` (`'default'` for singleton facts, domain-specific key for multi-valued facts), `claim` (the fact content as JSONB), `confidence` (0-1), `superseded_at` / `superseded_by` (null = current), `source_event_id` (provenance).
+**Key columns:** `assertion_type`, `assertion_key`, `claim`, `status`
+(`candidate` or `accepted`), `basis` (`observed`, `reported`, `inferred`,
+`assumed`, or `unknown`), `classification`, `confidence` (stored prior),
+`effective_at` / `effective_to`, `asserted_at`, and
+`superseded_at` / `superseded_by`.
 
-**Write convention:** INSERT directly for new facts. Use `supersede_assertion()` to replace existing single-valued facts. Direct UPDATE is blocked by trigger.
+**Write convention:** Use `record_assertion()`. Direct inserts without evidence
+are reserved for explicit `assumed` assertions. Use lifecycle helpers for
+acceptance, rejection, supersession, and scheduling.
+
+#### `assertion_evidence` — Assertion Provenance
+
+Append-only evidence linking an assertion to an event or a source assertion.
+
+**Why it exists:** Provenance can be a source event, corroborating event, or
+derivation chain. A single foreign key cannot represent those cases or preserve
+independent witnesses.
+
+**Key columns:** `assertion_id`, `kind` (`source`, `corroboration`, or
+`derivation`), `event_id`, `source_assertion_id`, `witness_node_id`,
+`recorded_at`, and `attrs`. Derivation references an assertion; other kinds
+reference an event. RLS requires visibility at both ends.
 
 #### `artifacts` — Extracted Content
 
@@ -58,7 +80,7 @@ Content objects produced by or referenced from events — document extracts, par
 
 **Why it exists:** Agents and processes extract structured data from unstructured sources (emails, documents, transcripts). Artifacts store those extractions with provenance back to the source event and links to related nodes.
 
-**Key columns:** `artifact_type`, `source_event_id` (provenance), `source_node_id`, `content` (JSONB), `related_node_ids` (quick-reference array).
+**Key columns:** `artifact_type`, `source_event_id` (provenance), `source_node_id`, `content` (JSONB), `related_node_ids` (quick-reference array), and `attrs` (including propagated classification). Digest narratives inherit the digest assertion classification, and artifact RLS enforces it in addition to source-node visibility.
 
 ### Supporting Tables
 
@@ -124,11 +146,23 @@ Counters for generating sequential codes in the format `{PREFIX}-{YYMM}-{SEQ}`.
 
 ## Views
 
+#### `current_valid_assertions`
+
+Accepted, non-superseded assertions inside their effective window.
+
+**Why it exists:** It is the sole base for operational knowledge reads.
+Candidates, expired rows, and future rows are excluded consistently.
+
 #### `current_assertions`
 
-Non-superseded assertions only (`WHERE superseded_at IS NULL`).
+Compatibility alias for `current_valid_assertions`.
 
-**Why it exists:** Most queries want current beliefs, not historical ones. This view filters out superseded rows so callers don't need to remember the filter.
+#### `current_assertions_weighted`
+
+Current valid assertions with `effective_confidence`.
+
+**Why it exists:** Confidence decay, corroboration lift, and candidate discount
+are calculated at read time. Stored priors remain immutable.
 
 #### `node_context`
 
@@ -144,13 +178,30 @@ Nodes with field-level redaction applied via `redact_properties()`.
 
 Uses `security_invoker = true` so RLS is evaluated with the caller's permissions.
 
-#### `active_disputes`
+#### `review_queue`
 
-Nodes or edges with multiple active assertions of the same type — competing claims that haven't been resolved.
+Live candidates grouped by subject, assertion type, and assertion key.
 
-**Why it exists:** After `contest_assertion()` creates competing claims, someone needs to find and resolve them. This view surfaces all unresolved disputes with the competing assertions aggregated into a single row per (subject, type).
+#### `competing_candidates`
 
-Uses `security_invoker = true` so RLS is evaluated with the caller's permissions.
+Candidate tuples with more than one live candidate.
+
+#### `stale_digests`
+
+Current digests whose subject has accepted knowledge newer than the digest
+watermark, or whose derivation source was superseded or displaced.
+
+#### `open_gaps`
+
+Current accepted `knowledge_gap` assertions whose claim is not resolved.
+
+#### `assertion_support`
+
+Visible evidence rows with target assertion and referenced event or source
+assertion context.
+
+All five review and knowledge-maintenance views use
+`security_invoker = true`.
 
 ---
 
@@ -308,9 +359,64 @@ the caller should pass a scope ID.
 supersede_assertion(p_old_assertion_id, p_new_assertion_type, p_new_subject_node_id, p_new_subject_edge_id, p_new_claim, ...) → uuid
 ```
 
-Replaces an existing assertion with a new version. Sets `superseded_at` / `superseded_by` on the old row and inserts the new one. Supersedes the old assertion first to avoid unique-key conflicts.
+Replaces an accepted assertion with a new accepted version on exactly the same
+subject, type, and key. Cross-tuple replacement raises an error.
 
-**Why it exists:** The immutability trigger blocks direct updates to assertion content. Supersession is the only way to change a fact, and it must happen atomically — the old assertion must be marked superseded before the new one is inserted (because of the active uniqueness index on `(subject_ref, assertion_type, assertion_key)`). This function manages the ordering and session flags.
+**Why it exists:** Supersession must close the prior accepted row before
+inserting its replacement. The helper controls that ordering and the narrow
+immutability bypass.
+
+#### `record_assertion()`
+
+```
+record_assertion(p_assertion_type, p_claim, p_subject_node_id,
+                 p_subject_edge_id, p_assertion_key, p_effective_at,
+                 p_effective_to, p_confidence, p_status, p_basis,
+                 p_evidence, p_actor, p_attrs) → uuid
+```
+
+Writes an accepted or candidate assertion and its evidence atomically.
+Accepted writes apply temporal replacement rules. Helper writes require
+evidence unless `basis = 'assumed'`.
+
+#### `accept_assertion()` / `reject_candidate()`
+
+Accepts a candidate on its existing tuple or rejects it with an audit event.
+Acceptance supersedes an accepted incumbent but leaves other candidates
+unchanged. Inferred candidates cannot displace non-inferred incumbents.
+
+#### `schedule_assertion_change()`
+
+Creates an accepted future-effective replacement for any assertion type and
+closes the predecessor's effective window. Profile schedulers are thin wrappers.
+
+#### `record_distillation()`
+
+Creates an inferred `digest`, its derivation/source evidence, a validated
+watermark, and a `distillation` event. It propagates maximum source
+classification, rejects empty or mixed-access sources, and validates a digest
+facet against `digest_facets:<node_type>` when configured.
+
+#### `resolve_knowledge_gap()`
+
+Supersedes a `knowledge_gap` with a resolved version on the same tuple. The
+claim links the answer assertion; the answer is never used for cross-type
+supersession.
+
+#### `assertions_as_of()`
+
+Returns accepted assertions effective at one timestamp and known at another.
+Superseded rows remain answerable for periods when they were believed.
+
+#### `registry_value()`
+
+Resolves a registry key with scope override, plugin default, then core default
+precedence.
+
+#### `effective_confidence()`
+
+Calculates current belief from a stored confidence or basis prior, distinct
+independent witnesses, optional half-life decay, and live candidate discount.
 
 #### `merge_nodes()`
 
@@ -328,7 +434,9 @@ Merges a duplicate node into a canonical node. Records a `node_merge` event (bef
 agent_node_summary(p_node_id, p_max_items) → jsonb
 ```
 
-Returns compact context for a node: the node itself, top relationships (both outbound and inbound, ranked by weight, each with a `direction` field), current facts, and recent activity. Each section is limited to `p_max_items`.
+Returns compact context for a node: the node, relationships, active digests
+first, uncovered raw assertions, and recent activity. Assertions come only from
+`current_valid_assertions`, include basis labels, and share the item budget.
 
 **Why it exists:** Agents need context but have limited context windows. Dumping a node's full history overwhelms the model. This function returns a ranked, bounded summary that fits typical agent consumption.
 
@@ -351,26 +459,6 @@ record_artifact(p_artifact_type, p_content, p_source_event_id, p_source_node_id,
 Creates an artifact with optional content-hash deduplication. If `p_content_hash` is provided and a matching artifact of the same type already exists, returns the existing ID without inserting. The hash is stored in `attrs->>'content_hash'`.
 
 **Why it exists:** The artifacts table had no helper function, leaving agents and applications to do raw INSERTs with no dedup protection. This function makes artifact creation a single idempotent call with built-in duplicate detection for document processing pipelines.
-
-#### `contest_assertion()`
-
-```
-contest_assertion(p_existing_assertion_id, p_new_claim, p_source, p_confidence, p_reason, p_source_event_id, p_actor) → uuid
-```
-
-Creates a competing assertion alongside an existing one without superseding it. Both remain active with different `assertion_key` values (`default` vs `contested:<source>`). Records a `dispute_raised` event.
-
-**Why it exists:** The original assertion model was binary — active or superseded. When contradictory information arrives but the correct answer is uncertain, this function lets both claims coexist until a human or process resolves the dispute.
-
-#### `resolve_dispute()`
-
-```
-resolve_dispute(p_winning_assertion_id, p_reason, p_actor) → uuid
-```
-
-Picks a winning assertion and supersedes all other active assertions for the same (subject, type). If the winner has a `contested:` key, promotes it to a clean `default` assertion. Records a `dispute_resolved` event.
-
-**Why it exists:** Completes the dispute lifecycle. After `contest_assertion()` creates competing claims, someone must eventually resolve them. This function handles the resolution atomically, including key promotion and audit trail.
 
 #### `update_node_properties()`
 
@@ -446,7 +534,9 @@ BEFORE UPDATE trigger on `nodes`. Sets `updated_at = now()`.
 
 #### `assertions_immutable_guard()`
 
-BEFORE UPDATE trigger on `assertions`. Blocks changes to any column except `superseded_at` and `superseded_by`.
+BEFORE UPDATE trigger on `assertions`. Allows only narrowly gated supersession,
+candidate acceptance, and effective-window narrowing. Basis and content remain
+immutable.
 
 **Why it exists:** Enforces the append-only contract. Without this, application code could accidentally overwrite assertion content, destroying history.
 
@@ -468,7 +558,11 @@ Helper function used internally by `supersede_assertion()` and `merge_nodes()`. 
 
 #### `create_opportunity()`
 
-Creates an opportunity node with a generated code, links it to a pipeline, assigns an owner, records an `opportunity_created` event, and sets the initial `deal_stage` assertion. The initial assertion carries provenance: its `source_event_id` is the caller-supplied `p_source_event_id` when given, otherwise the `opportunity_created` event. Auto-sets `classification: "internal"` when teams are provided.
+Creates an opportunity node with a generated code, links it to a pipeline,
+assigns an owner, records an `opportunity_created` event, and sets the initial
+`deal_stage` assertion. The initial assertion carries source evidence for the
+caller event when supplied, otherwise for the creation event. Auto-sets
+`classification: "internal"` when teams are provided.
 
 #### `advance_deal_stage()`
 
@@ -484,7 +578,11 @@ Thin wrapper around `record_event()` for CRM-specific event logging.
 
 #### `create_task()`
 
-Creates a task node with a generated code and project sequence number, links it to a project, assigns an owner, records a `task_created` event, and sets the initial `task_status` assertion to `"backlog"`. The initial assertion carries provenance: its `source_event_id` is the caller-supplied `p_source_event_id` when given, otherwise the `task_created` event. Auto-sets `classification: "internal"` when teams are provided.
+Creates a task node with a generated code and project sequence number, links it
+to a project, assigns an owner, records a `task_created` event, and sets the
+initial `task_status` assertion to `"backlog"`. The initial assertion carries
+source evidence for the caller event when supplied, otherwise for the creation
+event. Auto-sets `classification: "internal"` when teams are provided.
 
 #### `advance_task_status()`
 

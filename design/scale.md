@@ -495,7 +495,9 @@ Use the `weight` column on edges and `confidence` on assertions to prioritize wh
 The append-only model provides intrinsic safety for agent writes:
 
 - **Agents cannot corrupt existing data through direct DML.** Direct `UPDATE`/`DELETE` on assertions are blocked by policy. Supersession updates are function-scoped.
-- **Every agent write has provenance.** The `actor_system` field on events and the `source_event_id` on assertions trace every piece of data back to the agent and the interaction that produced it.
+- **Every agent write has provenance.** The `actor_system` field on events and
+  append-only `assertion_evidence` rows trace knowledge back to the agent and
+  the interaction that produced it.
 - **Contradictions are explicit.** When an agent writes a new assertion that contradicts an existing one, the supersession is visible. A human or another agent can review supersession chains to validate agent decisions.
 
 Enforce this at the database level:

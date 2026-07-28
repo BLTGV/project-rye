@@ -13,8 +13,8 @@ WITH seeded_node AS (
   VALUES ('project', 'Security Test Node', '{"suite": "security"}')
   RETURNING id
 )
-INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence)
-SELECT 'project_status', 'default', id, '{"status": "todo"}', 1.0
+INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence, basis)
+SELECT 'project_status', 'default', id, '{"status": "todo"}', 1.0, 'assumed'
 FROM seeded_node;
 
 -- Direct update should be blocked even for non-agent roles.
@@ -86,13 +86,14 @@ BEGIN
 END;
 $$;
 
-INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence)
+INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence, basis)
 SELECT
   'project_status_note',
   'agent-note',
   id,
   '{"note": "investigating"}',
-  0.6
+  0.6,
+  'assumed'
 FROM nodes
 WHERE label = 'Security Test Node'
 ORDER BY created_at DESC

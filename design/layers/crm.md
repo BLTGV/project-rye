@@ -234,8 +234,11 @@ BEGIN
         p_new_claim := jsonb_build_object(
             'stage', p_new_stage, 'pipeline', v_pipeline,
             'moved_from', v_old_stage, 'reason', p_reason),
-        p_new_source_event_id := v_event_id,
-        p_new_confidence := 1.0
+        p_new_confidence := 1.0,
+        p_new_basis := 'reported',
+        p_new_evidence := ARRAY[
+          jsonb_build_object('kind', 'source', 'event_id', v_event_id)
+        ]
     );
 
     RETURN v_new_assertion_id;

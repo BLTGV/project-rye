@@ -119,7 +119,7 @@ BEGIN
 
     v_candidate := agent_create_candidate(
         p_agent_id          := v_intake_agent,
-        p_candidate_kind    := 'fact',
+        p_candidate_kind    := 'decision',
         p_statement         := 'Apex account owner is Mina as of the current sales review.',
         p_domain_keys       := ARRAY['sec-account-updates'],
         p_source_scope      := 'slack:#sec-sales',
@@ -166,7 +166,7 @@ BEGIN
     BEGIN
         PERFORM agent_create_candidate(
             p_agent_id        := v_intake_agent,
-            p_candidate_kind  := 'fact',
+            p_candidate_kind  := 'decision',
             p_statement       := 'Title diligence is complete.',
             p_domain_keys     := ARRAY['sec-title-diligence'],
             p_source_scope    := 'slack:#sec-sales',

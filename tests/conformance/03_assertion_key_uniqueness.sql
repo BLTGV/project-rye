@@ -11,17 +11,14 @@ BEGIN
   VALUES ('parcel', 'Assertion Key Test', '{"suite": "conformance"}')
   RETURNING id INTO v_node;
 
-  INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence)
-  VALUES ('ownership', 'owner:a', v_node, '{"owner": "a", "fraction": "1/2"}', 1.0);
+  INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence, basis) VALUES ('ownership', 'owner:a', v_node, '{"owner": "a", "fraction": "1/2"}', 1.0, 'assumed');
 
   -- Different key should be allowed.
-  INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence)
-  VALUES ('ownership', 'owner:b', v_node, '{"owner": "b", "fraction": "1/2"}', 1.0);
+  INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence, basis) VALUES ('ownership', 'owner:b', v_node, '{"owner": "b", "fraction": "1/2"}', 1.0, 'assumed');
 
   BEGIN
     -- Same key/type/subject and still active should fail.
-    INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence)
-    VALUES ('ownership', 'owner:a', v_node, '{"owner": "a", "fraction": "1/4"}', 0.5);
+    INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, confidence, basis) VALUES ('ownership', 'owner:a', v_node, '{"owner": "a", "fraction": "1/4"}', 0.5, 'assumed');
   EXCEPTION WHEN unique_violation THEN
     v_dup_error := true;
   END;
