@@ -2673,9 +2673,33 @@ export async function promoteKnowledgeCandidate(
   input: PromoteKnowledgeCandidateInput
 ): Promise<{ target_type: string; id: string }> {
   if (input.target_type === "assertion") {
-    throw new Error(
-      "Fact promotion was removed in Rye Core Model v2; review assertion candidates with accept_assertion()"
+    const rows = await sql.unsafe(
+      withAdminCte() +
+        `SELECT rye.promote_candidate_node_to_assertion(
+           p_candidate_id    := $1::uuid,
+           p_subject_node_id := $2::uuid,
+           p_assertion_type  := $3::text,
+           p_assertion_key   := $4::text,
+           p_claim           := $5::jsonb,
+           p_effective_at    := $6::timestamptz,
+           p_effective_to    := $7::timestamptz,
+           p_confidence      := $8::numeric,
+           p_actor           := $9::text
+         )::text AS id
+         FROM cfg`,
+      [
+        candidateId,
+        input.subject_node_id,
+        input.assertion_type,
+        input.assertion_key ?? "default",
+        jsonParam(input.claim ?? {}),
+        input.effective_at ?? null,
+        input.effective_to ?? null,
+        input.confidence ?? null,
+        input.actor ?? null,
+      ]
     );
+    return { target_type: "assertion", id: rows[0]?.id as string };
   }
 
   if (input.target_type === "task") {

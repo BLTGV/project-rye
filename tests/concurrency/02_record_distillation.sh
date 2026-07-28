@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export PGOPTIONS="-c app.current_role=admin"
 
 DB_URL="${DATABASE_URL:-}"
 TEST_ROLE="${RYE_TEST_ROLE:-}"
@@ -23,7 +24,6 @@ node_id="$(psql "$DB_URL" -Atqc "SELECT gen_random_uuid()")"
 psql "$DB_URL" -v ON_ERROR_STOP=1 -qc "
 ${role_sql}
 SET search_path = rye, public, pg_catalog;
-SET "app.current_role" = 'admin';
 SET "app.current_user_id" = 'conformance:distillation-concurrency';
 SET "app.current_teams" = '';
 INSERT INTO nodes (id, node_type, label, properties)
@@ -33,7 +33,6 @@ VALUES ('${node_id}', 'project', 'Distillation Concurrency', '{\"suite\":\"core-
 source_id="$(psql "$DB_URL" -Atqc "
 ${role_sql}
 SET search_path = rye, public, pg_catalog;
-SET "app.current_role" = 'admin';
 SET "app.current_user_id" = 'conformance:distillation-concurrency';
 SELECT record_assertion(
     p_assertion_type := 'concurrency_source',
@@ -47,7 +46,6 @@ SELECT record_assertion(
 psql "$DB_URL" -v ON_ERROR_STOP=1 -qc "
 ${role_sql}
 SET search_path = rye, public, pg_catalog;
-SET "app.current_role" = 'admin';
 SET "app.current_user_id" = 'conformance:distillation-concurrency';
 SELECT record_distillation(
     p_subject_node_id := '${node_id}'::uuid,
@@ -70,7 +68,6 @@ call_distillation() {
   psql "$DB_URL" -v ON_ERROR_STOP=1 -Atqc "
 ${role_sql}
 SET search_path = rye, public, pg_catalog;
-SET "app.current_role" = 'admin';
 SET "app.current_user_id" = 'conformance:distillation-concurrency';
 SELECT record_distillation(
     p_subject_node_id := '${node_id}'::uuid,
@@ -95,7 +92,6 @@ wait "$pid_two"
 active_count="$(psql "$DB_URL" -Atqc "
 ${role_sql}
 SET search_path = rye, public, pg_catalog;
-SET "app.current_role" = 'admin';
 SELECT count(*)
 FROM current_valid_assertions
 WHERE subject_node_id = '${node_id}'::uuid
@@ -106,7 +102,6 @@ WHERE subject_node_id = '${node_id}'::uuid
 total_count="$(psql "$DB_URL" -Atqc "
 ${role_sql}
 SET search_path = rye, public, pg_catalog;
-SET "app.current_role" = 'admin';
 SELECT count(*)
 FROM assertions
 WHERE subject_node_id = '${node_id}'::uuid

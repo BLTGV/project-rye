@@ -21,10 +21,12 @@ DECLARE
     v_source_a uuid;
     v_source_b uuid;
 BEGIN
-    INSERT INTO nodes (node_type, label, attrs)
+    INSERT INTO nodes (node_type, label, external_id, external_source, attrs)
     VALUES (
         'project',
         'V2 Digest Subject',
+        gen_random_uuid()::text,
+        'conformance:v2',
         '{"teams":["alpha"],"classification":"internal"}'
     )
     RETURNING id INTO v_node;
@@ -210,7 +212,7 @@ BEGIN
     VALUES ('onboarding_scope', 'V2 Registry Scope', gen_random_uuid()::text, 'conformance:v2')
     RETURNING id INTO v_scope;
     INSERT INTO nodes (node_type, label, external_id, external_source)
-    VALUES ('plugin', 'V2 Registry Plugin', 'v2-registry-plugin', 'conformance:v2')
+    VALUES ('plugin', 'V2 Registry Plugin', gen_random_uuid()::text, 'conformance:v2')
     RETURNING id INTO v_plugin;
     INSERT INTO edges (edge_type, source_id, target_id)
     VALUES ('scope_enables_plugin', v_scope, v_plugin);
@@ -289,8 +291,8 @@ DECLARE
     v_subject uuid;
     v_updated int;
 BEGIN
-    INSERT INTO nodes (node_type, label, attrs)
-    VALUES ('project', 'V2 Evidence Subject', '{"classification":"public"}')
+    INSERT INTO nodes (node_type, label, external_id, external_source, attrs)
+    VALUES ('project', 'V2 Evidence Subject', gen_random_uuid()::text, 'conformance:v2', '{"classification":"public"}')
     RETURNING id INTO v_subject;
     INSERT INTO nodes (node_type, label, attrs)
     VALUES (
@@ -363,8 +365,8 @@ DECLARE
     v_witness_two uuid;
     v_weight numeric;
 BEGIN
-    INSERT INTO nodes (node_type, label, attrs)
-    VALUES ('project', 'V2 Confidence Subject', '{"classification":"public"}')
+    INSERT INTO nodes (node_type, label, external_id, external_source, attrs)
+    VALUES ('project', 'V2 Confidence Subject', gen_random_uuid()::text, 'conformance:v2', '{"classification":"public"}')
     RETURNING id INTO v_subject;
     INSERT INTO nodes (node_type, label, attrs)
     VALUES ('source', 'Witness One', '{"classification":"public"}')

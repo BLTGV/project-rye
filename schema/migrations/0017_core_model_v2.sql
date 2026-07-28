@@ -1018,3 +1018,92 @@ SELECT jsonb_build_object(
     )
 );
 $$ LANGUAGE sql STABLE;
+
+-- ============================================================================
+-- promote_candidate_node_to_assertion
+-- ============================================================================
+-- v2 bridge for fact-shaped promotion of knowledge_candidate NODES (the
+-- structural candidate flow). Unlike the deleted v1 promote_candidate_to_
+-- assertion, this routes through record_assertion + accept_assertion, so all
+-- lifecycle invariants (tuple gating, evidence, classification propagation)
+-- apply. The candidate node is archived on success.
+
+CREATE OR REPLACE FUNCTION promote_candidate_node_to_assertion(
+    p_candidate_id uuid,
+    p_subject_node_id uuid,
+    p_assertion_type text,
+    p_assertion_key text DEFAULT 'default',
+    p_claim jsonb DEFAULT '{}'::jsonb,
+    p_effective_at timestamptz DEFAULT NULL,
+    p_effective_to timestamptz DEFAULT NULL,
+    p_confidence numeric DEFAULT NULL,
+    p_actor text DEFAULT NULL
+) RETURNS uuid
+SECURITY DEFINER
+SET search_path = rye, pg_catalog
+AS $$
+DECLARE
+    v_candidate nodes;
+    v_event_id uuid;
+    v_assertion_id uuid;
+    v_evidence jsonb[];
+BEGIN
+    SELECT * INTO v_candidate
+    FROM nodes
+    WHERE id = p_candidate_id
+      AND node_type = 'knowledge_candidate'
+      AND archived_at IS NULL;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Knowledge candidate % not found', p_candidate_id;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM nodes WHERE id = p_subject_node_id AND archived_at IS NULL) THEN
+        RAISE EXCEPTION 'Subject node % not found', p_subject_node_id;
+    END IF;
+
+    v_event_id := record_event(
+        p_event_type := 'knowledge_candidate_promoted',
+        p_summary    := format('Knowledge candidate promoted to assertion: %s',
+                               left(coalesce(v_candidate.label, p_candidate_id::text), 120)),
+        p_properties := jsonb_build_object(
+            'candidate_id', p_candidate_id,
+            'target_type', 'assertion',
+            'subject_node_id', p_subject_node_id,
+            'assertion_type', p_assertion_type,
+            'assertion_key', p_assertion_key,
+            'actor', p_actor,
+            'source_refs', knowledge_candidate_source_refs(p_candidate_id)
+        ),
+        p_participant_ids := ARRAY[p_subject_node_id],
+        p_participant_roles := ARRAY['subject']
+    );
+
+    v_evidence := ARRAY[jsonb_build_object('kind', 'source', 'event_id', v_event_id)];
+
+    v_assertion_id := record_assertion(
+        p_assertion_type  := p_assertion_type,
+        p_claim           := p_claim,
+        p_subject_node_id := p_subject_node_id,
+        p_assertion_key   := p_assertion_key,
+        p_effective_at    := p_effective_at,
+        p_effective_to    := p_effective_to,
+        p_confidence      := p_confidence,
+        p_status          := 'candidate',
+        p_basis           := 'reported',
+        p_evidence        := v_evidence
+    );
+
+    v_assertion_id := accept_assertion(
+        p_assertion_id := v_assertion_id,
+        p_reason       := 'promoted from knowledge candidate ' || p_candidate_id::text,
+        p_actor        := p_actor
+    );
+
+    PERFORM set_config('app.write_path', 'update_node_properties', true);
+    UPDATE nodes
+    SET archived_at = now(), updated_at = now()
+    WHERE id = p_candidate_id;
+    PERFORM set_config('app.write_path', '', true);
+
+    RETURN v_assertion_id;
+END;
+$$ LANGUAGE plpgsql;

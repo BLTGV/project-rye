@@ -11,10 +11,12 @@ DECLARE
     v_node uuid;
     v_scheduled uuid;
 BEGIN
-    INSERT INTO nodes (node_type, label, properties)
+    INSERT INTO nodes (node_type, label, external_id, external_source, properties)
     VALUES (
         'task',
         'Generic Future Task',
+        gen_random_uuid()::text,
+        'conformance:v2',
         '{"suite":"conformance","code":"TSK-GENERIC-FUTURE"}'
     )
     RETURNING id INTO v_node;

@@ -3,7 +3,10 @@
 SET search_path = rye, public, pg_catalog;
 SELECT set_config('app.current_role', 'admin', false);
 SELECT set_config('app.current_user_id', 'conformance:v2-lifecycle', false);
-SELECT set_config('app.current_teams', '', false);
+-- conformance-only team keeps this suite's opportunity node out of the RLS
+-- scenario suites' visibility counts while staying visible here (RETURNING
+-- applies SELECT policies to inserted rows).
+SELECT set_config('app.current_teams', 'conformance-only', false);
 
 DO $$
 DECLARE
@@ -16,14 +19,18 @@ DECLARE
     v_summary jsonb;
     v_updated int;
 BEGIN
+    -- Real 'opportunity' type so the CRM matview test below is meaningful,
+    -- but scoped to a conformance-only team so it never leaks into the RLS
+    -- scenario suites' visibility counts.
     INSERT INTO nodes (
-        node_type, label, external_id, external_source, properties
+        node_type, label, external_id, external_source, properties, attrs
     ) VALUES (
         'opportunity',
         'V2 Lifecycle Opportunity',
         gen_random_uuid()::text,
         'conformance:v2',
-        '{"code":"V2-LIFECYCLE","name":"V2 Lifecycle Opportunity"}'
+        '{"code":"V2-LIFECYCLE","name":"V2 Lifecycle Opportunity"}',
+        '{"teams":["conformance-only"],"classification":"internal"}'
     )
     RETURNING id INTO v_node;
 

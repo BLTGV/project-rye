@@ -13,8 +13,8 @@ DECLARE
     v_node uuid;
     v_old uuid;
 BEGIN
-    INSERT INTO nodes (node_type, label, properties)
-    VALUES ('project', 'V2 Bitemporal Project', '{"suite":"core-model-v2"}')
+    INSERT INTO nodes (node_type, label, external_id, external_source, properties)
+    VALUES ('project', 'V2 Bitemporal Project', gen_random_uuid()::text, 'conformance:v2', '{"suite":"core-model-v2"}')
     RETURNING id INTO v_node;
 
     INSERT INTO assertions (

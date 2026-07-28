@@ -22,7 +22,7 @@ DECLARE
 BEGIN
     -- Engineering has tasks 1-12 (12 tasks)
     SELECT count(*) INTO v_task_count
-    FROM nodes WHERE node_type = 'task';
+    FROM nodes WHERE node_type = 'task' AND coalesce(external_source,'') <> 'conformance:v2';
 
     IF v_task_count <> 12 THEN
         RAISE EXCEPTION 'S2-2a: engineering team_member should see 12 tasks, got %', v_task_count;
@@ -39,7 +39,7 @@ BEGIN
     FROM current_assertions ca
     JOIN nodes n ON n.id = ca.subject_node_id
     JOIN current_assertions st ON st.subject_node_id = n.id AND st.assertion_type = 'task_status'
-    WHERE n.node_type = 'task'
+    WHERE n.node_type = 'task' AND coalesce(n.external_source,'') <> 'conformance:v2' AND coalesce(external_source,'') <> 'conformance:v2'
       AND ca.assertion_type = 'estimate'
       AND st.claim->>'status' = 'in_progress';
 
@@ -84,7 +84,7 @@ DECLARE
 BEGIN
     -- Marketing has tasks 19-24 (6 tasks)
     SELECT count(*) INTO v_task_count
-    FROM nodes WHERE node_type = 'task';
+    FROM nodes WHERE node_type = 'task' AND coalesce(external_source,'') <> 'conformance:v2';
 
     IF v_task_count <> 6 THEN
         RAISE EXCEPTION 'S2-2b: marketing team_member should see 6 tasks, got %', v_task_count;
@@ -96,7 +96,7 @@ BEGIN
     FROM current_assertions ca
     JOIN nodes n ON n.id = ca.subject_node_id
     JOIN current_assertions st ON st.subject_node_id = n.id AND st.assertion_type = 'task_status'
-    WHERE n.node_type = 'task'
+    WHERE n.node_type = 'task' AND coalesce(n.external_source,'') <> 'conformance:v2' AND coalesce(external_source,'') <> 'conformance:v2'
       AND ca.assertion_type = 'estimate'
       AND st.claim->>'status' = 'in_progress';
 
@@ -121,7 +121,7 @@ DECLARE
     v_done_count int;
 BEGIN
     SELECT count(*) INTO v_task_count
-    FROM nodes WHERE node_type = 'task';
+    FROM nodes WHERE node_type = 'task' AND coalesce(external_source,'') <> 'conformance:v2';
 
     IF v_task_count <> 30 THEN
         RAISE EXCEPTION 'S2-2c: admin should see 30 tasks, got %', v_task_count;
@@ -139,7 +139,7 @@ BEGIN
     SELECT coalesce(sum((ca.claim->>'points')::numeric), 0) INTO v_total_points
     FROM current_assertions ca
     JOIN nodes n ON n.id = ca.subject_node_id
-    WHERE n.node_type = 'task'
+    WHERE n.node_type = 'task' AND coalesce(n.external_source,'') <> 'conformance:v2' AND coalesce(external_source,'') <> 'conformance:v2'
       AND ca.assertion_type = 'estimate';
 
     IF v_total_points <> 135 THEN
@@ -150,7 +150,7 @@ BEGIN
     SELECT count(*) INTO v_done_count
     FROM current_assertions ca
     JOIN nodes n ON n.id = ca.subject_node_id
-    WHERE n.node_type = 'task'
+    WHERE n.node_type = 'task' AND coalesce(n.external_source,'') <> 'conformance:v2' AND coalesce(external_source,'') <> 'conformance:v2'
       AND ca.assertion_type = 'task_status'
       AND ca.claim->>'status' = 'done';
 
