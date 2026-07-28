@@ -505,11 +505,23 @@ export async function fetchNodeDetail(sql: Sql, nodeId: string) {
          'assertions', COALESCE((SELECT json_agg(a ORDER BY a.created_at DESC) FROM (
             SELECT a.id, a.assertion_type, a.assertion_key, a.status, a.basis,
                    a.classification, a.claim, a.confidence,
-                   a.effective_at, a.effective_to,
+                   rye.effective_confidence(ROW(a.*)::rye.assertions) AS effective_confidence,
+                   a.asserted_at, a.effective_at, a.effective_to,
                    (SELECT ae.event_id::text
                     FROM rye.assertion_evidence ae
                     WHERE ae.assertion_id = a.id AND ae.event_id IS NOT NULL
                     ORDER BY ae.recorded_at, ae.id LIMIT 1) AS source_event_id,
+                   ` +
+      ASSERTION_EVIDENCE_SQL +
+      ` AS evidence,
+                   EXISTS (
+                     SELECT 1 FROM rye.stale_digests sd
+                     WHERE sd.digest_assertion_id = a.id
+                   ) AS is_stale,
+                   (SELECT sd.newer_subject_assertion FROM rye.stale_digests sd
+                    WHERE sd.digest_assertion_id = a.id) AS stale_newer_subject_assertion,
+                   (SELECT sd.overturned_source FROM rye.stale_digests sd
+                    WHERE sd.digest_assertion_id = a.id) AS stale_overturned_source,
                    a.attrs,
                    created_at, superseded_at, superseded_by
             FROM rye.assertions a WHERE subject_node_id = $1::uuid) a), '[]'::json),
@@ -816,6 +828,264 @@ export async function fetchActiveDisputes(sql: Sql, limit = 50) {
   return rows;
 }
 
+// ---------------------------------------------------------------------------
+// Core model v2 review surfaces: review_queue, assertion_support, open_gaps,
+// stale_digests. Candidate assertions are invisible to operational reads, so
+// these are the only places they surface.
+// ---------------------------------------------------------------------------
+
+// Evidence bundle for one assertion, resolved through assertion_support and
+// decorated with witness/event labels the UI can render without extra lookups.
+const ASSERTION_EVIDENCE_SQL = `COALESCE((
+  SELECT json_agg(json_build_object(
+    'evidence_id', ev->>'evidence_id',
+    'kind', ev->>'kind',
+    'event_id', ev->>'event_id',
+    'event_type', evt.event_type,
+    'event_summary', evt.summary,
+    'event_occurred_at', evt.occurred_at,
+    'source_assertion_id', ev->>'source_assertion_id',
+    'source_assertion_type', src.assertion_type,
+    'source_assertion_key', src.assertion_key,
+    'witness_node_id', ev->>'witness_node_id',
+    'witness_label', witness.label,
+    'witness_node_type', witness.node_type,
+    'independent', COALESCE((ev->'attrs'->>'independent')::boolean, true),
+    'recorded_at', ev->>'recorded_at'
+  ) ORDER BY ev->>'recorded_at')
+  FROM rye.assertion_support support
+  CROSS JOIN LATERAL jsonb_array_elements(support.evidence) ev
+  LEFT JOIN rye.events evt ON evt.id = (ev->>'event_id')::uuid
+  LEFT JOIN rye.assertions src ON src.id = (ev->>'source_assertion_id')::uuid
+  LEFT JOIN rye.nodes witness ON witness.id = (ev->>'witness_node_id')::uuid
+  WHERE support.assertion_id = a.id
+), '[]'::json)`;
+
+export interface AssertionReviewQueueOptions {
+  assertionType?: string | null;
+  q?: string | null;
+  competingOnly?: boolean;
+  limit?: number;
+  offset?: number;
+}
+
+// review_queue groups every live candidate by (subject, type, key). Tuples with
+// more than one candidate are competing groups and are surfaced together.
+export async function fetchAssertionReviewQueue(
+  sql: Sql,
+  opts: AssertionReviewQueueOptions = {}
+) {
+  const rows = await sql.unsafe(
+    withAdminCte() +
+      `, queue AS (
+         SELECT rq.*,
+                subject.label AS subject_label,
+                subject.node_type AS subject_node_type
+         FROM rye.review_queue rq
+         LEFT JOIN rye.nodes subject ON subject.id = rq.subject_node_id
+       ),
+       filtered AS (
+         SELECT *
+         FROM queue q
+         WHERE ($1::text IS NULL OR q.assertion_type = $1::text)
+           AND (NOT $3::boolean OR q.candidate_count > 1)
+           AND (
+             nullif(trim(coalesce($2::text, '')), '') IS NULL
+             OR q.assertion_type ILIKE '%' || $2::text || '%'
+             OR q.assertion_key ILIKE '%' || $2::text || '%'
+             OR coalesce(q.subject_label, '') ILIKE '%' || $2::text || '%'
+             OR q.candidates::text ILIKE '%' || $2::text || '%'
+           )
+       ),
+       group_rows AS (
+         SELECT
+           f.subject_ref,
+           f.subject_node_id::text AS subject_node_id,
+           f.subject_edge_id::text AS subject_edge_id,
+           f.subject_label,
+           f.subject_node_type,
+           f.assertion_type,
+           f.assertion_key,
+           f.candidate_count::int AS candidate_count,
+           (
+             SELECT max((x->>'asserted_at')::timestamptz)
+             FROM jsonb_array_elements(f.candidates) x
+           ) AS newest_candidate_at,
+           (
+             SELECT json_build_object(
+               'id', incumbent.id::text,
+               'claim', incumbent.claim,
+               'basis', incumbent.basis,
+               'classification', incumbent.classification,
+               'confidence', incumbent.confidence,
+               'effective_confidence', rye.effective_confidence(ROW(incumbent.*)::rye.assertions),
+               'asserted_at', incumbent.asserted_at,
+               'effective_at', incumbent.effective_at,
+               'effective_to', incumbent.effective_to,
+               'attrs', incumbent.attrs
+             )
+             FROM rye.current_valid_assertions incumbent
+             WHERE incumbent.subject_ref = f.subject_ref
+               AND incumbent.assertion_type = f.assertion_type
+               AND incumbent.assertion_key = f.assertion_key
+             LIMIT 1
+           ) AS incumbent,
+           COALESCE((
+             SELECT json_agg(candidate ORDER BY candidate.asserted_at, candidate.id)
+             FROM (
+               SELECT
+                 a.id::text AS id,
+                 a.claim,
+                 a.basis,
+                 a.classification,
+                 a.confidence,
+                 rye.effective_confidence(ROW(a.*)::rye.assertions) AS effective_confidence,
+                 (rye.registry_value('basis_prior:' || a.basis, NULL) #>> '{}')::numeric AS basis_prior,
+                 a.asserted_at,
+                 a.effective_at,
+                 a.effective_to,
+                 a.attrs,
+                 (
+                   SELECT COUNT(DISTINCT ae.witness_node_id)::int
+                   FROM rye.assertion_evidence ae
+                   WHERE ae.assertion_id = a.id
+                     AND ae.kind IN ('source', 'corroboration')
+                     AND ae.witness_node_id IS NOT NULL
+                 ) AS witness_count,
+                 ` +
+      ASSERTION_EVIDENCE_SQL +
+      ` AS evidence
+               FROM jsonb_array_elements(f.candidates) entry
+               JOIN rye.assertions a ON a.id = (entry->>'assertion_id')::uuid
+             ) candidate
+           ), '[]'::json) AS candidates
+         FROM filtered f
+         ORDER BY f.candidate_count DESC, newest_candidate_at DESC NULLS LAST, f.assertion_type
+         LIMIT $4::int
+         OFFSET $5::int
+       ),
+       type_counts AS (
+         SELECT assertion_type, COUNT(*)::int AS count
+         FROM rye.review_queue
+         GROUP BY assertion_type
+       )
+       SELECT json_build_object(
+         'groups', COALESCE((SELECT json_agg(g) FROM group_rows g), '[]'::json),
+         'types', COALESCE((SELECT json_agg(tc ORDER BY tc.count DESC, tc.assertion_type) FROM type_counts tc), '[]'::json),
+         'stats', json_build_object(
+           'tuples', (SELECT COUNT(*)::int FROM rye.review_queue),
+           'competing_tuples', (SELECT COUNT(*)::int FROM rye.competing_candidates),
+           'candidates', (SELECT COALESCE(SUM(candidate_count), 0)::int FROM rye.review_queue),
+           'filtered', (SELECT COUNT(*)::int FROM filtered)
+         )
+       ) AS payload
+       FROM cfg`,
+    [
+      opts.assertionType && opts.assertionType !== "all" ? opts.assertionType : null,
+      opts.q ?? null,
+      opts.competingOnly ?? false,
+      opts.limit ?? 60,
+      opts.offset ?? 0,
+    ]
+  );
+  return rows[0]?.payload ?? {
+    groups: [],
+    types: [],
+    stats: { tuples: 0, competing_tuples: 0, candidates: 0, filtered: 0 },
+  };
+}
+
+export async function acceptAssertion(
+  sql: Sql,
+  assertionId: string,
+  input: { reason?: string | null; actor?: string | null } = {}
+): Promise<{ assertion_id: string }> {
+  const rows = await sql.unsafe(
+    withAdminCte() +
+      `SELECT rye.accept_assertion(
+         p_assertion_id := $1::uuid,
+         p_evidence     := NULL,
+         p_reason       := $2::text,
+         p_actor        := $3::text
+       )::text AS assertion_id
+       FROM cfg`,
+    [assertionId, input.reason ?? null, input.actor ?? null]
+  );
+  return { assertion_id: rows[0]?.assertion_id as string };
+}
+
+export async function rejectCandidateAssertion(
+  sql: Sql,
+  assertionId: string,
+  input: { reason: string; actor?: string | null }
+): Promise<{ assertion_id: string }> {
+  await sql.unsafe(
+    withAdminCte() +
+      `SELECT rye.reject_candidate(
+         p_assertion_id := $1::uuid,
+         p_reason       := $2::text,
+         p_actor        := $3::text
+       )
+       FROM cfg`,
+    [assertionId, input.reason, input.actor ?? null]
+  );
+  return { assertion_id: assertionId };
+}
+
+export async function fetchOpenGaps(sql: Sql, limit = 100) {
+  const rows = await sql.unsafe(
+    withAdminCte() +
+      `SELECT a.id::text AS id,
+              a.subject_ref,
+              a.subject_node_id::text AS subject_node_id,
+              a.subject_edge_id::text AS subject_edge_id,
+              subject.label AS subject_label,
+              subject.node_type AS subject_node_type,
+              a.assertion_key,
+              a.claim,
+              a.basis,
+              a.classification,
+              a.confidence,
+              rye.effective_confidence(ROW(a.*)::rye.assertions) AS effective_confidence,
+              a.asserted_at,
+              a.attrs,
+              ` +
+      ASSERTION_EVIDENCE_SQL +
+      ` AS evidence
+       FROM rye.open_gaps a
+       LEFT JOIN rye.nodes subject ON subject.id = a.subject_node_id, cfg
+       ORDER BY a.asserted_at DESC
+       LIMIT $1::int`,
+    [limit]
+  );
+  return rows;
+}
+
+export async function fetchStaleDigests(sql: Sql, limit = 100) {
+  const rows = await sql.unsafe(
+    withAdminCte() +
+      `SELECT s.digest_assertion_id::text AS id,
+              s.subject_ref,
+              s.subject_node_id::text AS subject_node_id,
+              s.subject_edge_id::text AS subject_edge_id,
+              subject.label AS subject_label,
+              subject.node_type AS subject_node_type,
+              s.assertion_key,
+              s.watermark,
+              s.newer_subject_assertion,
+              s.overturned_source,
+              a.claim,
+              a.asserted_at
+       FROM rye.stale_digests s
+       JOIN rye.assertions a ON a.id = s.digest_assertion_id
+       LEFT JOIN rye.nodes subject ON subject.id = s.subject_node_id, cfg
+       ORDER BY s.watermark DESC NULLS LAST
+       LIMIT $1::int`,
+    [limit]
+  );
+  return rows;
+}
+
 export async function fetchRecentEvents(sql: Sql, limit = 50) {
   const rows = await sql.unsafe(
     withAdminCte() +
@@ -862,6 +1132,9 @@ export async function fetchKnowledgeKpis(sql: Sql) {
          (SELECT COUNT(*) FROM rye.current_valid_assertions)::int AS active_assertions,
          (SELECT COUNT(*) FROM rye.assertions WHERE superseded_at IS NOT NULL)::int AS superseded_assertions,
          (SELECT COUNT(*) FROM rye.competing_candidates)::int AS disputed_subjects,
+         (SELECT COUNT(*) FROM rye.review_queue)::int AS review_tuples,
+         (SELECT COUNT(*) FROM rye.open_gaps)::int AS open_gaps,
+         (SELECT COUNT(*) FROM rye.stale_digests)::int AS stale_digests,
          (SELECT COUNT(*) FROM rye.nodes WHERE node_type='person')::int AS people_total,
          (SELECT COUNT(DISTINCT subject_node_id) FROM rye.assertions)::int AS subjects_total,
          (SELECT COUNT(*) FROM rye.artifacts)::int AS artifacts_total
