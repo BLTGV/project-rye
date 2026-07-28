@@ -322,7 +322,10 @@ $$ LANGUAGE plpgsql;
 -- Convenience function to refresh all profile materialized views.
 -- Uses CONCURRENTLY when the unique index exists (allows reads during refresh).
 
+-- SECURITY DEFINER: matviews are owned by the installing role; agents and
+-- test roles must still be able to refresh them after writes.
 CREATE OR REPLACE FUNCTION refresh_materialized_views() RETURNS void
+SECURITY DEFINER
 SET search_path = rye, pg_catalog
 AS $$
 BEGIN
