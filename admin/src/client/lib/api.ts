@@ -310,11 +310,64 @@ export function acceptPmMilestonePlanCandidate(
   );
 }
 
-export function useDisputes() {
+export interface AssertionReviewQueueOptions {
+  assertionType?: string;
+  q?: string;
+  competingOnly?: boolean;
+  limit?: number;
+  offset?: number;
+}
+
+export function useAssertionReviewQueue(opts: AssertionReviewQueueOptions = {}) {
   const { current } = useInstance();
   return useQuery({
-    queryKey: ["disputes", current],
-    queryFn: () => get<DisputeRow[]>(`${BASE}/disputes`, current),
+    queryKey: ["assertion-review", current, opts],
+    queryFn: () => {
+      const params = new URLSearchParams();
+      if (opts.assertionType && opts.assertionType !== "all") {
+        params.set("assertion_type", opts.assertionType);
+      }
+      if (opts.q) params.set("q", opts.q);
+      if (opts.competingOnly) params.set("competing_only", "true");
+      if (opts.limit) params.set("limit", String(opts.limit));
+      if (opts.offset) params.set("offset", String(opts.offset));
+      const suffix = params.toString() ? `?${params.toString()}` : "";
+      return get<AssertionReviewQueueResponse>(`${BASE}/review/assertions${suffix}`, current);
+    },
+    enabled: !!current,
+  });
+}
+
+export function acceptAssertion(
+  instance: string,
+  id: string,
+  input: { reason?: string | null; actor?: string | null } = {}
+) {
+  return post<{ assertion_id: string }>(`${BASE}/assertions/${id}/accept`, instance, input);
+}
+
+export function rejectCandidateAssertion(
+  instance: string,
+  id: string,
+  input: { reason: string; actor?: string | null }
+) {
+  return post<{ assertion_id: string }>(`${BASE}/assertions/${id}/reject`, instance, input);
+}
+
+export function useOpenGaps(limit = 100) {
+  const { current } = useInstance();
+  return useQuery({
+    queryKey: ["open-gaps", current, limit],
+    queryFn: () => get<OpenGapRow[]>(`${BASE}/gaps?limit=${limit}`, current),
+    enabled: !!current,
+  });
+}
+
+export function useStaleDigests(limit = 100) {
+  const { current } = useInstance();
+  return useQuery({
+    queryKey: ["stale-digests", current, limit],
+    queryFn: () => get<StaleDigestRow[]>(`${BASE}/stale-digests?limit=${limit}`, current),
     enabled: !!current,
   });
 }
@@ -408,6 +461,9 @@ export interface KnowledgeDashboardResponse {
     active_assertions: number;
     superseded_assertions: number;
     disputed_subjects: number;
+    review_tuples: number;
+    open_gaps: number;
+    stale_digests: number;
     people_total: number;
     subjects_total: number;
     artifacts_total: number;
@@ -816,6 +872,117 @@ export interface CandidateReviewQueueResponse {
   };
 }
 
+export type AssertionBasis = "observed" | "reported" | "inferred" | "assumed" | "unknown";
+
+export interface AssertionEvidenceRow {
+  evidence_id: string;
+  kind: "source" | "corroboration" | "derivation" | string;
+  event_id: string | null;
+  event_type: string | null;
+  event_summary: string | null;
+  event_occurred_at: string | null;
+  source_assertion_id: string | null;
+  source_assertion_type: string | null;
+  source_assertion_key: string | null;
+  witness_node_id: string | null;
+  witness_label: string | null;
+  witness_node_type: string | null;
+  independent: boolean;
+  recorded_at: string;
+}
+
+export interface ReviewCandidateRow {
+  id: string;
+  claim: unknown;
+  basis: AssertionBasis | string;
+  classification: string | null;
+  confidence: number | null;
+  /**
+   * effective_confidence() is defined only over current_valid_assertions, so it
+   * is null for live candidates. basis_prior is the registry prior the helper
+   * would start from once the candidate is accepted.
+   */
+  effective_confidence: number | null;
+  basis_prior: number | null;
+  asserted_at: string;
+  effective_at: string | null;
+  effective_to: string | null;
+  attrs: Record<string, unknown>;
+  witness_count: number;
+  evidence: AssertionEvidenceRow[];
+}
+
+export interface ReviewIncumbentRow {
+  id: string;
+  claim: unknown;
+  basis: AssertionBasis | string;
+  classification: string | null;
+  confidence: number | null;
+  effective_confidence: number | null;
+  asserted_at: string;
+  effective_at: string | null;
+  effective_to: string | null;
+  attrs: Record<string, unknown>;
+}
+
+export interface ReviewQueueGroup {
+  subject_ref: string;
+  subject_node_id: string | null;
+  subject_edge_id: string | null;
+  subject_label: string | null;
+  subject_node_type: string | null;
+  assertion_type: string;
+  assertion_key: string;
+  candidate_count: number;
+  newest_candidate_at: string | null;
+  incumbent: ReviewIncumbentRow | null;
+  candidates: ReviewCandidateRow[];
+}
+
+export interface AssertionReviewQueueResponse {
+  groups: ReviewQueueGroup[];
+  types: { assertion_type: string; count: number }[];
+  stats: {
+    tuples: number;
+    competing_tuples: number;
+    candidates: number;
+    filtered: number;
+  };
+}
+
+export interface OpenGapRow {
+  id: string;
+  subject_ref: string;
+  subject_node_id: string | null;
+  subject_edge_id: string | null;
+  subject_label: string | null;
+  subject_node_type: string | null;
+  assertion_key: string;
+  claim: Record<string, unknown>;
+  basis: AssertionBasis | string;
+  classification: string | null;
+  confidence: number | null;
+  effective_confidence: number | null;
+  asserted_at: string;
+  attrs: Record<string, unknown>;
+  evidence: AssertionEvidenceRow[];
+}
+
+export interface StaleDigestRow {
+  id: string;
+  subject_ref: string;
+  subject_node_id: string | null;
+  subject_edge_id: string | null;
+  subject_label: string | null;
+  subject_node_type: string | null;
+  assertion_key: string;
+  watermark: string | null;
+  newer_subject_assertion: boolean;
+  overturned_source: boolean;
+  claim: Record<string, unknown>;
+  asserted_at: string;
+}
+
 export interface AcceptedKnowledgeRow extends AssertionRow {
   source_event_type: string | null;
   source_event_summary: string | null;
@@ -883,11 +1050,20 @@ export interface AssertionRow {
   id: string;
   assertion_type: string;
   assertion_key: string;
+  status?: "candidate" | "accepted" | string;
+  basis?: AssertionBasis | string;
+  classification?: string | null;
   claim: unknown;
   confidence: number | null;
+  effective_confidence?: number | null;
+  asserted_at?: string;
   effective_at: string | null;
   effective_to: string | null;
   source_event_id: string | null;
+  evidence?: AssertionEvidenceRow[];
+  is_stale?: boolean;
+  stale_newer_subject_assertion?: boolean | null;
+  stale_overturned_source?: boolean | null;
   attrs: Record<string, unknown>;
   created_at: string;
   superseded_at: string | null;

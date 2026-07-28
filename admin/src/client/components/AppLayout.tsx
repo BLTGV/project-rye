@@ -2,10 +2,10 @@ import { useEffect, useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router";
 import {
   Activity,
-  AlertTriangle,
   BriefcaseBusiness,
   ClipboardCheck,
   CircuitBoard,
+  HelpCircle,
   KanbanSquare,
   LayoutDashboard,
   type LucideIcon,
@@ -25,7 +25,7 @@ const NAV_SECTIONS: {
       { to: "/", label: "Overview", Icon: LayoutDashboard },
       { to: "/sales", label: "Sales", Icon: BriefcaseBusiness },
       { to: "/projects", label: "Projects", Icon: KanbanSquare },
-      { to: "/review", label: "Decisions", Icon: ClipboardCheck },
+      { to: "/review", label: "Review", Icon: ClipboardCheck },
     ],
   },
   {
@@ -35,7 +35,7 @@ const NAV_SECTIONS: {
       { to: "/knowledge", label: "Process Map", Icon: CircuitBoard },
       { to: "/graph", label: "Graph", Icon: Network },
       { to: "/events", label: "Activity", Icon: Activity },
-      { to: "/disputes", label: "Disputes", Icon: AlertTriangle },
+      { to: "/gaps", label: "Open Gaps", Icon: HelpCircle },
     ],
   },
 ];

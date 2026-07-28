@@ -65,7 +65,7 @@ export function DashboardKnowledgePage({
         ]}
       />
 
-      <section className="grid grid-cols-4 gap-4">
+      <section className="grid grid-cols-3 gap-4">
         <Kpi label="Active assertions" value={fmtNumber(k.active_assertions)} sub="current claims" accent="rye" />
         <Kpi
           label="Superseded"
@@ -75,7 +75,30 @@ export function DashboardKnowledgePage({
           href="#superseded-assertions"
           action="View list"
         />
-        <Kpi label="Open disputes" value={fmtNumber(k.disputed_subjects)} sub="competing claims" accent="rose" to="/disputes" />
+        <Kpi
+          label="Awaiting review"
+          value={fmtNumber(k.review_tuples)}
+          sub={`${fmtNumber(k.disputed_subjects)} competing`}
+          accent="rose"
+          to="/review"
+          action="Review"
+        />
+        <Kpi
+          label="Open gaps"
+          value={fmtNumber(k.open_gaps)}
+          sub="questions Rye can't answer yet"
+          accent="cyan"
+          to="/gaps"
+          action="Open"
+        />
+        <Kpi
+          label="Stale digests"
+          value={fmtNumber(k.stale_digests)}
+          sub="summaries behind their sources"
+          accent="violet"
+          to="/gaps"
+          action="Open"
+        />
         <Kpi label="Artifacts" value={fmtNumber(k.artifacts_total)} sub="summaries & documents" accent="cyan" />
       </section>
 
@@ -188,9 +211,9 @@ export function DashboardKnowledgePage({
 
         <div className="card">
           <div className="mb-3 flex items-center justify-between">
-            <h3 className="text-sm font-medium">Active disputes</h3>
-            <Link to="/disputes" className="btn text-xs">
-              <AlertTriangle size={12} /> All
+            <h3 className="text-sm font-medium">Competing claims</h3>
+            <Link to="/review" className="btn text-xs">
+              <AlertTriangle size={12} /> Review
             </Link>
           </div>
           {data.disputes.length === 0 ? (

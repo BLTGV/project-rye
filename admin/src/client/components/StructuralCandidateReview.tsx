@@ -50,7 +50,11 @@ type GuidedAcceptResult = {
   subject_node_id: string;
 };
 
-export function CandidateReviewPage() {
+// Structural candidates are `knowledge_candidate` nodes, not v2 candidate
+// assertions. They still promote to tasks/edges, and fact-shaped ones go
+// through promote_candidate_node_to_assertion. The assertion review queue in
+// ReviewQueuePage handles the v2 candidate lifecycle instead.
+export function StructuralCandidateReview() {
   const { current } = useInstance();
   const queryClient = useQueryClient();
   const [status, setStatus] = useState("all");
@@ -114,12 +118,13 @@ export function CandidateReviewPage() {
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <div className="mb-2 flex items-center gap-2 text-[10px] uppercase tracking-[0.22em] text-[color:var(--color-ink-dim)]">
-            <ClipboardCheck size={13} /> Decision queue
+            <ClipboardCheck size={13} /> Structural candidates
           </div>
-          <h1 className="text-2xl font-semibold tracking-tight">Suggested Updates</h1>
+          <h2 className="text-xl font-semibold tracking-tight">Suggested Updates</h2>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-[color:var(--color-ink-muted)]">
             Confirm, edit, reject, or ask for better proof before a source-based
-            suggestion becomes accepted business knowledge.
+            suggestion becomes accepted business knowledge. These promote to
+            tasks, connections, or assertions.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">

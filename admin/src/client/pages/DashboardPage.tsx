@@ -101,11 +101,11 @@ export function DashboardPage() {
           accent="violet"
         />
         <Kpi
-          label="Open disputes"
+          label="Competing claims"
           value={fmtNumber(k.disputed_subjects)}
-          sub="competing claims"
+          sub="awaiting review"
           accent="rose"
-          to="/disputes"
+          to="/review"
         />
       </section>
 
