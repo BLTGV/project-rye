@@ -3,7 +3,8 @@ import { Link, useNavigate, useParams } from "react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, ArrowLeft, Calendar, Check, CheckCircle, Clock, Copy, Database, ExternalLink, FileText, GitBranch, History, Info, Link2, Plus, RefreshCcw, ScrollText, Tags, ThumbsDown, ThumbsUp, Users, X } from "lucide-react";
 import { createKnowledgeCandidate, promoteKnowledgeCandidate, setKnowledgeCandidateStatus, useNeighborhood, useNodeDetail, useNodeKnowledge } from "../lib/api";
-import type { AcceptedKnowledgeRow, ArtifactRow, AssertionRow, CreateKnowledgeCandidateInput, EdgeNeighbor, EventRow, GraphPayload, KnowledgeCandidateKind, KnowledgeCandidateRow, KnowledgeCandidateStatus, NodeDetail, NodeKnowledge, NodeProvenanceSummary, NodeRow, PromoteKnowledgeCandidateInput, ReviewContextScope, SourceSummary } from "../lib/api";
+import type { AcceptedKnowledgeRow, ArtifactRow, AssertionEvidenceRow, AssertionRow, CreateKnowledgeCandidateInput, EdgeNeighbor, EventRow, GraphPayload, KnowledgeCandidateKind, KnowledgeCandidateRow, KnowledgeCandidateStatus, NodeDetail, NodeKnowledge, NodeProvenanceSummary, NodeRow, PromoteKnowledgeCandidateInput, ReviewContextScope, SourceSummary } from "../lib/api";
+import { BasisBadge, ConfidenceChip } from "../components/AssertionBadges";
 import { GraphCanvas } from "../components/GraphCanvas";
 import { colorForType, fmtDate, fmtRel, shortId } from "../lib/format";
 import { useInstance } from "../lib/instance";
@@ -3242,30 +3243,35 @@ function PropertyValue({ v }: { v: unknown }) {
 }
 
 function AssertionList({ items }: { items: AssertionRow[] }) {
+  const ordered = useMemo(() => orderAssertionsDigestsFirst(items), [items]);
   if (items.length === 0)
     return (
       <div className="card text-xs text-[color:var(--color-ink-dim)]">
         No assertions on this node.
       </div>
     );
+  const digestCount = items.filter(isDigestAssertion).length;
   return (
     <div className="card">
-      <div className="mb-2 flex items-center gap-2 text-sm">
+      <div className="mb-2 flex flex-wrap items-center gap-2 text-sm">
         <ScrollText size={14} /> Assertions
         <span className="chip">{items.length}</span>
+        {digestCount > 0 ? <span className="chip">{digestCount} derived</span> : null}
       </div>
       <p className="mb-4 text-sm leading-5 text-[color:var(--color-ink-muted)]">
-        Assertions are Rye's stored claims and rules for this node. For a review
-        context, they explain why the context exists, what information belongs
-        here, when connections should be created, and when tasks should be made.
+        Assertions are Rye's stored claims and rules for this node. Derived
+        digests come first — they summarise the raw claims below them as of a
+        watermark. Each row shows its basis (how Rye came to believe it) and the
+        evidence recorded with it.
         <span className="text-[color:var(--color-ink)]"> Current</span> means
         the assertion has not been replaced by a newer one; replaced assertions
         stay visible for audit history.
       </p>
       <ul className="flex flex-col divide-y divide-[color:var(--color-line-soft)]">
-        {items.map((assertion) => {
+        {ordered.map((assertion) => {
           const definition = describeAssertion(assertion.assertion_type);
           const status = assertionStatus(assertion);
+          const derived = isDigestAssertion(assertion);
           return (
             <li key={assertion.id} className="py-4">
               <div className="flex items-start justify-between gap-4">
@@ -3275,10 +3281,41 @@ function AssertionList({ items }: { items: AssertionRow[] }) {
                       {definition.title}
                     </span>
                     <span className="chip">{definition.category}</span>
+                    {derived ? (
+                      <span
+                        className="rounded-md border border-[color:var(--color-violet)]/30 bg-[color:var(--color-violet)]/10 px-2 py-1 text-[10px] uppercase tracking-wider text-[color:var(--color-violet)]"
+                        title="Distilled from other assertions rather than observed directly."
+                      >
+                        derived · as of {fmtDate(digestWatermark(assertion))}
+                      </span>
+                    ) : null}
+                    {assertion.is_stale ? (
+                      <span
+                        className="rounded-md border border-amber-400/30 bg-amber-400/10 px-2 py-1 text-[10px] uppercase tracking-wider text-amber-200"
+                        title={staleReason(assertion)}
+                      >
+                        stale
+                      </span>
+                    ) : null}
+                    {assertion.status === "candidate" ? (
+                      <span
+                        className="rounded-md border border-[color:var(--color-line)] px-2 py-1 text-[10px] uppercase tracking-wider text-[color:var(--color-ink-muted)]"
+                        title="Not yet accepted. Candidates are invisible to operational reads until reviewed."
+                      >
+                        candidate
+                      </span>
+                    ) : null}
                   </div>
                   <p className="mt-1 text-sm leading-5 text-[color:var(--color-ink-muted)]">
                     {definition.description}
                   </p>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    {assertion.basis ? <BasisBadge basis={assertion.basis} /> : null}
+                    <ConfidenceChip
+                      effective={assertion.effective_confidence}
+                      stored={assertion.confidence}
+                    />
+                  </div>
                 </div>
                 <span
                   className={
@@ -3306,6 +3343,8 @@ function AssertionList({ items }: { items: AssertionRow[] }) {
                 )}
               </div>
 
+              <AssertionEvidenceList evidence={assertion.evidence ?? []} />
+
               <details className="mt-3">
                 <summary className="cursor-pointer text-xs uppercase tracking-wider text-[color:var(--color-ink-muted)] hover:text-[color:var(--color-ink)]">
                   Technical assertion data
@@ -3327,6 +3366,96 @@ function AssertionList({ items }: { items: AssertionRow[] }) {
       </ul>
     </div>
   );
+}
+
+function AssertionEvidenceList({ evidence }: { evidence: AssertionEvidenceRow[] }) {
+  if (evidence.length === 0) {
+    return (
+      <div className="mt-3 text-xs text-[color:var(--color-ink-dim)]">
+        No evidence rows recorded for this assertion.
+      </div>
+    );
+  }
+  const witnesses = new Set(
+    evidence.map((row) => row.witness_node_id).filter((id): id is string => Boolean(id))
+  );
+  return (
+    <div className="mt-3 rounded-md border border-[color:var(--color-line-soft)] bg-[color:var(--color-surface-2)] p-3">
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <span className="field-label">Evidence</span>
+        <span className="chip">{evidence.length} rows</span>
+        <span className="chip">
+          <Users size={10} /> {witnesses.size} witness{witnesses.size === 1 ? "" : "es"}
+        </span>
+      </div>
+      <ul className="flex flex-col gap-1.5">
+        {evidence.map((row) => (
+          <li
+            key={row.evidence_id}
+            className="flex flex-wrap items-center gap-2 text-xs text-[color:var(--color-ink-muted)]"
+          >
+            <span className="pill">{humanizeKey(row.kind)}</span>
+            {row.witness_node_id ? (
+              <Link
+                to={`/nodes/${row.witness_node_id}`}
+                className="hover:text-[color:var(--color-rye)]"
+              >
+                {row.witness_label ?? shortId(row.witness_node_id)}
+              </Link>
+            ) : (
+              <span className="text-[color:var(--color-ink-dim)]">no witness</span>
+            )}
+            {row.event_id ? (
+              <Link
+                to={`/events?event=${row.event_id}`}
+                className="hover:text-[color:var(--color-rye)]"
+              >
+                {row.event_summary ?? humanizeKey(row.event_type ?? "event")}
+              </Link>
+            ) : null}
+            {row.source_assertion_id ? (
+              <span className="font-mono text-[color:var(--color-ink-dim)]">
+                {row.source_assertion_type ?? "assertion"}:
+                {row.source_assertion_key ?? "default"}
+              </span>
+            ) : null}
+            {row.independent ? null : (
+              <span className="text-amber-300">shared witness</span>
+            )}
+            <span className="text-[color:var(--color-ink-dim)]">{fmtDate(row.recorded_at)}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function isDigestAssertion(assertion: AssertionRow): boolean {
+  return assertion.assertion_type === "digest";
+}
+
+// Digests summarise the raw claims underneath them, so they read first. Within
+// each band the existing newest-first ordering is preserved.
+function orderAssertionsDigestsFirst(items: AssertionRow[]): AssertionRow[] {
+  return [...items].sort((a, b) => {
+    const digestDelta = Number(isDigestAssertion(b)) - Number(isDigestAssertion(a));
+    if (digestDelta !== 0) return digestDelta;
+    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+  });
+}
+
+function digestWatermark(assertion: AssertionRow): string | null {
+  return firstString(assertion.attrs?.watermark) ?? assertion.asserted_at ?? assertion.created_at;
+}
+
+function staleReason(assertion: AssertionRow): string {
+  const reasons = [
+    assertion.stale_newer_subject_assertion ? "the subject gained newer accepted facts" : null,
+    assertion.stale_overturned_source ? "a source assertion was superseded or displaced" : null,
+  ].filter(Boolean);
+  return reasons.length > 0
+    ? `Stale because ${reasons.join(" and ")} after the digest watermark.`
+    : "This digest is behind its sources.";
 }
 
 function describeAssertion(type: string): {
@@ -3449,11 +3578,22 @@ function assertionTechnicalFacts(assertion: AssertionRow): DisplayFact[] {
   return [
     fact("Assertion type", assertion.assertion_type),
     fact("Assertion key", assertion.assertion_key),
+    fact("Lifecycle", assertion.status ?? null),
+    fact("Basis", assertion.basis ?? null),
+    fact("Classification", assertion.classification ?? null),
     fact("Status", assertion.superseded_at ? "Replaced" : "Current"),
     fact("Created", fmtDate(assertion.created_at)),
+    fact("Asserted at", assertion.asserted_at ? fmtDate(assertion.asserted_at) : null),
     fact("Effective at", assertion.effective_at ? fmtDate(assertion.effective_at) : null),
     fact("Effective to", assertion.effective_to ? fmtDate(assertion.effective_to) : null),
-    fact("Confidence", assertion.confidence === null ? null : String(assertion.confidence)),
+    fact("Stored confidence", assertion.confidence === null ? null : String(assertion.confidence)),
+    fact(
+      "Effective confidence",
+      assertion.effective_confidence === null || assertion.effective_confidence === undefined
+        ? null
+        : String(assertion.effective_confidence)
+    ),
+    fact("Evidence rows", assertion.evidence ? String(assertion.evidence.length) : null),
     fact("Source event", assertion.source_event_id),
     fact("Superseded at", assertion.superseded_at ? fmtDate(assertion.superseded_at) : null),
   ].filter((item): item is DisplayFact => Boolean(item));

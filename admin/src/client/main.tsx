@@ -9,9 +9,9 @@ import { SearchPage } from "./pages/SearchPage";
 import { NodeDetailPage } from "./pages/NodeDetailPage";
 import { GraphPage } from "./pages/GraphPage";
 import { EventsPage } from "./pages/EventsPage";
-import { DisputesPage } from "./pages/DisputesPage";
 import { KnowledgeMapPage } from "./pages/KnowledgeMapPage";
-import { CandidateReviewPage } from "./pages/CandidateReviewPage";
+import { OpenGapsPage } from "./pages/OpenGapsPage";
+import { ReviewQueuePage } from "./pages/ReviewQueuePage";
 import { SalesWorkspacePage } from "./pages/SalesWorkspacePage";
 import { ProjectsWorkspacePage } from "./pages/ProjectsWorkspacePage";
 import "./styles/app.css";
@@ -35,12 +35,12 @@ ReactDOM.createRoot(root).render(
               <Route path="/projects" element={<ProjectsWorkspacePage />} />
               <Route path="/search" element={<SearchPage />} />
               <Route path="/knowledge" element={<KnowledgeMapPage />} />
-              <Route path="/review" element={<CandidateReviewPage />} />
+              <Route path="/review" element={<ReviewQueuePage />} />
+              <Route path="/gaps" element={<OpenGapsPage />} />
               <Route path="/nodes/:id" element={<NodeDetailPage />} />
               <Route path="/graph" element={<GraphPage />} />
               <Route path="/graph/:id" element={<GraphPage />} />
               <Route path="/events" element={<EventsPage />} />
-              <Route path="/disputes" element={<DisputesPage />} />
             </Route>
           </Routes>
         </InstanceProvider>

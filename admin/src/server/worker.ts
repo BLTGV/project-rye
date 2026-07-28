@@ -4,6 +4,7 @@ import { z } from "zod";
 import { zValidator } from "@hono/zod-validator";
 import { type Env, loadInstances, pickInstance, sqlFor } from "./db";
 import {
+  acceptAssertion,
   acceptCrmStagePlanCandidate,
   acceptPmMilestonePlanCandidate,
   acceptPmTaskPlanCandidate,
@@ -17,6 +18,7 @@ import {
   fetchActiveDisputes,
   fetchActivityTimeline,
   fetchAssertionComposition,
+  fetchAssertionReviewQueue,
   fetchCatalog,
   fetchCountyRollup,
   fetchCrmWorkspace,
@@ -27,7 +29,9 @@ import {
   fetchKnowledgeKpis,
   fetchKnowledgeMap,
   fetchCandidateReviewQueue,
+  fetchOpenGaps,
   fetchPmWorkspace,
+  fetchStaleDigests,
   fetchSupersessions,
   fetchTopParticipants,
   fetchTopSubjects,
@@ -41,6 +45,7 @@ import {
   fetchTopLessees,
   fetchTopOwners,
   promoteKnowledgeCandidate,
+  rejectCandidateAssertion,
   searchNodes,
   setKnowledgeCandidateStatus,
   submitAgentObservation,
@@ -180,6 +185,16 @@ const acceptPmMilestonePlanCandidateSchema = z.object({
   reason: z.string().trim().min(1).nullable().optional(),
   actor: z.string().trim().min(1).nullable().optional(),
   plan_properties: optionalJsonRecordSchema,
+});
+
+const acceptAssertionSchema = z.object({
+  reason: z.string().trim().min(1).nullable().optional(),
+  actor: z.string().trim().min(1).nullable().optional(),
+});
+
+const rejectAssertionSchema = z.object({
+  reason: z.string().trim().min(1),
+  actor: z.string().trim().min(1).nullable().optional(),
 });
 
 const observationSchema = z.object({
@@ -585,6 +600,117 @@ app.get(
   }
 );
 
+app.get(
+  "/api/review/assertions",
+  zValidator(
+    "query",
+    z.object({
+      assertion_type: z.string().optional(),
+      q: z.string().optional(),
+      competing_only: z.string().optional(),
+      limit: z.coerce.number().int().min(1).max(200).optional(),
+      offset: z.coerce.number().int().min(0).optional(),
+      instance: z.string().optional(),
+    })
+  ),
+  async (c) => {
+    const blocked = await enforceCapability(c, {
+      action: "assertion_review_read",
+      capability: "rye.review.read",
+      request: { path: c.req.path },
+    });
+    if (blocked) return blocked;
+
+    const sql = sqlFor(c.get("instance"));
+    const q = c.req.valid("query");
+    return c.json(
+      await fetchAssertionReviewQueue(sql, {
+        assertionType: q.assertion_type ?? null,
+        q: q.q ?? null,
+        competingOnly: boolQuery(q.competing_only),
+        limit: q.limit,
+        offset: q.offset,
+      })
+    );
+  }
+);
+
+app.post(
+  "/api/assertions/:id/accept",
+  zValidator("param", z.object({ id: uuidSchema })),
+  zValidator("json", acceptAssertionSchema),
+  async (c) => {
+    const sql = sqlFor(c.get("instance"));
+    const assertionId = c.req.valid("param").id;
+    const input = c.req.valid("json");
+    const blocked = await enforceCapability(c, {
+      action: "assertion_accept",
+      capability: "rye.authoritative.promote",
+      targetRef: assertionId,
+      request: { reason: input.reason ?? null },
+    });
+    if (blocked) return blocked;
+
+    return c.json(
+      await acceptAssertion(sql, assertionId, {
+        reason: input.reason ?? null,
+        actor: input.actor ?? authActor(c),
+      })
+    );
+  }
+);
+
+app.post(
+  "/api/assertions/:id/reject",
+  zValidator("param", z.object({ id: uuidSchema })),
+  zValidator("json", rejectAssertionSchema),
+  async (c) => {
+    const sql = sqlFor(c.get("instance"));
+    const assertionId = c.req.valid("param").id;
+    const input = c.req.valid("json");
+    const blocked = await enforceCapability(c, {
+      action: "assertion_reject",
+      capability: "rye.candidate.adjudicate",
+      targetRef: assertionId,
+      request: { reason: input.reason },
+    });
+    if (blocked) return blocked;
+
+    return c.json(
+      await rejectCandidateAssertion(sql, assertionId, {
+        reason: input.reason,
+        actor: input.actor ?? authActor(c),
+      })
+    );
+  }
+);
+
+app.get("/api/gaps", async (c) => {
+  const blocked = await enforceCapability(c, {
+    action: "open_gaps_read",
+    capability: "rye.review.read",
+    request: { path: c.req.path },
+  });
+  if (blocked) return blocked;
+
+  const sql = sqlFor(c.get("instance"));
+  const limit = Math.min(Number(c.req.query("limit") ?? "100"), 500);
+  return c.json(await fetchOpenGaps(sql, limit));
+});
+
+app.get("/api/stale-digests", async (c) => {
+  const blocked = await enforceCapability(c, {
+    action: "stale_digests_read",
+    capability: "rye.review.read",
+    request: { path: c.req.path },
+  });
+  if (blocked) return blocked;
+
+  const sql = sqlFor(c.get("instance"));
+  const limit = Math.min(Number(c.req.query("limit") ?? "100"), 500);
+  return c.json(await fetchStaleDigests(sql, limit));
+});
+
 app.get("/api/nodes/:id/knowledge", async (c) => {
   const sql = sqlFor(c.get("instance"));
   return c.json(
@@ -797,11 +923,6 @@ app.post(
     );
   }
 );
-
-app.get("/api/disputes", async (c) => {
-  const sql = sqlFor(c.get("instance"));
-  return c.json(await fetchActiveDisputes(sql));
-});
 
 app.get("/api/events", async (c) => {
   const sql = sqlFor(c.get("instance"));
