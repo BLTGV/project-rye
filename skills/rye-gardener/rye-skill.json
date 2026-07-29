@@ -1,0 +1,40 @@
+{
+  "$schema": "../rye-skill.schema.json",
+  "id": "rye-gardener",
+  "version": "0.1.0",
+  "label": "Rye Gardener",
+  "description": "Audit Rye vocabulary drift and prepare human-reviewable alias and node-merge proposals without rewriting history.",
+  "source": {
+    "type": "github",
+    "repo": "BLTGV/project-rye",
+    "path": "skills/rye-gardener"
+  },
+  "install": {
+    "manager": "vercel-skills",
+    "package": "BLTGV/project-rye",
+    "skill": "rye-gardener",
+    "command": "npx skills add BLTGV/project-rye --skill rye-gardener"
+  },
+  "requires": {
+    "plugins": [],
+    "db_functions": ["canonical_type", "record_assertion", "create_knowledge_candidate", "accept_assertion", "merge_nodes"],
+    "db_views": ["type_vocabulary_report", "review_queue"],
+    "cli_commands": ["./scripts/rye catalog skills --json"]
+  },
+  "capabilities": [
+    {
+      "id": "garden-rye-vocabulary",
+      "label": "Garden Rye Vocabulary",
+      "kind": "skill",
+      "description": "Find vocabulary drift and stage aliases or merge decisions for human review.",
+      "read_only": false,
+      "requires": {
+        "db_functions": ["canonical_type", "record_assertion", "create_knowledge_candidate"],
+        "db_views": ["type_vocabulary_report", "review_queue"]
+      },
+      "entrypoints": [
+        { "type": "skill_install", "command": "npx skills add BLTGV/project-rye --skill rye-gardener" }
+      ]
+    }
+  ]
+}
