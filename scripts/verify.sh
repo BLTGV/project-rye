@@ -92,13 +92,13 @@ BEGIN
     RAISE EXCEPTION 'supersede_assertion function signature missing';
   END IF;
 
-  IF to_regprocedure('rye.record_assertion(text,jsonb,uuid,uuid,text,timestamp with time zone,timestamp with time zone,numeric,text,text,jsonb[],text,jsonb)') IS NULL THEN
-    RAISE EXCEPTION 'record_assertion v2 function signature missing';
+  IF to_regprocedure('rye.record_assertion(text,jsonb,uuid,uuid,text,timestamp with time zone,timestamp with time zone,numeric,text,text,jsonb[],text,jsonb,uuid)') IS NULL THEN
+    RAISE EXCEPTION 'record_assertion knowledge-mechanisms signature missing';
   END IF;
-  IF to_regprocedure('rye.accept_assertion(uuid,jsonb[],text,text)') IS NULL THEN
+  IF to_regprocedure('rye.accept_assertion(uuid,jsonb[],text,text,uuid,text)') IS NULL THEN
     RAISE EXCEPTION 'accept_assertion function missing';
   END IF;
-  IF to_regprocedure('rye.reject_candidate(uuid,text,text)') IS NULL THEN
+  IF to_regprocedure('rye.reject_candidate(uuid,text,text,text)') IS NULL THEN
     RAISE EXCEPTION 'reject_candidate function missing';
   END IF;
   IF to_regprocedure('rye.record_distillation(uuid,uuid,text,jsonb,uuid[],uuid[],text,text,uuid,numeric,jsonb)') IS NULL THEN
@@ -115,6 +115,21 @@ BEGIN
   END IF;
   IF to_regprocedure('rye.effective_confidence(rye.assertions)') IS NULL THEN
     RAISE EXCEPTION 'effective_confidence function missing';
+  END IF;
+  IF to_regprocedure('rye.governing_scope(uuid,uuid,text,uuid)') IS NULL THEN
+    RAISE EXCEPTION 'governing_scope function missing';
+  END IF;
+  IF to_regprocedure('rye.canonical_type(text,text)') IS NULL THEN
+    RAISE EXCEPTION 'canonical_type function missing';
+  END IF;
+  IF to_regprocedure('rye.record_prediction(uuid,uuid,text,text,text,jsonb,numeric,timestamp with time zone,uuid,text,uuid,jsonb)') IS NULL THEN
+    RAISE EXCEPTION 'record_prediction function missing';
+  END IF;
+  IF to_regprocedure('rye.score_due_predictions()') IS NULL THEN
+    RAISE EXCEPTION 'score_due_predictions function missing';
+  END IF;
+  IF to_regprocedure('rye.record_pattern(text,jsonb,uuid[],text,uuid[],uuid[],uuid,numeric,text,uuid,jsonb)') IS NULL THEN
+    RAISE EXCEPTION 'record_pattern function missing';
   END IF;
 
   IF to_regprocedure('rye.mark_assertion_superseded(uuid,uuid)') IS NULL THEN
@@ -155,10 +170,12 @@ BEGIN
         AND coalesce(qual, '') LIKE '%app.supersede_assertion_id%'
         AND coalesce(qual, '') LIKE '%app.accept_assertion_id%'
         AND coalesce(qual, '') LIKE '%app.classification_assertion_id%'
+        AND coalesce(qual, '') LIKE '%app.outcome_assertion_id%'
         AND coalesce(with_check, '') LIKE '%app.write_path%'
         AND coalesce(with_check, '') LIKE '%app.supersede_assertion_id%'
         AND coalesce(with_check, '') LIKE '%app.accept_assertion_id%'
         AND coalesce(with_check, '') LIKE '%app.classification_assertion_id%'
+        AND coalesce(with_check, '') LIKE '%app.outcome_assertion_id%'
   ) THEN
     RAISE EXCEPTION 'assertion_update_policy is not scoped to v2 helper contexts';
   END IF;
@@ -183,7 +200,12 @@ BEGIN
           ('open_gaps'),
           ('assertion_support'),
           ('competing_candidates'),
-          ('current_assertions_weighted')
+          ('current_assertions_weighted'),
+          ('node_salience'),
+          ('type_vocabulary_report'),
+          ('source_reliability'),
+          ('calibration_report'),
+          ('pattern_support')
       ) required(view_name)
       WHERE NOT EXISTS (
           SELECT 1

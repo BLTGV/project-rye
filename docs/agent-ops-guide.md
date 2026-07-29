@@ -63,6 +63,13 @@ SELECT record_assertion(
 Evidence is required for helper-created assertions unless `basis = 'assumed'`.
 Use `assumed` only for configuration or an explicit operator assumption.
 
+When an active scope governs the subject, assertion type, or primary witness,
+`record_assertion()` resolves it automatically. Pass `p_scope_node_id` only
+when the caller already knows the scope; a mismatch with durable coverage
+raises. `candidates_only` forces non-observed writes to candidates. `strict`
+forces all writes to candidates. Agent promotion under either policy requires
+`rye.authoritative.promote`.
+
 To represent uncertainty, write one or more `candidate` rows on the same
 tuple. Review them through `review_queue` or `competing_candidates`.
 
@@ -95,6 +102,31 @@ records a distillation event. It rejects mixed-access source sets.
 Use `resolve_knowledge_gap()` to close an accepted `knowledge_gap` with an
 answer assertion. It creates a resolved version on the gap's own tuple.
 
+## Predictions and future knowledge
+
+Use `record_prediction()` for a probabilistic forecast. The prediction stays on
+an `assertion_type = 'prediction'` tuple and names the outcome tuple in
+`claim.outcome_key`. Call `score_due_predictions()` from an operator-selected
+scheduler or maintenance run. Read calibration from `calibration_report`.
+
+Do not score accepted future-effective assertions. They are future truth Rye
+should return at their effective time, not forecasts. Use
+`schedule_assertion_change()` for future-effective truth and
+`record_prediction()` only when a probability and later calibration are
+intended.
+
+## Pattern write path
+
+Use `record_pattern()` for induction. Supply at least three current accepted
+source assertions from distinct subjects. The helper creates a `pattern` node,
+writes a candidate `pattern_claim`, and stores support and counter-evidence in
+`assertion_evidence`. It never writes an accepted pattern directly.
+
+Review `pattern_support`, then use `accept_assertion()` as a human reviewer or
+capability-granted agent. Inferences may cite an accepted pattern as derivation
+evidence. Their effective confidence is capped at the pattern's confidence for
+one hop; do not assume deeper propagation.
+
 ## Classification and evidence
 
 Assertions have their own `classification`. Derivations inherit the maximum
@@ -117,6 +149,8 @@ Digest narrative artifacts inherit the digest assertion classification.
   record. Update the domain table otherwise.
 - Use `record_artifact()` for artifacts and optional content-hash deduplication.
 - Use `log_agent_query()` to audit agent reads.
+- Use `type_vocabulary_report` and the Rye gardener skill to propose aliases or
+  merges. The gardener never calls `merge_nodes()` directly.
 - Use the tabular intake skill for CSV/XLSX staging and duplicate-run checks.
 
 ## Review and operational views
@@ -130,7 +164,16 @@ All views are security invokers.
 | `review_queue` | Live candidate rows grouped by tuple |
 | `competing_candidates` | Tuples with more than one live candidate |
 | `stale_digests` | Digests invalidated by newer knowledge or displaced sources |
+| `node_salience` | Advisory attention from cooperative query logging |
+| `type_vocabulary_report` | Historical type vocabulary and canonical aliases |
+| `source_reliability` | Labeled witness outcomes and sample size |
+| `calibration_report` | Resolvable prediction Brier score and hit rate |
+| `pattern_support` | Pattern support and contradiction counts |
 | `open_gaps` | Accepted unresolved knowledge gaps |
 | `assertion_support` | Visible evidence bundle in both directions |
 | `node_context` | Node, relationships, and current accepted assertions |
 | `nodes_secure` | Nodes with field-level redaction |
+
+`node_salience` is incomplete by design because only `log_agent_query()` reads
+count. It may order distillation or review work. Never use it to filter access,
+retention, deletion, or operational visibility.

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Rye Gardener"
+  short_description: "Audit vocabulary drift and stage review-only cleanup proposals"
+  default_prompt: "Audit Rye type vocabulary and duplicate-node evidence, then propose review-gated aliases or merges without rewriting history or executing merge_nodes."
