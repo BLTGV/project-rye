@@ -200,6 +200,89 @@ Candidates remain invisible to operational reads throughout review.
 - Read calculated belief from `current_assertions_weighted`.
 - Never overwrite stored confidence to represent decay or corroboration.
 
+## Scope Coverage And Review Policy Convention
+
+Active onboarding scopes declare durable coverage without adding a table:
+
+- `scope_governs_subject`: scope → governed subject. A governed process or
+  project also covers its immediate `has_step` children.
+- `scope_governs_source`: scope → person, connector, or system witness.
+- `governed_type:<assertion_type>`: a scope-level `registry_entry` marking an
+  assertion type as governed.
+- `DEFAULT_SCOPE`: a core registry value containing the fallback scope UUID.
+
+`governing_scope()` resolves subject coverage first, then type, source, and the
+default. Edge subjects check the source endpoint before the target endpoint.
+Two active scopes claiming the same type are an error. An explicit helper
+scope must match the resolved scope when both exist.
+
+Store `review_policy` on the scope with one of these values:
+
+- `open`: preserve accepted writes.
+- `candidates_only`: force non-observed writes to candidates.
+- `strict`: force every write to a candidate.
+
+Agents need `rye.authoritative.promote` to accept candidates under
+`candidates_only` or `strict`. Non-agent reviewers may accept them directly.
+
+## Type Alias Convention
+
+Store aliases as `registry_entry` assertions with key
+`type_alias:<kind>:<deprecated_value>` and the canonical string in
+`claim.value`. `kind` is `node_type`, `edge_type`, or `assertion_type`.
+
+`canonical_type()` follows alias chains and raises on cycles. New helper writes
+use the canonical value. Existing rows retain their stored spelling. Read
+historical vocabulary and canonical mappings from `type_vocabulary_report`.
+Near-duplicate detection stays in the gardener skill; no similarity extension
+is required in PostgreSQL. Alias activation and `merge_nodes()` remain
+human-reviewable actions.
+
+## Outcome Label Convention
+
+Reputation uses explicit outcomes, not ordinary supersession:
+
+- accepting one candidate labels other live candidates `displaced`;
+- `reject_candidate(..., p_outcome => ...)` accepts `incorrect`,
+  `unsupported`, `duplicate`, or `stale`;
+- `accept_assertion(..., p_supersedes_as => 'correction')` labels the
+  incumbent `corrected`; the default `update` is neutral.
+
+Only `incorrect`, `unsupported`, `corrected`, and scored-incorrect predictions
+reduce source reliability. `source_reliability` is derived at read time. Fewer
+than five witnessed claims is a low sample, so effective confidence does not
+apply a reputation discount yet. The discount can halve a prior, never zero it.
+
+## Prediction Convention
+
+Predictions use `assertion_type = 'prediction'`. Their claim contains
+`question`, `outcome_key`, `predicted_value`, `probability`, and `horizon`.
+Use `record_prediction()` so the shape, probability, inferred basis, witness,
+and provenance event are validated together.
+
+A prediction is a probabilistic statement on its own tuple. It never occupies
+the tuple named by `outcome_key`. `score_due_predictions()` reads that outcome
+through `assertions_as_of()` at the horizon and labels the prediction
+`correct`, `incorrect`, or `unresolvable`. Unresolvable rows are excluded from
+`calibration_report`.
+
+Do not use a prediction for an accepted future-effective assertion. A
+future-effective assertion says what Rye should treat as true at that time; a
+prediction says how likely an outcome is and is eligible for calibration.
+
+## Pattern Induction Convention
+
+`record_pattern()` creates a `pattern` node and a candidate `pattern_claim`
+assertion. It requires derivation evidence from at least three distinct
+subjects. Evidence with `attrs.contradicts = true` is counter-evidence and is
+counted separately in `pattern_support`.
+
+Direct accepted `pattern_claim` writes are refused. A human or an agent with
+`rye.authoritative.promote` must accept the candidate. Later inferences may
+cite an accepted pattern as derivation evidence, but their effective confidence
+is capped by the pattern's confidence for one derivation hop. Deeper chains are
+not propagated.
+
 ## Artifact Convention
 
 - Use `record_artifact()` for all artifact creation.
@@ -333,6 +416,11 @@ All views must use `security_invoker = true` (PostgreSQL 15+) so that RLS polici
 | `review_queue` | Live candidates grouped by assertion tuple |
 | `competing_candidates` | Tuples with more than one live candidate |
 | `stale_digests` | Digests invalidated by newer knowledge or displaced sources |
+| `node_salience` | Advisory query attention from logged agent reads |
+| `type_vocabulary_report` | Stored type vocabulary and canonical aliases |
+| `source_reliability` | Fresh witness outcomes and low-sample status |
+| `calibration_report` | Scored prediction calibration by witness and bucket |
+| `pattern_support` | Pattern support, contradictions, and distinct subjects |
 | `open_gaps` | Accepted unresolved knowledge gaps |
 | `assertion_support` | Visible evidence bundle |
 

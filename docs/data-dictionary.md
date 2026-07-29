@@ -189,7 +189,37 @@ Candidate tuples with more than one live candidate.
 #### `stale_digests`
 
 Current digests whose subject has accepted knowledge newer than the digest
-watermark, or whose derivation source was superseded or displaced.
+watermark, or whose derivation source was superseded or displaced. Includes a
+nullable advisory `salience_score` for hot-first ordering.
+
+#### `node_salience`
+
+Per-node count, distinct-agent count, last query time, and 30-day exponentially
+decayed score from `agent_query` events. Only reads routed through
+`log_agent_query()` appear. Salience must not gate visibility, retention, or
+deletion.
+
+#### `type_vocabulary_report`
+
+One row per stored node, edge, or assertion type with usage count, first/last
+seen dates, and a canonical alias when configured. Historical spellings remain
+unchanged.
+
+#### `source_reliability`
+
+Per witness, derives witnessed claims, labeled corrections and rejections,
+displacements, prediction metrics, correction rate, latest outcome, and the
+`low_sample` flag. Scores are never stored.
+
+#### `calibration_report`
+
+Per witness and probability bucket, reports resolvable prediction count, mean
+Brier score, and hit rate. Unresolvable predictions are excluded.
+
+#### `pattern_support`
+
+Per `pattern_claim`, reports supporting derivations, contradictory derivations,
+and distinct supporting subjects.
 
 #### `open_gaps`
 
@@ -372,18 +402,25 @@ immutability bypass.
 record_assertion(p_assertion_type, p_claim, p_subject_node_id,
                  p_subject_edge_id, p_assertion_key, p_effective_at,
                  p_effective_to, p_confidence, p_status, p_basis,
-                 p_evidence, p_actor, p_attrs) → uuid
+                 p_evidence, p_classification, p_attrs,
+                 p_scope_node_id) → uuid
 ```
 
 Writes an accepted or candidate assertion and its evidence atomically.
 Accepted writes apply temporal replacement rules. Helper writes require
-evidence unless `basis = 'assumed'`.
+evidence unless `basis = 'assumed'`. New assertion types are normalized with
+`canonical_type()`. When a governing scope exists, its review policy may force
+the row to candidate status.
 
 #### `accept_assertion()` / `reject_candidate()`
 
 Accepts a candidate on its existing tuple or rejects it with an audit event.
 Acceptance supersedes an accepted incumbent but leaves other candidates
-unchanged. Inferred candidates cannot displace non-inferred incumbents.
+live and labels them `displaced`. `p_supersedes_as = 'correction'` labels the
+incumbent `corrected`; the default `update` is neutral. Rejection accepts an
+optional outcome label. Inferred candidates cannot displace non-inferred
+incumbents. Scoped restrictive policy requires a human or the
+`rye.authoritative.promote` capability.
 
 #### `schedule_assertion_change()`
 
@@ -413,10 +450,44 @@ Superseded rows remain answerable for periods when they were believed.
 Resolves a registry key with scope override, plugin default, then core default
 precedence.
 
+#### `governing_scope()`
+
+```
+governing_scope(p_subject_node_id, p_subject_edge_id,
+                p_assertion_type, p_witness_node_id) → uuid
+```
+
+Resolves the active scope by direct/inherited subject coverage, type coverage,
+source coverage, then `DEFAULT_SCOPE`. Ambiguous type coverage raises.
+
+#### `canonical_type()`
+
+```
+canonical_type(p_kind, p_value) → text
+```
+
+Follows `type_alias:<kind>:<deprecated_value>` registry chains. Cycles and
+empty targets raise. Existing stored rows are not rewritten.
+
+#### `record_prediction()` / `score_due_predictions()`
+
+`record_prediction()` writes a validated inferred prediction with a witness
+and provenance event. `score_due_predictions()` scores unscored predictions
+past their horizon against the outcome tuple returned by `assertions_as_of()`
+and records `prediction_scored` events.
+
+#### `record_pattern()`
+
+Creates a `pattern` node and candidate `pattern_claim` with at least three
+distinct-subject derivation sources. Optional contradictory assertion IDs are
+stored as derivation evidence with `attrs.contradicts = true`.
+
 #### `effective_confidence()`
 
 Calculates current belief from a stored confidence or basis prior, distinct
-independent witnesses, optional half-life decay, and live candidate discount.
+independent witnesses, optional half-life decay, live candidate discount, and
+a capped non-low-sample witness prior. A direct derivation from an accepted
+pattern is capped at that pattern's effective confidence for one hop.
 
 #### `merge_nodes()`
 
