@@ -396,4 +396,66 @@ BEGIN
 END
 $$;
 
+-- Prediction misses are calibration, not unreliability: a witness whose only
+-- adverse outcomes are missed forecasts keeps correction_rate = 0 (regression
+-- for the folding defect found by blind scenario evaluation, issue #10).
+DO $$
+DECLARE
+    v_witness uuid;
+    v_subject uuid;
+    v_event uuid;
+    v_i int;
+    v_pred uuid;
+    v_rate numeric;
+    v_pi int;
+BEGIN
+    INSERT INTO nodes (node_type, label) VALUES ('person', 'Calibrated Hedger')
+    RETURNING id INTO v_witness;
+
+    -- Five witnessed factual claims, none ever corrected (non-low sample).
+    FOR v_i IN 1..5 LOOP
+        INSERT INTO nodes (node_type, label)
+        VALUES ('thing', 'Hedger subject ' || v_i) RETURNING id INTO v_subject;
+        v_event := record_event('hedger_fixture', 'hedger fixture ' || v_i,
+                                p_participant_ids := ARRAY[v_subject],
+                                p_participant_roles := ARRAY['subject']);
+        PERFORM record_assertion(
+            'hedger_fact', jsonb_build_object('n', v_i), v_subject,
+            p_assertion_key := 'default', p_basis := 'reported',
+            p_evidence := ARRAY[jsonb_build_object(
+                'kind','source','event_id',v_event,'witness_node_id',v_witness)]);
+    END LOOP;
+
+    -- One well-hedged prediction that resolves against its predicted value.
+    INSERT INTO nodes (node_type, label) VALUES ('thing', 'Hedger outcome subject')
+    RETURNING id INTO v_subject;
+    v_pred := record_prediction(
+        p_subject_node_id := v_subject,
+        p_subject_edge_id := NULL,
+        p_assertion_key := 'hedged-call',
+        p_question := 'does it happen',
+        p_outcome_key := 'hedger_outcome:default',
+        p_predicted_value := '{"happened": true}',
+        p_probability := 0.4,
+        p_horizon := clock_timestamp() - interval '1 hour',
+        p_witness_node_id := v_witness);
+    INSERT INTO assertions (assertion_type, assertion_key, subject_node_id,
+                            claim, asserted_at, effective_at, basis)
+    VALUES ('hedger_outcome', 'default', v_subject, '{"happened": false}',
+            clock_timestamp() - interval '2 hours',
+            clock_timestamp() - interval '2 hours', 'assumed');
+    PERFORM score_due_predictions();
+
+    SELECT correction_rate, predictions_incorrect INTO v_rate, v_pi
+    FROM source_reliability WHERE witness_node_id = v_witness;
+    IF v_pi <> 1 THEN
+        RAISE EXCEPTION 'missed prediction not visible in predictions_incorrect (got %)', v_pi;
+    END IF;
+    IF v_rate <> 0 THEN
+        RAISE EXCEPTION 'prediction miss leaked into correction_rate (got %)', v_rate;
+    END IF;
+    RAISE NOTICE 'PASS: prediction misses excluded from factual correction_rate';
+END
+$$;
+
 ROLLBACK;

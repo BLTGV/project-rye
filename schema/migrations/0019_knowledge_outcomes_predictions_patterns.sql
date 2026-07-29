@@ -667,8 +667,13 @@ SELECT
     corrections,
     rejected_incorrect,
     displaced,
-    (corrections + rejected_incorrect + predictions_incorrect)::numeric
+    -- Factual reliability only. Prediction misses are calibration data, not
+    -- unreliability: a well-hedged 40% forecast that resolves "no" is GOOD
+    -- forecasting and must never discount the witness's factual claims.
+    -- (Defect found by blind scenario evaluation — issue #10.)
+    (corrections + rejected_incorrect)::numeric
         / NULLIF(claims_witnessed, 0) AS correction_rate,
+    predictions_incorrect,
     last_outcome_at,
     claims_witnessed < 5 AS low_sample,
     predictions_scored,
