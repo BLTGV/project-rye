@@ -240,7 +240,7 @@ BEGIN
 
     -- Type coverage is intentionally strict: multiple active claims are an
     -- administrative ambiguity and must fail at write time.
-    SELECT count(DISTINCT scope.id), min(scope.id)
+    SELECT count(DISTINCT scope.id), (array_agg(scope.id ORDER BY scope.id))[1]
     INTO v_count, v_scope
     FROM nodes scope
     JOIN current_valid_assertions status

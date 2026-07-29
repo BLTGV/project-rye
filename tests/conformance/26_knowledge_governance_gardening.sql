@@ -245,11 +245,38 @@ BEGIN
     ) THEN
         RAISE EXCEPTION 'node_salience counted non-agent-query events or missed agent query';
     END IF;
-    IF pg_get_viewdef('rye.stale_digests'::regclass, true)
-       ILIKE '%where%salience.salience_score%'
-    THEN
-        RAISE EXCEPTION 'salience appears in stale_digests membership predicate';
-    END IF;
+    -- Behavioral guard: salience must never gate stale_digests membership.
+    -- A stale digest on a never-queried subject must still appear (NULL score).
+    DECLARE
+        v_quiet uuid;
+        v_src uuid;
+        v_dig uuid;
+    BEGIN
+        INSERT INTO nodes (node_type, label, external_id, external_source)
+        VALUES ('project', 'Never-queried digest subject', gen_random_uuid()::text, 'conformance:v2')
+        RETURNING id INTO v_quiet;
+        v_src := record_assertion(
+            'project_status', '{"status":"active"}', v_quiet,
+            p_assertion_key := 'default', p_basis := 'assumed');
+        v_dig := record_distillation(
+            p_subject_node_id := v_quiet, p_subject_edge_id := NULL,
+            p_assertion_key := 'overview', p_claim := '{"summary":"quiet"}',
+            p_source_assertion_ids := ARRAY[v_src],
+            p_source_event_ids := '{}'::uuid[],
+            p_agent := 'conformance:mechanisms');
+        -- now() is frozen in-transaction; the newer fact must outrun the
+        -- digest watermark, so insert with clock_timestamp (suite 25 pattern).
+        INSERT INTO assertions (assertion_type, assertion_key, subject_node_id,
+                                claim, asserted_at, basis)
+        VALUES ('project_update', 'after-digest', v_quiet, '{"value":"newer"}',
+                clock_timestamp() + interval '1 millisecond', 'assumed');
+        IF NOT EXISTS (
+            SELECT 1 FROM stale_digests
+            WHERE digest_assertion_id = v_dig AND salience_score IS NULL
+        ) THEN
+            RAISE EXCEPTION 'salience gated stale_digests membership (never-queried stale digest missing or scored)';
+        END IF;
+    END;
 
     -- Alias chains normalize new writes while preserving existing rows.
     SELECT id INTO v_core
