@@ -296,45 +296,115 @@ $$ LANGUAGE plpgsql;
 -- link_record), and node_merges records where it went. Re-create the mapping
 -- onto the merge's final canonical node (following merge chains, since a
 -- canonical node may itself have been merged later) wherever the source row
--- has no mapping today. source_id_type is copied from an existing mapping
--- for the same source table when one exists, else the column default.
+-- has no mapping today.
+--
+-- Runs inside one DO block so it can take transaction-local admin context:
+-- nodes has FORCE ROW LEVEL SECURITY, and on installations where the
+-- migrating role is not a superuser (Supabase) an unprivileged session would
+-- silently skip restricted duplicate nodes.
+--
+-- (source_schema, source_table) is recovered by matching external_source
+-- against pairs that still exist in node_source_map — the collision that
+-- deleted the duplicate's mapping guarantees the canonical kept one for the
+-- same table — rather than splitting at the first '.', which would misparse
+-- a schema name containing a dot. Rows whose external_source matches zero or
+-- several known pairs are skipped and counted.
+--
+-- A source row that was re-linked AFTER the lossy merge already maps to a
+-- bug-resurrected node; the backfill must not silently repoint it (the
+-- resurrected node may have accumulated its own history). Those rows are
+-- left in place and reported: merge_nodes(resurrected, canonical) is the
+-- remediation, and under this migration it now repoints the mapping.
 
-WITH RECURSIVE latest_merge AS (
-    SELECT DISTINCT ON (duplicate_id) duplicate_id, canonical_id
-    FROM node_merges
-    ORDER BY duplicate_id, merged_at DESC
-),
-chain AS (
-    SELECT lm.duplicate_id, lm.canonical_id, 1 AS depth
-    FROM latest_merge lm
-    UNION ALL
-    SELECT c.duplicate_id, lm.canonical_id, c.depth + 1
-    FROM chain c
-    JOIN latest_merge lm ON lm.duplicate_id = c.canonical_id
-    WHERE c.depth < 32
-),
-final AS (
-    SELECT DISTINCT ON (duplicate_id) duplicate_id, canonical_id
-    FROM chain
-    ORDER BY duplicate_id, depth DESC
-)
-INSERT INTO node_source_map (node_id, source_schema, source_table, source_id, source_id_type)
-SELECT
-    f.canonical_id,
-    split_part(d.external_source, '.', 1),
-    substr(d.external_source, strpos(d.external_source, '.') + 1),
-    d.external_id,
-    coalesce(
-        (SELECT nsm.source_id_type
-         FROM node_source_map nsm
-         WHERE nsm.source_schema = split_part(d.external_source, '.', 1)
-           AND nsm.source_table = substr(d.external_source, strpos(d.external_source, '.') + 1)
-         LIMIT 1),
-        'int'
+DO $$
+DECLARE
+    v_restored   bigint;
+    v_unparsed   bigint;
+    v_misdirected bigint;
+BEGIN
+    -- Full node visibility for this transaction only (FORCE RLS applies to
+    -- non-superuser owners; 'admin' reads every classification).
+    PERFORM set_config('app.current_role', 'admin', true);
+
+    CREATE TEMP TABLE tmp_0020_backfill ON COMMIT DROP AS
+    WITH RECURSIVE latest_merge AS (
+        SELECT DISTINCT ON (duplicate_id) duplicate_id, canonical_id
+        FROM node_merges
+        ORDER BY duplicate_id, merged_at DESC
+    ),
+    chain AS (
+        SELECT lm.duplicate_id, lm.canonical_id, 1 AS depth
+        FROM latest_merge lm
+        UNION ALL
+        SELECT c.duplicate_id, lm.canonical_id, c.depth + 1
+        FROM chain c
+        JOIN latest_merge lm ON lm.duplicate_id = c.canonical_id
+        WHERE c.depth < 32
+    ),
+    final AS (
+        SELECT DISTINCT ON (duplicate_id) duplicate_id, canonical_id
+        FROM chain
+        ORDER BY duplicate_id, depth DESC
+    ),
+    -- Only chains that resolved to a terminal canonical: a "canonical" that
+    -- is itself a merged duplicate means the chain was truncated by the
+    -- depth cap (or cycles); mapping to it would target an archived node.
+    terminal AS (
+        SELECT f.duplicate_id, f.canonical_id
+        FROM final f
+        WHERE NOT EXISTS (
+            SELECT 1 FROM latest_merge lm WHERE lm.duplicate_id = f.canonical_id
+        )
+    ),
+    lost AS (
+        SELECT t.canonical_id, d.id AS duplicate_id,
+               d.external_source, d.external_id
+        FROM terminal t
+        JOIN nodes d ON d.id = t.duplicate_id
+        WHERE d.archived_at IS NOT NULL
+          AND d.external_id IS NOT NULL
+          AND strpos(coalesce(d.external_source, ''), '.') > 0
+    ),
+    known_pairs AS (
+        SELECT source_schema, source_table,
+               source_schema || '.' || source_table AS ext,
+               min(source_id_type) AS source_id_type
+        FROM node_source_map
+        GROUP BY source_schema, source_table
     )
-FROM final f
-JOIN nodes d ON d.id = f.duplicate_id
-WHERE d.archived_at IS NOT NULL
-  AND d.external_id IS NOT NULL
-  AND strpos(coalesce(d.external_source, ''), '.') > 0
-ON CONFLICT (source_schema, source_table, source_id) DO NOTHING;
+    SELECT l.canonical_id, l.duplicate_id, l.external_id AS source_id,
+           kp.source_schema, kp.source_table, kp.source_id_type,
+           count(*) OVER (PARTITION BY l.duplicate_id) AS pair_matches
+    FROM lost l
+    LEFT JOIN known_pairs kp ON kp.ext = l.external_source;
+
+    SELECT count(DISTINCT duplicate_id) INTO v_unparsed
+    FROM tmp_0020_backfill
+    WHERE source_schema IS NULL OR pair_matches > 1;
+
+    INSERT INTO node_source_map (node_id, source_schema, source_table, source_id, source_id_type)
+    SELECT canonical_id, source_schema, source_table, source_id, source_id_type
+    FROM tmp_0020_backfill
+    WHERE source_schema IS NOT NULL
+      AND pair_matches = 1
+    ON CONFLICT (source_schema, source_table, source_id) DO NOTHING;
+    GET DIAGNOSTICS v_restored = ROW_COUNT;
+
+    SELECT count(*) INTO v_misdirected
+    FROM tmp_0020_backfill b
+    JOIN node_source_map nsm
+      ON nsm.source_schema = b.source_schema
+     AND nsm.source_table  = b.source_table
+     AND nsm.source_id     = b.source_id
+    WHERE b.pair_matches = 1
+      AND nsm.node_id <> b.canonical_id;
+
+    RAISE NOTICE '0020 backfill: % mappings restored', v_restored;
+    IF v_unparsed > 0 THEN
+        RAISE NOTICE '0020 backfill: % lost mappings skipped (external_source matched zero or multiple known source tables); restore manually via node_merges + node external_id', v_unparsed;
+    END IF;
+    IF v_misdirected > 0 THEN
+        RAISE NOTICE '0020 backfill: % source rows still map to a node other than their merge-final canonical (likely resurrected duplicates from the pre-0020 bug); remediate with merge_nodes(mapped_node, canonical), which now repoints the mapping', v_misdirected;
+    END IF;
+END;
+$$;
