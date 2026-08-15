@@ -112,6 +112,11 @@ the fast-start commands.
   separation, expected contexts, context gaps, and plugin policy helpers.
 - `docs/roadmap.md` records the undated improvement roadmap.
 - `docs/conventions-catalog.md` lists graph conventions and type vocabulary.
+- `docs/vocabulary-contract.md` fixes the internal/plain-language boundary for
+  agents addressing non-technical people.
+- `docs/observed-authoritative-process.md` is the design contract for future
+  process governance: observed and authoritative process as parallel temporal
+  lineages with derived divergence.
 
 ## Conformance tests
 
