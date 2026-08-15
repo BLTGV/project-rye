@@ -87,6 +87,10 @@ maturity and real adoption pressure, not fixed calendar promises.
   evidence, provenance, or control than a generic channel.
 - Support indirect sources such as logs and audit trails as evidence sources
   with their own retention and confidence policies.
+- Evaluate optional durable execution adapters for scheduled refreshes,
+  backfills, and post-capture processing without adding a Rye Core runtime or
+  dependency. The current `pg_durable` assessment is documented in
+  [`design/proposals/pg-durable-evaluation.md`](../design/proposals/pg-durable-evaluation.md).
 
 ## Security and Compliance
 
