@@ -1,0 +1,259 @@
+{
+  "scenario": "harbor_point",
+  "seed": "seed.sql",
+  "note": "Assertions are referenced by (subject_node_id, assertion_type, assertion_key) rather than id, because seed assertion ids are generated at load time and must not be pinned.",
+  "questions": [
+    {
+      "id": "q-entry-exact-01",
+      "question": "Tell me about Northwind Trading Co.",
+      "class": "entry_point",
+      "answerable": true,
+      "entry": {
+        "expected_node_ids": ["fa000001-0001-0001-0001-000000000005"],
+        "difficulty": "exact"
+      },
+      "answer": { "expected_node_ids": ["fa000001-0001-0001-0001-000000000005"] },
+      "notes": "Floor case. If this misses, something is wrong with the harness, not with retrieval."
+    },
+    {
+      "id": "q-entry-external-01",
+      "question": "Which customer is NW-4471?",
+      "class": "entry_point",
+      "answerable": true,
+      "entry": {
+        "expected_node_ids": ["fa000001-0001-0001-0001-000000000005"],
+        "difficulty": "exact"
+      },
+      "answer": { "expected_node_ids": ["fa000001-0001-0001-0001-000000000005"] },
+      "notes": "External identity should rank above every fuzzy match."
+    },
+    {
+      "id": "q-entry-typo-01",
+      "question": "What do we buy from Coastal Steal Supply?",
+      "class": "entry_point",
+      "answerable": true,
+      "entry": {
+        "expected_node_ids": ["fa000001-0001-0001-0001-000000000006"],
+        "difficulty": "trigram"
+      },
+      "answer": { "expected_node_ids": ["fa000001-0001-0001-0001-000000000006"] },
+      "notes": "Typo-class miss. Fixable by threshold, not by embeddings."
+    },
+    {
+      "id": "q-entry-confusable-01",
+      "question": "What is Meridian Fencing?",
+      "class": "entry_point",
+      "answerable": true,
+      "entry": {
+        "expected_node_ids": [
+          "fa000001-0001-0001-0001-000000000002",
+          "fa000001-0001-0001-0001-000000000003"
+        ],
+        "difficulty": "trigram"
+      },
+      "answer": { "expected_node_ids": [] },
+      "expected_behavior": "report_ambiguity",
+      "notes": "Two plausible entities. The right answer is to surface both, not to pick one."
+    },
+    {
+      "id": "q-entry-abbrev-01",
+      "question": "What does Harbor Point Marine Services handle?",
+      "class": "entry_point",
+      "answerable": true,
+      "entry": {
+        "expected_node_ids": ["fa000001-0001-0001-0001-000000000004"],
+        "difficulty": "abbreviation"
+      },
+      "answer": { "expected_node_ids": ["fa000001-0001-0001-0001-000000000004"] },
+      "notes": "Label is 'HPF Marine Services'. No trigram threshold reaches this from the expanded name. Fixable by vocabulary visibility (see issue #17) or by embeddings — this question is what tells those two apart."
+    },
+    {
+      "id": "q-entry-paraphrase-01",
+      "question": "Who is the fence company we work with?",
+      "class": "entry_point",
+      "answerable": true,
+      "entry": {
+        "expected_node_ids": ["fa000001-0001-0001-0001-000000000002"],
+        "difficulty": "paraphrase"
+      },
+      "answer": { "expected_node_ids": ["fa000001-0001-0001-0001-000000000002"] },
+      "evidence": {
+        "expected_assertions": [
+          {
+            "subject_node_id": "fa000001-0001-0001-0001-000000000002",
+            "assertion_type": "subcontractor_role",
+            "assertion_key": "default"
+          }
+        ]
+      },
+      "notes": "Reachable by reformulating to 'Meridian Fence'. Whether the agent gets there is the core measurement for the semantic-index decision."
+    },
+    {
+      "id": "q-causal-01",
+      "question": "Why did the Pier 9 Rebuild slip?",
+      "class": "causal_path",
+      "answerable": true,
+      "entry": {
+        "expected_node_ids": ["fa000001-0003-0001-0001-000000000001"],
+        "difficulty": "exact"
+      },
+      "answer": {
+        "expected_node_ids": [
+          "fa000001-0004-0001-0001-000000000001",
+          "fa000001-0001-0001-0001-000000000006"
+        ],
+        "expected_claim_contains": "rebar"
+      },
+      "evidence": {
+        "expected_edge_ids": [
+          "fa000002-0002-0001-0001-000000000001",
+          "fa000002-0002-0001-0001-000000000002"
+        ],
+        "expected_assertions": [
+          {
+            "subject_node_id": "fa000001-0004-0001-0001-000000000001",
+            "assertion_type": "issue_cause",
+            "assertion_key": "default"
+          }
+        ]
+      },
+      "notes": "Two causal hops upstream from the project."
+    },
+    {
+      "id": "q-causal-02",
+      "question": "Did Coastal Steel Supply end up costing us the late delivery penalty?",
+      "class": "causal_path",
+      "answerable": true,
+      "entry": {
+        "expected_node_ids": ["fa000001-0001-0001-0001-000000000006"],
+        "difficulty": "exact"
+      },
+      "answer": { "expected_node_ids": ["fa000001-0004-0001-0001-000000000002"] },
+      "evidence": {
+        "expected_edge_ids": [
+          "fa000002-0002-0001-0001-000000000001",
+          "fa000002-0002-0001-0001-000000000002",
+          "fa000002-0002-0001-0001-000000000003"
+        ]
+      },
+      "forbidden_evidence": {
+        "edge_ids": ["fa000002-0003-0001-0001-000000000001"],
+        "reason": "A `regarding` edge connects these two directly. Citing it presents co-occurrence as causation — the exact failure the semantics filter exists to prevent."
+      },
+      "notes": "The full 3-hop chain is the right answer. A 1-hop answer means the decoy was used."
+    },
+    {
+      "id": "q-causal-negative-01",
+      "question": "Did Meridian Fence & Gate cause the Pier 9 delay?",
+      "class": "causal_path",
+      "answerable": true,
+      "entry": {
+        "expected_node_ids": ["fa000001-0001-0001-0001-000000000002"],
+        "difficulty": "trigram"
+      },
+      "answer": { "expected_node_ids": [] },
+      "expected_behavior": "report_no_causal_link",
+      "forbidden_evidence": {
+        "edge_ids": ["fa000002-0003-0001-0001-000000000002"],
+        "reason": "Only a `regarding` edge exists. The correct answer is no, and citing that edge as support is the error."
+      },
+      "notes": "A correct negative. Agents that treat any path as evidence will answer yes."
+    },
+    {
+      "id": "q-fact-01",
+      "question": "What is the current status of Pier 9 Rebuild?",
+      "class": "direct_fact",
+      "answerable": true,
+      "entry": {
+        "expected_node_ids": ["fa000001-0003-0001-0001-000000000001"],
+        "difficulty": "exact"
+      },
+      "answer": { "expected_claim_contains": "delayed" },
+      "evidence": {
+        "expected_assertions": [
+          {
+            "subject_node_id": "fa000001-0003-0001-0001-000000000001",
+            "assertion_type": "project_status",
+            "assertion_key": "default"
+          }
+        ]
+      },
+      "notes": "Baseline: one hop, one assertion, one citation."
+    },
+    {
+      "id": "q-fact-02",
+      "question": "What work does Meridian Fence & Gate do for us?",
+      "class": "direct_fact",
+      "answerable": true,
+      "entry": {
+        "expected_node_ids": ["fa000001-0001-0001-0001-000000000002"],
+        "difficulty": "trigram"
+      },
+      "answer": { "expected_claim_contains": "fencing" },
+      "evidence": {
+        "expected_assertions": [
+          {
+            "subject_node_id": "fa000001-0001-0001-0001-000000000002",
+            "assertion_type": "subcontractor_role",
+            "assertion_key": "default"
+          }
+        ]
+      },
+      "notes": "Same target as the paraphrase question, reached by name. Comparing the two isolates entry-point difficulty from answer difficulty."
+    },
+    {
+      "id": "q-crosssubject-01",
+      "question": "What is the most common cause of our project delays?",
+      "class": "cross_subject",
+      "answerable": true,
+      "entry": { "expected_node_ids": [], "difficulty": "paraphrase" },
+      "answer": { "expected_node_ids": ["fa000001-0001-0001-0001-000000000006"] },
+      "notes": "Coastal Steel Supply is upstream of two of three delayed projects. Rye has no aggregation surface today, so a failure here is the evidence for cohort digests — and a pass means the agent assembled it from per-subject traversal, which is worth knowing too."
+    },
+    {
+      "id": "q-crosssubject-02",
+      "question": "Is any one supplier behind more than one of our delayed projects?",
+      "class": "cross_subject",
+      "answerable": true,
+      "entry": { "expected_node_ids": [], "difficulty": "paraphrase" },
+      "answer": { "expected_node_ids": ["fa000001-0001-0001-0001-000000000006"] },
+      "notes": "Same shape, narrower phrasing. If this passes and q-crosssubject-01 fails, the gap is phrasing, not aggregation."
+    },
+    {
+      "id": "q-unanswerable-01",
+      "question": "What are Meridian Fence & Gate's payment terms?",
+      "class": "unanswerable",
+      "answerable": false,
+      "entry": {
+        "expected_node_ids": ["fa000001-0001-0001-0001-000000000002"],
+        "difficulty": "trigram"
+      },
+      "expected_behavior": "report_gap",
+      "notes": "The entity exists and is easy to find; the fact does not exist. Finding the node and then answering anyway is the failure mode."
+    },
+    {
+      "id": "q-unanswerable-02",
+      "question": "Who is the site safety officer on the Dock 4 Refit?",
+      "class": "unanswerable",
+      "answerable": false,
+      "entry": {
+        "expected_node_ids": ["fa000001-0003-0001-0001-000000000002"],
+        "difficulty": "exact"
+      },
+      "expected_behavior": "report_gap",
+      "notes": "A plausible role that no assertion or edge establishes. Neighboring people exist, which is the temptation."
+    },
+    {
+      "id": "q-unanswerable-03",
+      "question": "How much did the late delivery penalty cost us?",
+      "class": "unanswerable",
+      "answerable": false,
+      "entry": {
+        "expected_node_ids": ["fa000001-0004-0001-0001-000000000002"],
+        "difficulty": "trigram"
+      },
+      "expected_behavior": "report_gap",
+      "notes": "The node is named for a cost that is never quantified anywhere. The hardest refusal in the set."
+    }
+  ]
+}
