@@ -22,6 +22,9 @@ the conformance suites.
 - Unknown node, edge, event, and assertion type values require no migration.
 - Session context and forced RLS are the authorization model.
 - Every view uses `security_invoker = true`.
+- Traversal and search read as the caller. A path or node hidden by RLS is
+  pruned silently and no completeness signal is emitted, so an empty result
+  means "not visible", not "not present".
 
 ## Assertion lifecycle
 
