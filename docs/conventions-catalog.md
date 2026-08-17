@@ -238,6 +238,33 @@ Near-duplicate detection stays in the gardener skill; no similarity extension
 is required in PostgreSQL. Alias activation and `merge_nodes()` remain
 human-reviewable actions.
 
+## Identity Key Convention
+
+Declare what makes a node type the same entity with a `registry_entry`
+assertion keyed `identity_keys:<node_type>`, whose `claim.value` is an array:
+
+```json
+[{"property": "email",   "normalize": "lower"},
+ {"property": "website", "normalize": "domain"}]
+```
+
+Normalizers are `trim`, `lower`, `digits_only`, and `domain`. An unknown
+normalizer raises. Keep the set boring: every normalizer is a permanent
+semantic commitment, because changing it rewrites what "matched" meant for
+everything already resolved on its basis.
+
+A node matching **any** declared key is an exact candidate. Matching more than
+one node is `ambiguous`, not a merge.
+
+`identity_threshold:<node_type>` sets the trigram floor for label similarity
+(default 0.45, floored at the `pg_trgm.similarity_threshold` GUC). Label
+similarity only ever produces `ambiguous`.
+
+Resolution is advisory. `resolve_node_identity()` is a read; agents decide and
+route ambiguity to review. Deterministic resolution belongs only where the
+process is predefined — tabular imports with a declared key, `link_record()`
+mirroring of a domain table, connector syncs with stable external ids.
+
 ## Outcome Label Convention
 
 Reputation uses explicit outcomes, not ordinary supersession:

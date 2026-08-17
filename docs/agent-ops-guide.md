@@ -141,6 +141,43 @@ Corroboration from a repeated witness is retained for audit but marked
 Nodes with non-empty `attrs.teams` must also set `attrs.classification`.
 Digest narrative artifacts inherit the digest assertion classification.
 
+## Before creating a node
+
+Call `resolve_node_identity()` before minting an entity you expect might
+already exist.
+
+```sql
+SELECT resolve_node_identity(
+    p_node_type := 'org',
+    p_label := 'Northwind Trading',
+    p_identity := '{"email":"ops@northwind.example"}'
+);
+```
+
+It returns a verdict and the candidates behind it:
+
+| Verdict | What it means | What to do |
+|---|---|---|
+| `match` | One node matches on external identity or a declared identity key | Reuse that node |
+| `ambiguous` | Several exact matches, or a plausible label match only | Do not guess — record a structural candidate for review |
+| `new` | Nothing matched | Create the node |
+
+A similar label never returns `match`. Similar names are not evidence of
+identity, so they arrive as `ambiguous` for a person to settle.
+
+This call is advisory. It writes nothing and blocks nothing, and no write
+helper consults it — the decision is yours. Route `ambiguous` to
+`create_knowledge_candidate()` and batch review by resolved cluster rather
+than by row, or a large import will stall on individual near-misses.
+
+`new` means nothing matched *that you can see*. A node hidden from you by
+classification is not matched, so a duplicate is possible across an access
+boundary. Where that matters, run intake under a role that can see the whole
+population for the node type.
+
+Hold an id that may be stale? `resolve_merged_node(id)` follows `node_merges`
+to the surviving node.
+
 ## Other safe writes
 
 - Use `link_record()` to connect a domain row to a graph node.

@@ -511,6 +511,62 @@ first, uncovered raw assertions, and recent activity. Assertions come only from
 
 **Why it exists:** Agents need context but have limited context windows. Dumping a node's full history overwhelms the model. This function returns a ranked, bounded summary that fits typical agent consumption.
 
+#### `resolve_node_identity()`
+
+```
+resolve_node_identity(p_node_type, p_label, p_identity, p_limit, p_scope) → jsonb
+```
+
+Advisory identity lookup. Returns `verdict` (`match`, `ambiguous`, or `new`)
+plus the candidates and why each surfaced. Matches exact external identity and
+declared identity keys from `identity_keys:<node_type>`, then falls back to
+trigram label similarity.
+
+Fuzzy label matching never produces `match` — a similar name is grounds for
+review, not evidence of identity.
+
+**Why it exists:** Agents perform graph inserts; the database gates outcomes,
+not steps. This is a read an intake agent consults before creating a node. It
+writes nothing, blocks nothing, and no write helper calls it — a deterministic
+resolver in the write path would make the judgment with less context than the
+agent has and stall a bulk import on per-row ambiguity. Ambiguity routes to
+`create_knowledge_candidate()` for review like any other uncertain claim.
+
+**Scale note:** identity-key matching normalizes both sides, so it cannot use
+an index out of the box. On large installs add an expression index per
+declared key:
+
+```sql
+CREATE INDEX idx_org_email_identity ON rye.nodes
+  (rye.normalize_identity_value(properties->>'email', 'lower'))
+  WHERE node_type = 'org' AND archived_at IS NULL;
+```
+
+#### `normalize_identity_value()` / `identity_keys()`
+
+```
+normalize_identity_value(p_value, p_normalizer) → text
+identity_keys(p_node_type, p_scope) → jsonb
+```
+
+Normalizers are `trim`, `lower`, `digits_only`, and `domain`. An unknown
+normalizer raises — a silent pass-through would quietly widen identity.
+`identity_keys()` resolves the declared keys for a node type, returning `[]`
+when none are configured.
+
+#### `resolve_merged_node()`
+
+```
+resolve_merged_node(p_node_id) → uuid
+```
+
+Follows `node_merges` transitively to the surviving node, returning the input
+when it was never merged and raising on a merge cycle.
+
+**Why it exists:** `merge_nodes()` has always recorded merges so old
+references could be traced to the survivor, but nothing read the table — a
+stale reference to a merged-away id resolved to nothing.
+
 #### `log_agent_query()`
 
 ```
