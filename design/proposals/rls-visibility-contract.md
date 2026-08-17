@@ -7,8 +7,9 @@
 **Last evaluated:** 2026-08-17
 
 **Context:** issue #17. Constrains the graph traversal and identity resolution
-work. The default-safe half is implementable immediately; the two opt-in
-disclosures below need a maintainer decision before they ship.
+work. The default-safe half (D1, D4) is implemented in #19 and #20. D2 is a
+follow-up. D3 is blocked on a finding recorded below: the definer probe it
+assumed does not bypass RLS on every deployment.
 
 ## Summary
 
@@ -107,7 +108,48 @@ Grantees are expected to be admin-facing or audit tooling, not ordinary agents.
 Not required by the initial traversal work. Recommended as a follow-up once
 there is a caller that needs it.
 
-### D3 — Identity resolution reports a restricted match (needs decision)
+### D3 — Identity resolution reports a restricted match (blocked)
+
+**Blocking finding: the mechanism this decision assumed does not work.**
+
+The design below assumes a `SECURITY DEFINER` probe can read rows hidden from
+the caller. It cannot be relied on. `FORCE ROW LEVEL SECURITY` applies policies
+to the table owner, so a definer function only bypasses RLS when its owner
+holds `BYPASSRLS` or is a superuser — which varies by deployment, and
+`AGENTS.md` already records that `postgres` is not a superuser on Supabase.
+
+Measured with a non-superuser owner and a two-row table where one row is
+hidden by policy:
+
+| Path | Rows seen |
+|---|---|
+| Owner (`NOBYPASSRLS`), direct select | 1 of 2 |
+| Caller, via `SECURITY DEFINER` owned by that role | 1 of 2 |
+
+So the probe as specified would return `false` for a hidden match on exactly
+the deployments where classification is doing real work, silently degrading to
+today's behavior while appearing to protect against split-brain.
+
+The split-brain risk itself is unchanged and still real. Options that remain:
+
+- Require the probe's owner to hold `BYPASSRLS` and refuse to install the
+  probe otherwise, so the guarantee is explicit rather than accidental.
+- Add a policy clause honoring a flag that only the probe can set. Rejected on
+  its face unless the flag is unforgeable by the caller — otherwise it is a
+  total RLS bypass available to anyone who can call `set_config`.
+- A readable identity-fingerprint table needing no privilege. **Rejected**: it
+  converts an online one-bit oracle into an offline bulk attack against
+  low-entropy values like email addresses.
+- Accept the risk, document it, and handle it operationally by running intake
+  under a role that sees the whole population for a node type.
+
+Until this is settled, `resolve_node_identity()` ships with
+`match | ambiguous | new` only, and `tests/security/03_identity_visibility.sql`
+pins the current behavior so that adopting D3 changes the test deliberately.
+
+The original design is retained below as the starting point for that decision.
+
+#### Original design (unimplemented)
 
 `resolve_node_identity()` gains a fourth verdict alongside `match`,
 `ambiguous`, and `new`:
