@@ -19,6 +19,54 @@ bounded context. Read current knowledge from `current_valid_assertions` or
 `current_assertions_weighted`, never from a bare `superseded_at IS NULL`
 filter.
 
+## Finding and traversing
+
+Start from `find_nodes()` when you have a name and need a node. It ranks exact
+external identity above exact label above fuzzy matching and tells you which
+one fired in `match_reason`. It does not search property values, so do not
+expect to locate a node by an attribute.
+
+```sql
+SELECT * FROM find_nodes('Acme', ARRAY['org'], 5);
+```
+
+Use `neighborhood()` to build context for a question about one subject. It
+returns the surrounding nodes, the edges among them, and each node's current
+accepted assertions, under an explicit budget.
+
+```sql
+SELECT neighborhood('<node_uuid>', p_max_depth := 2, p_max_nodes := 40);
+```
+
+Use `find_paths()` for questions about connection or cause.
+
+```sql
+SELECT node_path, edge_type_path, depth
+FROM find_paths('<from_uuid>', '<to_uuid>',
+                p_max_depth := 3,
+                p_semantics := ARRAY['causal']);
+```
+
+Pass `p_semantics := ARRAY['causal']` whenever the question is why something
+happened. Without it a path may run through `references` or `regarding` edges,
+which record that two things were mentioned together and assert nothing about
+cause. Leave `p_direction` at its default `out` for causal work; `any` answers
+"are these connected at all" and will happily return a chain backwards.
+
+Depth is capped by `max_path_depth` (default 3). Asking for more silently
+clamps. Two or three hops answer most questions, and deeper traversal is where
+retrieval cost goes wrong.
+
+Pass `p_as_of` to reconstruct past connectivity. Edges honor their effective
+windows, so this is the structural counterpart to `assertions_as_of()`.
+
+These functions never write. If you want a read to count toward
+`node_salience`, call `log_agent_query()` yourself.
+
+An empty result means the path is not visible to you. It does not prove the
+path does not exist — RLS prunes traversal silently and by design. Say "no
+connection is visible under this access" rather than "there is no connection."
+
 ## Events
 
 Always create events through `record_event()`. It creates participants

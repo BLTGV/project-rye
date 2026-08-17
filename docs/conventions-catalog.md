@@ -238,6 +238,38 @@ Near-duplicate detection stays in the gardener skill; no similarity extension
 is required in PostgreSQL. Alias activation and `merge_nodes()` remain
 human-reviewable actions.
 
+## Edge Semantics Convention
+
+Store the semantic class of an edge type as a `registry_entry` assertion with
+key `edge_semantics:<edge_type>` and one of these strings in `claim.value`:
+
+| Value | Meaning |
+|---|---|
+| `causal` | One thing produced, blocked, or changed another |
+| `structural` | Composition, membership, ownership, assignment |
+| `associative` | Mention, reference, topical adjacency |
+| `temporal` | Ordering without a claim of cause |
+
+Unregistered edge types resolve to `associative`. An unclassified vocabulary
+is therefore never mistaken for causation, and `find_paths(p_semantics =>
+ARRAY['causal'])` cannot walk a `references` edge to reach a conclusion.
+
+Core assignments: `blocks`, `triggered_by`, `affects`, and `impacted` are
+causal; `employs`, `assigned_to`, `project_member`, `depends_on`, `contains`,
+and `owns` are structural; `regarding`, `references`, `applied_to`, `targets`,
+and `adjacent_to` are associative. Plugins declare semantics for the edge types
+they contribute.
+
+## Retrieval Registry Keys
+
+| Key | Default | Effect |
+|---|---|---|
+| `max_path_depth` | `3` | Hard ceiling on traversal depth. Callers may request less, never more. |
+| `node_search_threshold` | `0.35` | Minimum trigram similarity for a `find_nodes` fuzzy match. Floors at the `pg_trgm.similarity_threshold` GUC, since the `%` operator is what keeps the GIN index usable. |
+
+Both follow the usual scope, plugin, then core precedence through
+`registry_value()`.
+
 ## Outcome Label Convention
 
 Reputation uses explicit outcomes, not ordinary supersession:
