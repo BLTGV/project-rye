@@ -207,6 +207,66 @@ BEGIN
     END IF;
     RAISE NOTICE 'PASS: find_nodes does not search property values';
 
+    -- ------------------------------------------------------------------
+    -- Batch search: an agent's reformulations in one round trip, each
+    -- attributed to the query that produced it.
+    -- ------------------------------------------------------------------
+    SELECT count(DISTINCT b.query) INTO v_rows
+    FROM find_nodes_batch(ARRAY['Trav Warehouse', 'Trav Conversion'], NULL, 5) b;
+    IF v_rows <> 2 THEN
+        RAISE EXCEPTION 'batch search did not attribute results to both queries (got %)', v_rows;
+    END IF;
+
+    SELECT count(*) INTO v_rows
+    FROM find_nodes_batch(ARRAY['Trav Warehouse'], NULL, 5) b
+    WHERE b.query <> 'Trav Warehouse';
+    IF v_rows <> 0 THEN
+        RAISE EXCEPTION 'batch search mislabeled the originating query';
+    END IF;
+    RAISE NOTICE 'PASS: batch search attributes results per query';
+
+    -- Blank and duplicate entries are dropped, not treated as wildcards.
+    SELECT count(DISTINCT b.query) INTO v_rows
+    FROM find_nodes_batch(ARRAY['Trav Warehouse', '  ', 'Trav Warehouse'], NULL, 5) b;
+    IF v_rows <> 1 THEN
+        RAISE EXCEPTION 'batch search did not normalize blank/duplicate queries (got %)', v_rows;
+    END IF;
+    RAISE NOTICE 'PASS: batch search drops blank and duplicate queries';
+
+    -- The limit is per query, not across the batch.
+    SELECT count(*) INTO v_rows
+    FROM find_nodes_batch(ARRAY['Trav', 'Vis'], NULL, 1) b;
+    IF v_rows > 2 THEN
+        RAISE EXCEPTION 'per-query limit leaked across the batch (got % rows)', v_rows;
+    END IF;
+    RAISE NOTICE 'PASS: batch limit applies per query';
+
+    -- Single-query form agrees with the batch form.
+    SELECT count(*) INTO v_rows
+    FROM find_nodes('Trav Warehouse') f
+    FULL JOIN find_nodes_batch(ARRAY['Trav Warehouse'], NULL, 20) b
+      ON b.node_id = f.node_id
+    WHERE f.node_id IS NULL OR b.node_id IS NULL;
+    IF v_rows <> 0 THEN
+        RAISE EXCEPTION 'find_nodes disagrees with find_nodes_batch';
+    END IF;
+    RAISE NOTICE 'PASS: find_nodes matches its batch form';
+
+    -- ------------------------------------------------------------------
+    -- The threshold is a per-call argument, not fixed policy: the agent
+    -- owns semantic matching and needs the dial.
+    -- ------------------------------------------------------------------
+    SELECT count(*) INTO v_rows FROM find_nodes('Trav Warehosue', p_threshold := 0.35);
+    IF v_rows < 1 THEN
+        RAISE EXCEPTION 'transposed label not found at a permissive threshold';
+    END IF;
+
+    SELECT count(*) INTO v_rows FROM find_nodes('Trav Warehosue', p_threshold := 0.95);
+    IF v_rows <> 0 THEN
+        RAISE EXCEPTION 'per-call threshold was ignored (% rows at 0.95)', v_rows;
+    END IF;
+    RAISE NOTICE 'PASS: per-call threshold overrides the registry default';
+
     -- Empty input is not a wildcard.
     SELECT count(*) INTO v_rows FROM find_nodes('   ');
     IF v_rows <> 0 THEN

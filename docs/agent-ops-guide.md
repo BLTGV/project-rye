@@ -30,6 +30,31 @@ expect to locate a node by an attribute.
 SELECT * FROM find_nodes('Acme', ARRAY['org'], 5);
 ```
 
+**Semantic matching is your job, not the database's.** `find_nodes()` matches
+characters, not meaning: it handles spelling and spacing drift, and nothing
+else. It will not connect "the fence company" to `Meridian Fence & Gate`. You
+know the domain vocabulary, so expect to search more than once.
+
+Send your reformulations in one call rather than one at a time:
+
+```sql
+SELECT query, label, score, match_reason
+FROM find_nodes_batch(
+    ARRAY['Meridian Fence', 'the fence company', 'Meridian'],
+    ARRAY['org'], 3);
+```
+
+Every row is attributed to the query that produced it, so you can see which
+phrasing worked. Judge the candidates on `score` and `match_reason` — a
+`label_contains` hit at 0.40 is a much weaker signal than `external_id` at
+1.00.
+
+If nothing comes back, reformulate before you widen. `p_threshold` overrides
+the registry default per call, but a lower threshold only buys more spelling
+tolerance; it will never reach a synonym. Narrowing with `p_node_types` and
+rephrasing are the moves that work. `rye_catalog()` shows the node types
+available to rephrase against.
+
 Use `neighborhood()` to build context for a question about one subject. It
 returns the surrounding nodes, the edges among them, and each node's current
 accepted assertions, under an explicit budget.

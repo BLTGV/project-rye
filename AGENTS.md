@@ -19,6 +19,8 @@ There is no runtime, no ORM, no package manager, and no build step. The delivera
 7. Use `find_nodes()` to locate a node from text, `neighborhood()` for surrounding context, and
    `find_paths(p_semantics => ARRAY['causal'])` for questions about cause. An empty traversal result
    means no visible path, not no path.
+8. Semantic matching is yours, not the database's. Expect to search more than once: send
+   reformulations through `find_nodes_batch()` in one call and judge the candidates yourself.
 
 ## Schema Isolation
 
@@ -130,7 +132,8 @@ Views: `current_valid_assertions` (accepted and effective now), `node_context`
 | `link_record(schema, table, id, node_type, label, properties)` | Connect a domain table row to the graph. Idempotent. |
 | `track_table(schema, table)` | Attach CDC trigger to a domain table for automatic change tracking |
 | `agent_node_summary(node_id, max_items)` | Compact context for a node (relationships, facts, activity) |
-| `find_nodes(query, node_types, limit)` | Ranked entry-point lookup by label and external identity. Never searches property values. |
+| `find_nodes(query, node_types, limit, threshold)` | Ranked entry-point lookup by label and external identity. Never searches property values. |
+| `find_nodes_batch(queries[], ...)` | Same, for several reformulations in one round trip |
 | `find_paths(from, to, max_depth, edge_types, semantics, as_of, direction, max_paths)` | Bounded typed multi-hop traversal. Depth capped by `max_path_depth`. |
 | `neighborhood(node_id, max_depth, ...)` | Bounded subgraph plus current accepted assertions |
 | `edge_semantics(edge_type)` | Semantic class of an edge type; unregistered types are `associative` |

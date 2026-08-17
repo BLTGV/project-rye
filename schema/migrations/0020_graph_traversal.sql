@@ -49,23 +49,41 @@ COMMENT ON FUNCTION edge_semantics(text, uuid) IS
 'Resolves the semantic class of an edge type from registry key edge_semantics:<edge_type>. Unregistered types are associative.';
 
 -- --------------------------------------------------------------------------
--- find_nodes — text entry point
+-- find_nodes / find_nodes_batch — text entry points
 -- --------------------------------------------------------------------------
+-- These are primitives for an agent's search loop, not a search engine. The
+-- agent owns semantic matching: it knows the domain vocabulary, it can
+-- reformulate ("the fence company" -> "Meridian Fence"), decompose, try a
+-- type filter, and judge which candidate is right. The database's job is to
+-- make that loop cheap and honest, not to guess.
+--
+-- Three consequences for this API:
+--
+--   1. find_nodes_batch takes many query strings in one round trip, so N
+--      reformulations cost one call rather than N.
+--   2. match_reason and score are returned so the agent can judge rather than
+--      trusting a rank it cannot see into.
+--   3. The similarity threshold is a per-call argument, not a fixed policy.
+--      The registry value is only the default.
+--
 -- Deliberately searches label and external identity only. `properties` is
 -- excluded because field_classifications redacts individual property paths
 -- (redact_properties / nodes_secure); matching on a raw property value would
 -- let a caller confirm the contents of a field it is not allowed to read.
 --
--- Fuzzy matching is trigram-only. It catches spacing and spelling drift
--- ("Acme Corp" / "Acme Corporation") but not synonyms or paraphrase; that is
--- what an optional semantic index would add later.
+-- Fuzzy matching is trigram-only: it catches spacing and spelling drift, not
+-- synonyms or paraphrase. Widening the threshold does not fix paraphrase —
+-- reformulating the query does. That is the agent's job, which is why the
+-- threshold floors rather than opening all the way down.
 
-CREATE OR REPLACE FUNCTION find_nodes(
-    p_query text,
+CREATE OR REPLACE FUNCTION find_nodes_batch(
+    p_queries text[],
     p_node_types text[] DEFAULT NULL,
-    p_limit int DEFAULT 20,
+    p_limit_per_query int DEFAULT 20,
+    p_threshold numeric DEFAULT NULL,
     p_scope uuid DEFAULT NULL
 ) RETURNS TABLE (
+    query text,
     node_id uuid,
     node_type text,
     label text,
@@ -77,70 +95,108 @@ LANGUAGE sql STABLE
 -- extension schema, as they do for capture_domain_change().
 SET search_path = rye, pg_catalog, public
 AS $$
-    WITH q AS (
+    WITH cfg AS (
         SELECT
-            nullif(btrim(p_query), '') AS text,
-            -- Floors at the pg_trgm.similarity_threshold GUC (0.3 by default):
-            -- the `%` operator is what makes the GIN index usable, so a lower
-            -- registry value cannot widen recall below it.
+            -- Per-call threshold wins; the registry value is the default.
+            -- Both floor at the pg_trgm.similarity_threshold GUC (0.3 by
+            -- default): the `%` operator is what keeps the GIN index usable,
+            -- so a lower number cannot widen recall below it.
             greatest(
-                coalesce((registry_value('node_search_threshold', p_scope) #>> '{}')::numeric, 0.35),
+                coalesce(
+                    p_threshold,
+                    (registry_value('node_search_threshold', p_scope) #>> '{}')::numeric,
+                    0.35
+                ),
                 0.3
             ) AS threshold,
-            greatest(coalesce(p_limit, 20), 1) AS lim
+            greatest(coalesce(p_limit_per_query, 20), 1) AS lim
+    ),
+    q AS (
+        SELECT DISTINCT nullif(btrim(t), '') AS text
+        FROM unnest(coalesce(p_queries, '{}'::text[])) AS t
+        WHERE nullif(btrim(t), '') IS NOT NULL
     ),
     matches AS (
-        SELECT n.id, n.node_type, n.label, 1.00::numeric AS score, 'external_id' AS reason
+        SELECT q.text AS query, n.id, n.node_type, n.label,
+               1.00::numeric AS score, 'external_id' AS reason
         FROM nodes n, q
-        WHERE q.text IS NOT NULL
-          AND n.archived_at IS NULL
+        WHERE n.archived_at IS NULL
           AND (p_node_types IS NULL OR n.node_type = ANY(p_node_types))
           AND n.external_id = q.text
 
         UNION ALL
 
-        SELECT n.id, n.node_type, n.label, 0.95::numeric, 'exact_label'
+        SELECT q.text, n.id, n.node_type, n.label, 0.95::numeric, 'exact_label'
         FROM nodes n, q
-        WHERE q.text IS NOT NULL
-          AND n.archived_at IS NULL
+        WHERE n.archived_at IS NULL
           AND (p_node_types IS NULL OR n.node_type = ANY(p_node_types))
           AND lower(n.label) = lower(q.text)
 
         UNION ALL
 
-        SELECT n.id, n.node_type, n.label,
+        SELECT q.text, n.id, n.node_type, n.label,
                round((similarity(n.label, q.text) * 0.9)::numeric, 4), 'label_similarity'
-        FROM nodes n, q
-        WHERE q.text IS NOT NULL
-          AND n.archived_at IS NULL
+        FROM nodes n, q, cfg
+        WHERE n.archived_at IS NULL
           AND (p_node_types IS NULL OR n.node_type = ANY(p_node_types))
           AND n.label IS NOT NULL
           AND n.label % q.text
-          AND similarity(n.label, q.text) >= q.threshold
+          AND similarity(n.label, q.text) >= cfg.threshold
 
         UNION ALL
 
-        SELECT n.id, n.node_type, n.label, 0.40::numeric, 'label_contains'
+        SELECT q.text, n.id, n.node_type, n.label, 0.40::numeric, 'label_contains'
         FROM nodes n, q
-        WHERE q.text IS NOT NULL
-          AND n.archived_at IS NULL
+        WHERE n.archived_at IS NULL
           AND (p_node_types IS NULL OR n.node_type = ANY(p_node_types))
           AND n.label ILIKE '%' || q.text || '%'
     ),
     best AS (
-        SELECT DISTINCT ON (m.id)
-               m.id, m.node_type, m.label, m.score, m.reason
+        SELECT DISTINCT ON (m.query, m.id)
+               m.query, m.id, m.node_type, m.label, m.score, m.reason
         FROM matches m
-        ORDER BY m.id, m.score DESC, m.reason
+        ORDER BY m.query, m.id, m.score DESC, m.reason
+    ),
+    ranked AS (
+        SELECT b.*,
+               row_number() OVER (
+                   PARTITION BY b.query
+                   ORDER BY b.score DESC, b.label NULLS LAST, b.id
+               ) AS rn
+        FROM best b
     )
-    SELECT b.id, b.node_type, b.label, b.score, b.reason
-    FROM best b, q
-    ORDER BY b.score DESC, b.label NULLS LAST, b.id
-    LIMIT (SELECT lim FROM q);
+    SELECT r.query, r.id, r.node_type, r.label, r.score, r.reason
+    FROM ranked r, cfg
+    WHERE r.rn <= cfg.lim
+    ORDER BY r.query, r.score DESC, r.label NULLS LAST, r.id;
 $$;
 
-COMMENT ON FUNCTION find_nodes(text, text[], int, uuid) IS
-'Ranked node lookup by label and external identity. Searches no property values because field-level redaction applies to them.';
+COMMENT ON FUNCTION find_nodes_batch(text[], text[], int, numeric, uuid) IS
+'Ranked node lookup for many query strings in one round trip, so an agent can try several reformulations at once. Searches no property values because field-level redaction applies to them.';
+
+CREATE OR REPLACE FUNCTION find_nodes(
+    p_query text,
+    p_node_types text[] DEFAULT NULL,
+    p_limit int DEFAULT 20,
+    p_threshold numeric DEFAULT NULL,
+    p_scope uuid DEFAULT NULL
+) RETURNS TABLE (
+    node_id uuid,
+    node_type text,
+    label text,
+    score numeric,
+    match_reason text
+)
+LANGUAGE sql STABLE
+SET search_path = rye, pg_catalog
+AS $$
+    SELECT b.node_id, b.node_type, b.label, b.score, b.match_reason
+    FROM find_nodes_batch(ARRAY[p_query], p_node_types, p_limit, p_threshold, p_scope) b
+    ORDER BY b.score DESC, b.label NULLS LAST, b.node_id;
+$$;
+
+COMMENT ON FUNCTION find_nodes(text, text[], int, numeric, uuid) IS
+'Single-query form of find_nodes_batch. Use the batch form when trying several reformulations.';
 
 -- --------------------------------------------------------------------------
 -- find_paths — bounded multi-hop traversal

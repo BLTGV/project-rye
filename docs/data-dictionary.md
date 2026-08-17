@@ -511,16 +511,31 @@ first, uncovered raw assertions, and recent activity. Assertions come only from
 
 **Why it exists:** Agents need context but have limited context windows. Dumping a node's full history overwhelms the model. This function returns a ranked, bounded summary that fits typical agent consumption.
 
-#### `find_nodes()`
+#### `find_nodes()` / `find_nodes_batch()`
 
 ```
-find_nodes(p_query, p_node_types, p_limit, p_scope)
+find_nodes(p_query, p_node_types, p_limit, p_threshold, p_scope)
   → (node_id, node_type, label, score, match_reason)
+
+find_nodes_batch(p_queries[], p_node_types, p_limit_per_query, p_threshold, p_scope)
+  → (query, node_id, node_type, label, score, match_reason)
 ```
 
 Ranked entry-point lookup. Matches exact external identity, exact label, then
 trigram similarity and substring containment, returning the best reason per
-node. `match_reason` tells an agent why a node surfaced.
+node. Results carry `score` and `match_reason` so the caller can judge rather
+than trust an opaque rank.
+
+**Why it exists:** these are primitives for an agent's search loop, not a
+search engine. The agent owns semantic matching — it knows the domain
+vocabulary, and it can reformulate ("the fence company" → "Meridian Fence"),
+decompose, or narrow by type. So the batch form takes many query strings in
+one round trip, and `p_threshold` is a per-call argument with the registry
+value as its default rather than as fixed policy.
+
+Widening the threshold does not solve paraphrase; reformulating does. The
+threshold floors at the `pg_trgm.similarity_threshold` GUC (0.3 by default),
+since the `%` operator is what keeps the GIN index usable.
 
 Property values are deliberately not searched. `field_classifications` redacts
 individual property paths, so a match on a raw property would let a caller
