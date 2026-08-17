@@ -77,6 +77,11 @@ maturity and real adoption pressure, not fixed calendar promises.
   duplicate entities, repeated context gaps, and plugin-policy violations.
 - Add migration paths for plugin supersession when a better plugin replaces an
   earlier good-enough convention.
+- Give agents multi-hop traversal, a supported entry point into the graph, and
+  advisory identity resolution, so intake judgment stays with the agent while
+  the database keeps gating outcomes. Derived reads that answer questions about
+  absence need the disclosure rules in
+  [`design/proposals/rls-visibility-contract.md`](../design/proposals/rls-visibility-contract.md).
 
 ## Integration Surface
 
