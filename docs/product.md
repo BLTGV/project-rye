@@ -1,206 +1,220 @@
 # Rye Product Definition
 
-Owner: Product role. Source of intent: `BRIEF.md`. This document says who Rye
-is for, what it must do, what it must not do, and what "done" means. It never
-says how. Terms used here are defined in `docs/glossary.md` and follow the
-plain register in `docs/vocabulary-contract.md`.
+Owner: Product role. Source of intent: `BRIEF.md` (v0.3). Who Rye is for, what
+it must do, what it must not do, what "done" means. Never how. Terms are in
+`docs/glossary.md`, in the plain register of `docs/vocabulary-contract.md`.
+
+**Two meanings.** *Classification* in Rye already means sensitivity — who may
+see a thing. The business sense, *what type of thing this is*, is a
+**category**; choosing one is **categorizing**. Only the loop step keeps the
+brief's word "classify".
 
 ## Purpose
 
-Rye gives one organization a single, shared, reviewable memory: the things
-that happened, the things that are true, when they were true, and where each
-of those came from. It lives inside the organization's existing database as an
-overlay, so adopting it changes nothing that already runs and dropping it
-leaves everything intact. It exists so that AI agents can read and write
-organizational knowledge without people losing authority over what counts as
-accepted.
+Rye gives one organization a shared, reviewable memory that agents can read
+and write without people losing authority over what counts as accepted. In
+v0.3 its opinionated SQL and skills exist for one job: telling an agent how to
+categorize what it finds — discover what categories exist here, classify the
+item and explain the choice, resolve whether it already exists before
+proposing to create it.
 
 ## Users
 
-- **The Rye admin.** Usually a technical or semi-technical person at a small
-  organization. Wants to point agents at their real work without hand-feeding
-  context every session. Judges Rye by whether the first useful scope exists
-  quickly and whether they trust what is in it.
-- **The reviewer.** A person who knows the business but not the database. Sees
-  suggestions waiting for a person, accepts or declines them, and settles open
-  disagreements. Judges Rye by whether each item explains itself: what is
-  claimed, where it came from, how sure Rye is.
+- **The Rye admin.** Technical or semi-technical, at a small organization.
+  Wants agents working from shared knowledge without hand-feeding context
+  every session. Judges Rye by whether agents file things correctly unwatched.
+- **The reviewer.** Knows the business, not the database. Accepts or declines
+  what agents suggest. Judges Rye by whether each item explains itself: what
+  it claims, which category it was put in and why, where it came from, how
+  sure Rye is.
 - **The developer adopting Rye.** Installs Rye next to an existing application
-  database and connects domain tables to it. Judges Rye by whether nothing in
-  their application had to change.
-- **The agent.** Needs a compact briefing about an area of the business, a
-  short list of safe write paths, and a clear answer about what it may record
-  itself versus what it must suggest.
+  database. Judges Rye by whether nothing in their application had to change.
+- **The agent.** Needs a compact briefing about the categories in use here,
+  safe write paths, and a clear answer about what it may record versus what it
+  must suggest.
 
 ## Goals
 
-1. A new organization goes from nothing to a first scope with real reviewed
-   knowledge in it in under an hour, guided by an agent.
-2. Every accepted fact can answer three questions on demand: where it came
-   from, how sure Rye is, and when it is true.
-3. Agents suggest by default; people accept. The line moves per area of the
-   business, deliberately, and never by accident.
-4. Rye stays small. Everything specific to an industry, a tool, or a workflow
-   arrives as a plugin and can be checked against the area's policy before an
-   agent writes anything.
-5. Rye is an overlay. Installing or removing it never changes operational
-   systems.
+1. An agent that has never seen this database can find out what categories
+   exist here, what each one means, and what it carries — from the database,
+   not from a hand-written prompt.
+2. Every proposed write states which category it chose and why, and has its
+   shape checked before it lands.
+3. An agent looks for an existing match before proposing to create anything,
+   and says "I do not know" when the evidence is too thin.
+4. A mismatch is never silently dropped; it becomes something a person sees.
+5. Categorization guidance improves in the graph through the normal review
+   lifecycle; skill files stay static while the answers get better.
+6. Rye stays an overlay: installing or removing it changes nothing already
+   running.
 
 ## Non-goals
 
-- Being the day-to-day screen where people manage domain records. Domain
-  applications keep that job; Rye's surface is for reviewing knowledge.
-- Deciding on its own that knowledge is stale enough to delete. Retention is
-  designed for now; automatic cleanup comes later.
-- Depending on any one connector vendor, chat tool, or hosting provider.
-- Inferring what a source means from its name. An unlabelled source stays an
-  open question until a person answers it.
-- Being a general document store or a search index over raw content.
+- Tokens, forecasting, calibration, reputation, and the declared-knowledge
+  workflow. They do not serve discover, classify, resolve.
+- Rewriting a write at write time to match an alias or a preferred name. Rye
+  reports the drift; it does not silently reinterpret the insert.
+- Being the day-to-day screen where people manage domain records.
+- Deciding on its own that knowledge is stale enough to delete. Storage
+  pruning and cleanup are out.
+- Depending on any one connector vendor, chat tool, or hosting provider, or
+  being a general document store or search index over raw content.
 
 ## Stories
 
-Each story is checkable by someone with the admin surface, the command line,
-and no access to the code.
+Each story is checkable from the admin surface or the command line, by someone
+with no access to the code.
 
-### S1 — First hour
-As a Rye admin, I can install Rye and stand up my first scope without reading
-the design docs.
+### S1 — What categories exist here
+
+As an agent with only the skills, I can ask the database what kinds of things
+it holds before I try to add one.
+
+- One request returns every category in use in the current area, and for each:
+  its name, what it means in this organization's words, the properties it
+  carries and which are required, the relationships it takes part in, and
+  whether it is on or off here. Categories that are off are listed as off,
+  not omitted.
+- No part of the reply comes from a file the agent was handed: a person can
+  change a category's description in the graph and see the change in the next
+  reply.
+- Asking in an area with no categories yet returns an empty list and says so,
+  not an error.
+
+### S2 — Categorize an item and say why
+
+As an agent, I can put an item into a category and state my reason in terms a
+reviewer can check.
+
+- Every proposed write names exactly one category and carries a stated reason
+  referring to what was actually in the item.
+- The reason is readable by a reviewer who never saw the item's raw form.
+- Two agents given the same item and categories propose the same category, or
+  the difference shows up as one open disagreement, not two loose proposals.
+
+### S3 — The shape does not fit
+
+As a reviewer, an item that does not match its category's expected shape
+reaches me instead of vanishing.
+
+- A proposed write missing a required property, or carrying a property the
+  category does not define, is not accepted as-is.
+- It appears in the suggestions waiting for a person, naming the category, the
+  properties at fault, and what was expected, with the original item readable
+  alongside it.
+- Nothing about the mismatch is silent: the agent is told what failed and why,
+  in the same words the reviewer sees.
+
+### S4 — Nothing here fits
+
+As a reviewer, when an agent finds something no existing category covers, I
+find out.
+
+- The agent does not force the item into the nearest category; an open
+  question is recorded naming the item and why nothing matched.
+- The open question can be answered by adding or describing a category, and
+  the answer is linked to the question afterwards.
+- The agent never creates a new category on its own.
+
+### S5 — Does this already exist
+
+As an agent, I check the graph for an existing match before proposing to
+create anything, and I abstain when I cannot tell.
+
+- **Existing thing.** A confident single match proposes an update to that
+  thing and names it, rather than a new one.
+- **New thing.** No match proposes a creation, and states what it searched
+  for and did not find.
+- **Ambiguous.** Two or more plausible matches produce one item for a person
+  showing the candidates side by side; the agent picks none of them.
+- **Too thin to tell.** When the evidence supports none of the above, the
+  agent abstains: it records that it could not decide and why, and writes
+  nothing else. Abstaining is a recorded outcome, not silence.
+- Each of these four outcomes, and the two in S3 and S4, is reproducible: the
+  same starting database and item give the same outcome every time.
+
+### S6 — Who accepts the write
+
+As a reviewer, I decide what an agent's proposal becomes, unless my area's
+owner deliberately chose otherwise.
+
+- Agents suggest; people accept. **The one exception is per-area and
+  deliberate: in an area whose review policy is set to "agents may record
+  accepted knowledge here", an agent's write is accepted the moment it is
+  made, under that policy.** In every other area an agent's write stays a
+  suggestion, answers no questions, and appears in no summary until a person
+  accepts it.
+- The area's current policy is visible on the admin surface next to its name,
+  and changing it records who changed it and when; the previous setting stays
+  readable.
+- One list shows every suggestion waiting for a person, with what it claims,
+  which category it chose and why, where it came from, and how sure Rye is.
+- Accepting makes a suggestion answer questions immediately and marks what it
+  replaced as replaced, not deleted. Declining requires a reason; the declined
+  item stays readable. Nothing is ever edited in place.
+
+### S7 — Categorization gets better without a code change
+
+As a Rye admin, the descriptions agents categorize against live in the graph
+and improve the same way any other knowledge does.
+
+- A category's description can be proposed, reviewed, accepted, and later
+  superseded, using the same review path as any other suggestion.
+- Improving a description requires no change to any skill or plugin file, and
+  the improved text appears in the next discovery reply.
+- Previous descriptions stay readable, so a past categorization can be judged
+  against the description in force when it was made.
+
+### S8 — Install path still works
+
+As a developer, I can install Rye beside an existing database without
+changing that database.
 
 - Following only the README fast start, install completes and reports success
   against a fresh local database and against an existing remote database.
-- Installing into a database that already has application tables leaves every
-  one of those tables byte-identical, and the application still starts.
-- After install, one command reports status: installed, version, active
-  scopes, enabled plugins.
-- An agent given only the onboarding skill can take an admin from install to
-  an active scope, and refuses to create the scope until purpose, boundary,
-  owner, and review policy are answered.
-- Whole path, timed by a first-time admin, finishes in under an hour.
+- Every pre-existing application table is unchanged afterwards, and the
+  application still starts.
+- One command reports status: installed, version, active areas, plugins.
+- An agent given only the onboarding skill takes an admin from install to a
+  working area with at least one category in it.
 
-### S2 — Scope is named after the work, not the tool
-As a Rye admin, my first scope describes the business function Rye is helping
-with, and what is deliberately out of scope.
+### S9 — Where it came from, and what was true when
 
-- Creating a scope records its purpose, what is in scope, what is out of
-  scope, its owner, and what would signal the purpose has changed.
-- A scope named after a source or connector is challenged by the agent, with
-  the reason, before it is created.
-- The scope's stated boundary is visible on the admin surface and readable by
-  a person who was not there when it was written.
+As a reviewer or an agent, anything Rye answers with can show its backing and
+its history.
 
-### S3 — Suggest by default
-As a reviewer, agents cannot quietly write accepted knowledge into my area.
-
-- Each scope carries one of three settings: agents may record accepted
-  knowledge here; agents suggest and people accept; everything waits for a
-  person.
-- With the middle or strictest setting, anything an agent writes appears as a
-  suggestion and never in an answer to a normal question.
-- Changing the setting is recorded with who changed it and when, and the prior
-  setting remains readable.
-
-### S4 — The review queue
-As a reviewer, I can work a single list of suggestions waiting for a person.
-
-- One list shows every pending suggestion, with what it claims, where it came
-  from, and how sure Rye is.
-- Accepting a suggestion makes it answer questions immediately, and marks the
-  fact it replaced as replaced rather than deleting it.
-- Declining a suggestion requires a reason, and the declined item stays
-  readable afterwards.
-- Nothing in the list can be edited in place; a correction is a new entry.
-
-### S5 — Open disagreements
-As a reviewer, when two sources disagree I see one disagreement, not two
-unrelated items.
-
-- Two competing suggestions about the same thing appear together as one open
-  disagreement.
-- Accepting one leaves the other untouched and still declinable.
-- While a disagreement is open, Rye reports lower certainty about that fact.
-- A worked-out or assumed suggestion cannot displace something a person or a
-  direct observation established.
-
-### S6 — Where it came from
-As a reviewer or an agent, every accepted fact can show its backing.
-
-- Every fact records how Rye knows it: seen directly, heard from someone,
-  worked out, taken on faith, or unclear.
-- Every fact lists what it came from and what independently backs it up.
-- Two supports that trace to the same original witness are not counted as two.
+- Every accepted fact records how Rye knows it, what it came from, and what
+  backs it up; two supports tracing to one original witness count once.
 - A fact built from restricted material is never shown to someone who could
-  not see the material it was built from.
-
-### S7 — Summaries that admit when they are outdated
-As an agent, I get a short briefing about a subject rather than a raw pile.
-
-- Asking about a subject returns summaries first, each stating what it was
-  built from and as of when, then anything not yet covered by a summary.
-- When newer accepted knowledge arrives, or a fact a summary rests on is
-  overturned, that summary is listed as outdated.
-- A summary never quietly includes suggestions that nobody accepted.
-
-### S8 — Open questions
-As a reviewer, the things Rye does not know are visible, not silent.
-
-- When material arrives that does not fit the scope's expectations, Rye
-  records an open question instead of guessing or discarding it.
-- Open questions are listed with the reason they were raised.
-- Answering an open question closes it and links the answer; the closed
-  question stays readable.
-- The same question recurring can be raised as a proposal to revisit the
-  scope, and never changes the scope on its own.
-
-### S9 — History
-As anyone, I can ask what was true at a past date and what Rye believed then.
-
+  not see that material.
 - Asking about a past date returns what was true then, including facts since
-  replaced.
-- Asking what Rye believed at a past date excludes anything learned later.
-- Suggestions never appear in either answer.
-- A change scheduled for a future date does not affect today's answers, and
-  does affect answers on and after that date.
-
-### S10 — Plugins carry the vocabulary
-As a Rye admin, industry and workflow vocabulary arrives as plugins I can turn
-on per scope, and agents are blocked from writing outside them.
-
-- A catalog lists installed plugins, skills, and permissions.
-- Enabling a plugin for a scope makes only that scope's vocabulary available
-  there.
-- An agent attempting to write a term the scope has not enabled is refused,
-  and the refusal names the policy that blocked it.
-- Turning a plugin off does not delete knowledge already accepted under it.
+  replaced; asking what Rye believed then excludes anything learned later.
 
 ## Constraints
 
 - Plain PostgreSQL 15 or newer, and Supabase. No runtime, framework, ORM, or
   build step for the core.
-- Nothing is edited in place. Corrections replace; records of what happened
-  never change.
-- Overlay only. Operational tables never point at Rye; removing Rye leaves
-  them working.
+- Nothing is edited in place; records of what happened never change.
+- Overlay only. Operational tables never point at Rye.
+- Procedure lives in git; vocabulary lives in the graph.
 - Internals keep the canonical vocabulary; only human-facing surfaces use the
-  plain register in `docs/vocabulary-contract.md`.
+  plain register.
 - No customer names in committed examples, fixtures, or documentation.
-- Storage growth is a design constraint everywhere now; automatic cleanup is
-  deferred.
+- The v2 lifecycle — suggestions, evidence, open questions, summaries — must
+  still behave as it does today.
 - Continuous-integration workflow files cannot be pushed with the credentials
   currently available; changes there need the repository owner.
 
 ## Open questions
 
-Listed here for the record; the ones needing a human decision are in the
-report that accompanies this document.
+Listed for the record; the ones needing a decision are in the accompanying
+report.
 
-- Whether a scope owns its subjects durably, or whether an agent must name the
-  scope on every write.
-- What the reviewer's smallest useful surface is: whether the review queue
-  must ship as a screen, or whether the command line is enough for the next
-  stage.
-- Whether "under an hour" is measured against a local database only, or must
-  hold for a remote database with existing application data.
-- Which plugins must exist before the first scope is genuinely useful, given
-  that people, teams, and goals are foundational but not core.
-- How much of a source may be sampled during discovery before a person has
-  confirmed what that source means.
+- Whether a category's description is one accepted fact per area, or one
+  shared description that areas may override.
+- What counts as "confident" versus "ambiguous" for an existing match, and
+  whether that line is set per area or globally.
+- Whether an abstention is a first-class item a reviewer works, or only a
+  recorded outcome nobody is asked to act on.
+- Whether an agent may propose a new category as a suggestion, or only raise
+  an open question about the gap.

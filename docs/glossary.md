@@ -29,6 +29,17 @@ identifiers stay canonical everywhere durable.
 - **A suggested rule of thumb** — a pattern Rye noticed, offered for confirmation, not yet treated as knowledge.
 - **What people ask about most** — which subjects draw attention, used to prioritize review and summarizing.
 
+## Categorizing what arrives
+
+- **Category** — what type of thing something is, in the business's terms: a customer, a quote, a meeting. Called a node type or an assertion predicate internally. Not the same as who may see it.
+- **Category description** — what a category means in this organization, kept in the graph so it can be improved by review rather than by editing a skill file.
+- **Type profile** — everything an agent needs to use one category: its description, the properties it carries and which are required, the relationships it takes part in, and whether it is turned on in this area.
+- **Discover** — the first step of the loop: asking the database which categories exist here and what each one carries, before proposing anything.
+- **Classify** — the second step: deciding which category an item belongs to and stating why, then having the proposed shape checked. This is the business sense of sorting, not the security sense of classification.
+- **Resolve** — the third step: checking whether the thing already exists in the graph before proposing to create it.
+- **Abstain** — the agent recording that it could not decide, and why, instead of guessing or staying silent. An abstention is an outcome, not a failure.
+- **Who may see it** — the sensitivity label on a fact or record that decides who it can be shown to. Called classification internally; unrelated to categories.
+
 ## Setup and governance
 
 - **Area of the business** — the limited function or workflow Rye is assisting, with its own sources, plugins, policies, and boundary. Called a scope on the admin surface.

@@ -21,7 +21,9 @@ client of it. This contract says what a client may depend on.
   `event_participants` separately, and never updates an assertion's content,
   status, or basis.
 - **Reads are views and `SELECT`-returning functions**: `rye_catalog()`,
-  `rye_agent_context()`, `agent_node_summary()`, and the views above.
+  `rye_agent_context()`, `rye_categories()`, `agent_node_summary()`, and the
+  views above. `rye_categories()` has its own contract,
+  `contracts/category-vocabulary.md`, which governs its jsonb shape.
   Base-table reads carry no promise beyond the data dictionary's columns.
 - **Extension points are values, not DDL.** New `node_type`, `edge_type`,
   `assertion_type`, and property keys need no migration.

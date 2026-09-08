@@ -1,50 +1,78 @@
 # Brief
 
-Draft written from README.md and docs/roadmap.md. Casey: edit freely; this
-is the one document Product reads as your intent.
+This is the one document Product reads as Casey's intent. Casey: edit
+freely.
 
-## What this is
-Project Rye is an open source, agent-native temporal knowledge graph that
-runs as a schema inside PostgreSQL. It gives an organization one queryable
-structure for entities, relationships, events, and time-versioned facts,
-designed so that LLM agents can read and write it safely while people keep
-authority over what counts as accepted knowledge.
+## Where Rye is
+Rye is not production. Call it v0.3. It is an open source, agent-native
+temporal knowledge graph that runs as a schema inside PostgreSQL, with
+skills and plugins that tell agents how to use it.
+
+## What v0.3 is for
+The opinionated SQL and skills exist to guide agent-driven categorization
+and schema validation. Agents should know how to query and find things.
+Given an item, an agent should:
+
+1. **Discover** what categories exist in this database: which types are in
+   use, what each one means here, what properties and relationships it
+   carries, and which are enabled or disabled in the current scope.
+2. **Classify** the item against those categories, explain the choice, and
+   have the proposed shape checked. A mismatch is reported as something for
+   a person to review, not silently rejected.
+3. **Resolve** whether the item already exists in the graph before
+   proposing to create it, and abstain when the evidence is too thin to
+   decide.
+
+Today only the resolve step is built. The catalog reports type names and
+counts but not what a type is, and nothing checks whether an item fits a
+type. Rye is opinionated about lifecycle and almost unopinionated about
+categorization. v0.3 fixes that imbalance.
 
 ## Who it is for
-- Small organizations and teams that want their agents to work from shared,
-  reviewable knowledge instead of scattered chat and documents.
-- Developers who install Rye alongside an existing database and connect
-  domain tables to it without changing them.
-- The agents themselves, which need compact context, safe write paths, and
-  clear review policies.
+- The Rye admin at a small organization who wants agents to work from
+  shared, reviewable knowledge without hand-feeding context every session.
+- The reviewer who knows the business, not the database, and accepts or
+  declines what agents suggest.
+- The developer who installs Rye beside an existing database without
+  changing it.
+- The agent, which needs a compact briefing, safe write paths, and a clear
+  answer about what it may record versus what it must suggest.
 
-## What must be true
+## What must stay true
 - The deliverable is SQL plus skills and plugins. No runtime, framework,
   ORM, or build step for the core.
 - Append-only: assertions are superseded, never mutated; events are
   immutable.
 - Overlay: domain tables never point at the graph. Dropping the schema
   leaves operational systems intact.
-- People accept knowledge; agents suggest. Review policy is per scope.
+- Agents suggest; people accept. Review policy is per scope.
+- Procedure lives in git. Vocabulary lives in the graph. Skill metadata
+  is the joint between them.
 - Works on plain PostgreSQL 15+ and on Supabase.
 
-## What done for the next stage looks like
-- A new organization can install Rye, create a first onboarding scope, feed
-  one source, and review candidates through the admin surface, guided by an
-  agent, in under an hour.
-- The v2 core model (assertion lifecycle, evidence, gaps, digests) is
-  implemented, conformance-tested, and documented in one vocabulary.
-- Plugins carry all non-core vocabulary and can be validated against scope
-  policy before agents write.
+## What done for v0.3 looks like
+- A freshly started agent, given one item and only the skills, can list
+  the categories available here, classify the item with a stated reason,
+  have the shape validated, and check for an existing match before it
+  proposes a write. Replay cases cover: an existing entity, a new entity,
+  an ambiguous match, invalid properties, and no matching category.
+- Category descriptions live in the graph and improve through the normal
+  review lifecycle, so the skill file stays static while categorization
+  gets better.
+- The onboarding path from the README still works, and the v2 lifecycle
+  (candidates, evidence, gaps, digests) is unchanged.
 
-## Out of scope for now
+## Out of scope for v0.3
+- Tokens, forecasting, calibration, reputation, and the declared-knowledge
+  workflow. They do not serve discover, classify, resolve.
+- Write-time alias triggers that silently reinterpret a write. Report
+  drift; do not rewrite the insert.
 - Being the operational UI for domain applications.
-- Storage pruning and garbage collection (design constraint now, jobs later).
-- Any dependency on a specific connector vendor.
+- Storage pruning and garbage collection.
 
 ## Constraints
 - No customer names in committed examples or fixtures.
 - Internals keep canonical vocabulary; only human-facing surfaces use the
   plain-language lexicon.
 - CI workflow files under .github/workflows cannot be pushed with the local
-  credentials currently available; changes there need the repo owner.
+  credentials on this machine.

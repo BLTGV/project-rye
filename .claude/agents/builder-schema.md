@@ -46,7 +46,7 @@ saved you time. Date each entry.
 # Area: schema
 
 - purpose: The rye schema and the bash that installs, verifies, and tests it. Tables, views, functions, RLS policies, migrations, the profile layers, and the ./scripts/rye CLI. This is the spine every other area is a client of.
-- paths: schema/** tests/** scripts/install.sh scripts/migrate.sh scripts/verify.sh scripts/conformance.sh scripts/docker-test.sh scripts/seed_quickstart.sh scripts/sync_plugin_metadata.sh scripts/rye docker-compose.yml design/model/** design/layers/** design/cookbooks/** docs/data-dictionary.md docs/core-contract.md docs/core-model-v2.md docs/cli.md
+- paths: schema/** tests/conformance/*.sql tests/conformance/07_domain_integration.sh tests/conformance/16_cli_smoke.sh tests/conformance/23_cli_agent_security.sh tests/concurrency/** tests/scenarios/** tests/security/** scripts/install.sh scripts/migrate.sh scripts/verify.sh scripts/conformance.sh scripts/docker-test.sh scripts/seed_quickstart.sh scripts/sync_plugin_metadata.sh scripts/rye docker-compose.yml design/model/** design/layers/** design/cookbooks/** docs/data-dictionary.md docs/core-contract.md docs/core-model-v2.md docs/cli.md
 - test: ./scripts/docker-test.sh test --reset --profiles crm,pm
 - record: docs/areas/schema.md
 
@@ -61,6 +61,7 @@ saved you time. Date each entry.
 ## Contracts published
 - contracts/sql-surface.md
 - contracts/rye-cli.md
+- contracts/category-vocabulary.md
 - contracts/docs-content.md
 
 ## Contracts consumed

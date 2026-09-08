@@ -44,7 +44,7 @@ saved you time. Date each entry.
 # Area: admin
 
 - purpose: The reviewer's screen and the agent's HTTP API, on one Cloudflare Worker. React SPA plus a Hono API that proxies SQL to one of several configured Rye instances. Also holds the demonstration domain surfaces.
-- paths: admin/** surfaces/**
+- paths: admin/** surfaces/** tests/conformance/21_api_security.sh
 - test: cd admin && npm run build
 - record: docs/areas/admin.md
 
@@ -60,5 +60,6 @@ saved you time. Date each entry.
 
 ## Contracts consumed
 - contracts/sql-surface.md
+- contracts/category-vocabulary.md
 
 """

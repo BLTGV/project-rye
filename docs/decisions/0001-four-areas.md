@@ -24,16 +24,11 @@ runs inside the same suite. Giving the CLI its own area was rejected: it has
 no test command of its own and no deploy step of its own, so it would be an
 area on paper only.
 
-**`tests/` belongs to `schema` entirely, including the tests that exercise
-other areas.** `21_api_security.sh` starts the admin API and
-`22_secure_mcp_simulation.sh` starts an agent-kit MCP server, yet both live
-in `tests/conformance/` and run under one runner against one disposable
-Postgres. Splitting the suite so each area owned its own integration test was
-rejected: it would give three areas the right to edit the same runner and
-would break `./scripts/docker-test.sh`, which is the one command that proves
-the system works end to end. The cost is that an `admin` or `agent-kit`
-change whose integration test needs updating has to reach into `schema` — a
-real cost, accepted because a single runnable suite is worth more.
+**`tests/` is split by the behavior each file exercises, not by the runner.**
+Superseded on 2026-09-08 by the paragraph below; the original text read that
+`tests/` belonged to `schema` entirely, including the tests that exercise
+other areas, because `21_api_security.sh` and `22_secure_mcp_simulation.sh`
+run under one runner against one disposable Postgres.
 
 **Reference documentation is owned by the area whose code it describes.**
 `design/model/**` and `docs/data-dictionary.md` go to `schema`;
@@ -49,3 +44,24 @@ remain outside every area, owned by Product and the Architect.
 kind of artifact as the console and were placed with it rather than given a
 fifth area for three files. The agent-workflow tooling is the Lead's and the
 Operator's; no builder should regenerate its own definition.
+
+## Amendment, 2026-09-08 — test files follow the behavior they test
+
+`tests/conformance/21_api_security.sh` now belongs to `admin` and
+`tests/conformance/22_secure_mcp_simulation.sh` to `agent-kit`; `schema` keeps
+the runner scripts (`scripts/conformance.sh`, `scripts/docker-test.sh`), the
+SQL conformance and security tests, the concurrency and scenario suites, and
+the two host-side tests whose subject is schema-owned code — `16_cli_smoke.sh`
+and `23_cli_agent_security.sh`, both of which exercise `./scripts/rye`. The
+original reasoning conflated two things: owning a test file and owning the
+runner that executes it. They are separable. `docker-test.sh` names 21, 22, and
+23 explicitly and still runs the whole suite from one command, so a builder
+editing its own integration test changes nothing about how the suite is
+invoked. The rejected alternative was leaving `tests/**` with `schema`, which
+kept the runner unambiguous but meant that the strongest test of the admin API
+and the strongest test of the agent kit's MCP path could only be updated by the
+area that owns neither — a change to the admin API and the test proving it
+still refuses cross-instance reads could never land in one diff. Also rejected:
+moving the test files into `admin/` and `skills/` so ownership followed the
+directory tree, which would have split the suite into three runners and given
+up the single end-to-end command that decision 0001 was built around.

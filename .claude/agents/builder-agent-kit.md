@@ -46,7 +46,7 @@ saved you time. Date each entry.
 # Area: agent-kit
 
 - purpose: What an agent is given: skills as procedures, plugins as vocabulary manifests, and replay scenarios that grade whether a clean-room agent can actually do the job. Includes the MCP servers and intake scripts skills shell out to.
-- paths: skills/** plugins/** eval/** docs/onboarding.md docs/agent-ops-guide.md docs/conventions-catalog.md
+- paths: skills/** plugins/** eval/** tests/conformance/22_secure_mcp_simulation.sh docs/onboarding.md docs/agent-ops-guide.md docs/conventions-catalog.md
 - test: npm --prefix skills/rye-source-context-intake run check && bash tests/conformance/22_secure_mcp_simulation.sh
 - record: docs/areas/agent-kit.md
 
@@ -65,5 +65,6 @@ saved you time. Date each entry.
 ## Contracts consumed
 - contracts/sql-surface.md
 - contracts/rye-cli.md
+- contracts/category-vocabulary.md
 - contracts/admin-api.md
 
