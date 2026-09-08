@@ -1,0 +1,91 @@
+# Deploy runbook
+
+Three deployable units. Each has one documented deploy path and one rollback
+line. No secrets appear here — see each tool's own secret store.
+
+## 1. SQL schema (Postgres)
+
+**What it is:** `schema/core`, `schema/profiles`, `schema/security` applied
+to a Postgres 15+ database via `scripts/migrate.sh`, tracked in the
+`public.rye_migrations` table (one row per applied migration file, never
+rolled back automatically).
+
+**Deploy:**
+
+```bash
+# Against a fresh or existing target database:
+./scripts/install.sh --db-url "$DATABASE_URL" --profiles crm,pm
+# or, for a brand-new remote target with the CLI wrapper:
+./scripts/rye init remote --db-url "$DATABASE_URL" --profiles crm,pm
+```
+
+`install.sh` runs, in order: `migrate.sh` (applies pending files from
+`schema/migrations`, skipping ones already recorded), `sync_plugin_metadata.sh`,
+optionally `seed_quickstart.sh` (`--seed`), then `verify.sh` (schema
+conformance check). It is safe to re-run: migrations already recorded in
+`rye_migrations` are skipped.
+
+**Rollback:** there are no down-migrations. Roll back by restoring the
+target database from its last snapshot/point-in-time-recovery backup taken
+before the deploy. If the failure is caught before other writes land,
+restoring is usually unnecessary — file a decision record and hand-write a
+corrective migration instead of reverting forward.
+
+## 2. Admin app (Cloudflare Worker, `admin/`)
+
+**What it is:** a Hono API + Vite/React SPA served from one Worker
+(`admin/src/server/worker.ts`, static assets in `dist/client`). Per-tenant
+database connections are supplied at runtime via the `RYE_INSTANCES` secret
+(JSON list of `{id, label, databaseUrl}`), not committed anywhere.
+
+**Deploy:**
+
+```bash
+cd admin
+npm run deploy   # = npm run build (tsc -b && vite build) && wrangler deploy
+```
+
+Requires `wrangler` to already be authenticated (`wrangler login`) and the
+`RYE_INSTANCES` secret to already be set (`wrangler secret put RYE_INSTANCES`);
+this command does not set secrets.
+
+**Rollback:**
+
+```bash
+cd admin
+npx wrangler deployments list      # find the previous good deployment id
+npx wrangler rollback <deployment-id>
+```
+
+## 3. Marketing/docs site (Cloudflare Worker, `site/`)
+
+**What it is:** an Astro site built to a Worker bundle
+(`dist/_worker.js/index.js`) with static assets in `dist/`. Content sync
+(`npm run sync:docs`) pulls docs into the site build; no external secrets
+required at deploy time.
+
+**Deploy:**
+
+```bash
+cd site
+npm run deploy   # = npm run build (clean + sync:docs + astro build) && wrangler deploy
+```
+
+**Rollback:**
+
+```bash
+cd site
+npx wrangler deployments list
+npx wrangler rollback <deployment-id>
+```
+
+## Notes
+
+- All three units are independent: a failed admin deploy does not affect the
+  site or the schema, and vice versa. Deploy them separately, in any order.
+- `scripts/test-all.sh` should pass locally before any of the above; it does
+  not deploy anything by itself.
+- Wrangler deploy history (`wrangler deployments list`) is the source of
+  truth for "what is live now" for the two Worker units; the SQL schema's
+  source of truth is the `public.rye_migrations` table on the target
+  database itself.

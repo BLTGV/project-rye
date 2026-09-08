@@ -8,6 +8,14 @@ Rye provides a single queryable structure for tracking entities, relationships, 
 
 There is no runtime, no ORM, no package manager, and no build step. The deliverable is SQL.
 
+## How Work Is Organized
+
+Work on this repository runs through six roles: Lead, Product, Architect,
+Builder (one per area), Verifier, and Operator. The interactive session is
+the Lead. Read `agents/README.md` for the loop and `agents/lead.md` for the
+Lead's instructions. Areas are listed in `docs/areas.md`; each has a record
+in `docs/areas/`. Tasks are work items under `work/`.
+
 ## Quick Start for Agents
 
 1. Set the search path: `SET search_path = rye, public, pg_catalog;`
