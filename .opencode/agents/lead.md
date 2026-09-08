@@ -43,6 +43,10 @@ session.
    An environment failure (port in use, missing tool) is diagnosed, not
    counted.
 6. Dispatch Operator if CI, environments, or deploy are affected.
+4b. Claude Code worktree isolation branches from `main`, not from the
+   current branch. Immediately after dispatching, merge the working branch
+   into each builder worktree (`git -C <worktree> merge --no-edit <branch>`)
+   or the builder will not see the work item, contract, or role files.
 6b. Integrate: state the base revision, merge each builder's branch, run
    the combined test command once, and only then call the item verified.
    Builders' worktrees share the Docker test database port, so run area
