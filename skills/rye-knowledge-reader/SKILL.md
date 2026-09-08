@@ -56,6 +56,14 @@ can reset before the read. Use `ROLLBACK`, not `COMMIT`, when wrapping reads.
 1. **Orient**
    - `SELECT rye.rye_catalog();`
    - Identify relevant `node_type`, `assertion_type`, edge types, and counts.
+   - `SELECT rye.rye_categories('<scope_uuid>'::uuid);` (omit the argument for
+     unscoped) when the question is what a type *means* here. It is `STABLE`
+     and writes nothing. Each entry carries `name`, `description`,
+     `properties.observed`, `relationships`, `enabled`, and `usage_count`;
+     `empty` `true` means the scope has no categories, which is an answer, not
+     an error. Report a `description` as the organization's words and `null`
+     as "nobody has said" — do not supply your own. Shape:
+     `contracts/category-vocabulary.md`.
    - If the Rye MCP server is available, prefer read-only tools such as
      `rye.catalog`, `rye.search_nodes`, `rye.node_summary`,
      `rye.source_inventory`, and `rye.pending_context_confirmations`.

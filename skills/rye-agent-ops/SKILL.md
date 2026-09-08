@@ -21,6 +21,46 @@ Without this, RLS will block access. Use `set_config()` (not `SET` syntax) for p
 
 1. Run `SELECT rye_catalog()` to see what's in the instance — node types, edge types, assertion types, tracked tables, and totals.
 2. Use `agent_node_summary(node_id, max_items)` for compact context on a specific node.
+3. Run the category discovery below before proposing any node.
+
+## Discover Categories Before You Write
+
+Before proposing any node, ask the database what kinds of things it already
+holds. Procedure ships with the skill; vocabulary lives in the graph. The
+reply's shape is `contracts/category-vocabulary.md`.
+
+```bash
+./scripts/rye categories --scope <uuid-or-key> --json
+```
+
+Over SQL or the API this is `rye_categories(p_scope_id)`; omit the argument to
+read unscoped. For each entry in `categories`:
+
+- `name` — the node type. Reuse an existing name over a near-synonym.
+- `description` — what the type means in this organization's words, or `null`
+  when nobody has said. Do not substitute your own reading for `null`.
+- `properties.observed` — `[{key, count, frequency}]` present on non-archived
+  nodes of the type. Shape your proposal to these keys; low `frequency` means
+  optional in practice. `properties.required` is `[]` in v0.3
+  (`required_source` `"none"`); honor it if it is ever non-empty.
+- `relationships.as_source` / `.as_target` — `[{edge_type, other_types,
+  count}]`. Prefer an edge type already used between these types.
+- `enabled` — `on`, `off`, or `unscoped`. Treat `off` as not writable here:
+  `validate_candidate_against_scope()` refuses it and names the policy that
+  blocked it. Off categories are listed, not omitted, so absence never means
+  disabled.
+
+At the top level: `empty` `true` means no categories yet — do not invent a
+type; raise it as an open question for a person, or record a `knowledge_gap`.
+`scope.scope_found` `false` means the scope you named did not resolve, so the
+empty reply says nothing about the graph. `scope.type_policy` `missing` means
+the scope has no current `allowed_node_types` claim, so every category reads
+`off`.
+
+Never create a category. A new node type is a person's decision: propose it and
+say why the existing ones do not fit. "Category" is the business sense, what
+kind of thing this is; it is not `classification`, which is who may see it.
+Ignore reply keys you do not recognize — the shape is additive.
 
 ## Why Rye Uses SQL Helpers
 
