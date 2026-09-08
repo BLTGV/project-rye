@@ -132,6 +132,13 @@ BEGIN
     RAISE EXCEPTION 'record_pattern function missing';
   END IF;
 
+  IF to_regprocedure('rye.rye_categories(uuid)') IS NULL THEN
+    RAISE EXCEPTION 'rye_categories function missing';
+  END IF;
+  IF to_regprocedure('rye.describe_category(text,text,uuid,text,text,jsonb[],numeric)') IS NULL THEN
+    RAISE EXCEPTION 'describe_category function missing';
+  END IF;
+
   IF to_regprocedure('rye.mark_assertion_superseded(uuid,uuid)') IS NULL THEN
     RAISE EXCEPTION 'mark_assertion_superseded function missing';
   END IF;

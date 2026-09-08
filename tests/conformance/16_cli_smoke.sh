@@ -41,6 +41,18 @@ require_contains "$capabilities_json" 'read-rye-knowledge' "catalog capabilities
 context_json="$("${rye_cmd[@]}" context --json)"
 require_contains "$context_json" '"scope_selection"' "context --json"
 
+categories_json="$("${rye_cmd[@]}" categories --json)"
+require_contains "$categories_json" '"contract_version": 1' "categories --json"
+require_contains "$categories_json" '"categories"' "categories --json"
+require_contains "$categories_json" '"category_count"' "categories --json"
+require_contains "$categories_json" '"empty"' "categories --json"
+
+categories_unknown_json="$("${rye_cmd[@]}" categories --scope ffffffff-ffff-4fff-8fff-ffffffffffff --json)"
+require_contains "$categories_unknown_json" '"scope_found": false' "categories --scope --json"
+require_contains "$categories_unknown_json" '"empty": true' "categories --scope --json"
+
+"${rye_cmd[@]}" categories >/dev/null
+
 inventory_json="$("${rye_cmd[@]}" sources inventory --json)"
 require_contains "$inventory_json" '[' "sources inventory --json"
 

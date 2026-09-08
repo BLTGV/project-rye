@@ -81,6 +81,47 @@ These commands call the portable catalog functions:
 - `rye_skill_catalog()`
 - `rye_capability_catalog()`
 
+## Categories
+
+Ask what kinds of things this database holds before proposing a write:
+
+```bash
+./scripts/rye categories
+./scripts/rye categories --json
+```
+
+Ask within one scope, by UUID or scope key:
+
+```bash
+./scripts/rye categories --scope first-scope --json
+```
+
+This calls `rye_categories(scope_id)`. For every category it returns the node
+type name, what it means in this organization's words, the properties observed
+on its rows and which are required, the relationships it takes part in, whether
+it is on or off in the scope, its usage count, and the plugins that declare it.
+Categories that are off are listed as off, not omitted. Scope selection works as
+it does for `context`: one active scope is selected automatically, otherwise pass
+`--scope`. An unknown scope returns an empty list rather than an error, and
+`--json` emits the function's output verbatim
+(see `contracts/category-vocabulary.md`).
+
+Descriptions live in the graph, not in a file. Record one with
+`describe_category()`:
+
+```sql
+SELECT rye.describe_category(
+    p_node_type   := 'opportunity',
+    p_description := 'A deal we are actively working, from qualified to closed.',
+    p_scope_id    := '00000000-0000-0000-0000-000000000000',
+    p_actor       := 'person:casey'
+);
+```
+
+Pass `p_scope_id := NULL` for the organization-wide fallback. If the scope
+reviews new knowledge, the words wait as a candidate until someone accepts them,
+and `categories` keeps showing the previous description until then.
+
 ## Onboarding Scope
 
 Create and activate the first onboarding scope:

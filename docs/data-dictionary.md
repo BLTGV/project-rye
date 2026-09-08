@@ -383,6 +383,61 @@ scope status, and compiled scope policy when a scope is selected.
 scope is active, Rye selects it automatically. If multiple scopes are active,
 the caller should pass a scope ID.
 
+#### `rye_categories()`
+
+```
+rye_categories(p_scope_id uuid DEFAULT NULL) → jsonb
+```
+
+Returns every category — a node type — in the selected scope, and for each: its
+name, what it means in this organization's words with the assertion that says
+so, the properties observed on its rows with counts and frequencies, the
+relationships it takes part in as source and as target, whether it is on or off
+in the scope, its usage count, and the plugins that declare it. Categories that
+are off are listed as `off`, never omitted. Top level carries `contract_version`,
+`categories`, `category_count`, `empty`, and a `scope` block whose `mode`
+resolves exactly as `rye_agent_context()` resolves it.
+
+Membership with a scope is types in use, types the scope's enabled plugins
+declare, and the names in its `allowed_node_types`; unscoped it is types in use
+plus every catalogued plugin's. A declared type with no rows counts 0. An unknown
+or archived `p_scope_id` answers empty rather than raising, as does a database
+with nothing in it. Everything is computed on read, so an accepted description is
+visible to the next call.
+
+**Why it exists:** An agent that knows only the skills must be able to ask the
+database what kinds of things it holds before trying to add one. Procedure lives
+in git; vocabulary lives in the graph. The jsonb shape is governed by
+`contracts/category-vocabulary.md`.
+
+#### `describe_category()`
+
+```
+describe_category(p_node_type, p_description, p_scope_id DEFAULT NULL, p_actor DEFAULT NULL,
+                  p_basis DEFAULT 'reported', p_evidence DEFAULT NULL, p_confidence DEFAULT 1.0) → uuid
+```
+
+Records what a node type means here. Creates the category node on first use,
+records a `category_described` event, and records a `category_description`
+assertion on that node keyed by the scope's uuid as text, or `default` for the
+organization-wide fallback. Returns the assertion id.
+
+**Why it exists:** A person must be able to change a category's meaning and have
+the next `rye_categories()` call show the new words. Going through
+`record_assertion()` means the scope's review policy applies: under a reviewing
+policy the words land as a candidate and stay invisible until `accept_assertion()`
+promotes them. Corrections are new assertions; nothing is updated in place.
+
+#### Category node convention
+
+A category is represented by a node with `node_type = 'category'`,
+`external_source = 'rye_category'`, and `external_id` equal to the node type it
+stands for — one node per type. `properties` carries
+`{"category_kind": "node_type", "node_type": <name>}`. The node exists only to
+give descriptions a subject; it is never a member of the category list it
+describes except as an ordinary node type in its own right. `describe_category()`
+creates it; `rye_categories()` only reads it.
+
 #### `supersede_assertion()`
 
 ```

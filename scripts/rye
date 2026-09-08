@@ -22,6 +22,7 @@ Usage:
   ./scripts/rye status [--json]
   ./scripts/rye doctor [--json]
   ./scripts/rye catalog plugins|skills|capabilities [--json]
+  ./scripts/rye categories [--scope <uuid-or-key>] [--json]
   ./scripts/rye context [--scope <uuid-or-key>] [--json]
   ./scripts/rye sources inventory|pending-context [--json]
   ./scripts/rye agents create|grant|issue-token|revoke-token|list|audit [--json]
@@ -758,6 +759,64 @@ UNION ALL
 SELECT 'capabilities' AS check, (rye_capability_catalog()->'totals'->>'capabilities') AS status;"
 }
 
+cmd_categories() {
+  local scope=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --scope)
+        scope="${2:-}"
+        shift 2
+        ;;
+      -h|--help)
+        cat <<'EOF'
+Usage:
+  ./scripts/rye categories [--scope <uuid-or-key>] [--json]
+EOF
+        return
+        ;;
+      *)
+        die "Unknown categories option: $1"
+        ;;
+    esac
+  done
+
+  local scope_expr
+  scope_expr="$(scope_sql_expr "$scope")"
+
+  if [[ "$OUTPUT_JSON" -eq 1 ]]; then
+    psql_json "SELECT rye.rye_categories(${scope_expr});"
+    return
+  fi
+
+  psql_exec "SET search_path = rye, public, pg_catalog;
+WITH answer AS (
+  SELECT rye_categories(${scope_expr}) AS j
+),
+listed AS (
+  SELECT jsonb_array_elements(j->'categories') AS c FROM answer
+)
+SELECT
+  c->>'name' AS category,
+  c->>'enabled' AS enabled,
+  (c->>'usage_count')::bigint AS nodes,
+  left(coalesce(c->>'description', ''), 60) AS meaning_here
+FROM listed
+ORDER BY nodes DESC, category;
+
+WITH answer AS (
+  SELECT rye_categories(${scope_expr}) AS j
+)
+SELECT
+  j->'scope'->>'mode' AS selection_mode,
+  j->'scope'->>'scope_key' AS scope_key,
+  j->'scope'->>'scope_found' AS scope_found,
+  j->'scope'->>'type_policy' AS type_policy,
+  j->>'category_count' AS category_count,
+  j->>'empty' AS empty
+FROM answer;"
+}
+
 cmd_context() {
   local scope=""
 
@@ -1235,6 +1294,9 @@ main() {
       ;;
     catalog)
       cmd_catalog "$@"
+      ;;
+    categories)
+      cmd_categories "$@"
       ;;
     context)
       cmd_context "$@"
