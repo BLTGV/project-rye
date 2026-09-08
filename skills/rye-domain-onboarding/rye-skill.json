@@ -17,22 +17,23 @@
   },
   "requires": {
     "plugins": [],
-    "db_functions": ["rye_catalog", "link_record", "track_table", "supersede_assertion"],
+    "db_functions": ["rye_catalog", "rye_categories", "link_record", "track_table", "supersede_assertion"],
     "db_views": ["current_valid_assertions"],
-    "cli_commands": ["./scripts/rye catalog plugins", "./scripts/conformance.sh"]
+    "cli_commands": ["./scripts/rye catalog plugins", "./scripts/rye categories --json", "./scripts/conformance.sh"]
   },
   "capabilities": [
     {
       "id": "define-domain-conventions",
       "label": "Define Domain Conventions",
       "kind": "skill",
-      "description": "Guide additions of reusable node, edge, assertion, event, artifact, profile, and test conventions.",
+      "description": "Guide additions of reusable node, edge, assertion, event, artifact, profile, and test conventions, starting from the categories already in the graph.",
       "read_only": false,
       "requires": {
-        "db_functions": ["rye_catalog", "link_record", "track_table"]
+        "db_functions": ["rye_catalog", "rye_categories", "link_record", "track_table"]
       },
       "entrypoints": [
-        { "type": "skill_install", "command": "npx skills add BLTGV/project-rye --skill rye-domain-onboarding" }
+        { "type": "skill_install", "command": "npx skills add BLTGV/project-rye --skill rye-domain-onboarding" },
+        { "type": "db_function", "name": "rye_categories" }
       ]
     }
   ]

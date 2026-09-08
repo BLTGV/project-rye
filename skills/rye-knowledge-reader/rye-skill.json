@@ -17,9 +17,9 @@
   },
   "requires": {
     "plugins": [],
-    "db_functions": ["rye_catalog", "agent_node_summary", "assertions_as_of", "rye_agent_context"],
+    "db_functions": ["rye_catalog", "rye_categories", "agent_node_summary", "assertions_as_of", "rye_agent_context"],
     "db_views": ["current_valid_assertions"],
-    "cli_commands": ["./scripts/rye status --json", "./scripts/rye context --json"]
+    "cli_commands": ["./scripts/rye status --json", "./scripts/rye context --json", "./scripts/rye categories --json"]
   },
   "capabilities": [
     {
@@ -29,12 +29,13 @@
       "description": "Use read-only query patterns to separate accepted knowledge, pending review, provenance, and history.",
       "read_only": true,
       "requires": {
-        "db_functions": ["rye_catalog", "agent_node_summary", "assertions_as_of", "rye_agent_context"],
+        "db_functions": ["rye_catalog", "rye_categories", "agent_node_summary", "assertions_as_of", "rye_agent_context"],
         "db_views": ["current_valid_assertions"]
       },
       "entrypoints": [
         { "type": "skill_install", "command": "npx skills add BLTGV/project-rye --skill rye-knowledge-reader" },
-        { "type": "db_function", "name": "rye_agent_context" }
+        { "type": "db_function", "name": "rye_agent_context" },
+        { "type": "db_function", "name": "rye_categories" }
       ]
     }
   ]

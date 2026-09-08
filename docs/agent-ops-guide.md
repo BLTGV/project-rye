@@ -19,6 +19,48 @@ bounded context. Read current knowledge from `current_valid_assertions` or
 `current_assertions_weighted`, never from a bare `superseded_at IS NULL`
 filter.
 
+## Discover categories before a write
+
+`rye_catalog()` reports type names and counts. `rye_categories()` reports what
+a type means here. Call it before proposing any node: procedure ships in the
+skill, vocabulary lives in the graph. `contracts/category-vocabulary.md` is the
+normative shape; it is `STABLE`, computed on read, and never cached, so a
+description accepted a moment ago is visible on the next call.
+
+```sql
+SELECT rye_categories('<scope_uuid>'::uuid);  -- omit the argument for unscoped
+```
+
+```bash
+./scripts/rye categories --scope <uuid-or-key> --json
+```
+
+Per category: `name` (the node type) and `kind` (`node_type`), plus
+
+| Key | Read it as |
+|---|---|
+| `description`, `description_source` | The organization's words for the type, or `null` when nobody has said. Sourced from a `category_description` assertion on a `category` node, keyed by scope with a `default` fallback. |
+| `properties.observed` | `[{key, count, frequency}]` over non-archived nodes of the type. The keys a proposal should carry; `frequency` is how often each appears. |
+| `properties.required`, `required_source` | `[]` and `"none"` in v0.3. Tolerate a non-empty array. |
+| `relationships.as_source`, `.as_target` | `[{edge_type, other_types, count}]`. Prefer an edge type already used between these types. |
+| `enabled` | `on`, `off`, or `unscoped`. `off` is not writable here — `validate_candidate_against_scope()` refuses it. Off categories are listed, not omitted. |
+| `usage_count`, `declared_by` | Non-archived nodes of the type; the plugin ids that declare it. |
+
+Top level: `empty` is `true` exactly when `categories` is empty — an empty area
+answers, it does not error, and the right response is an open question for a
+person, not an invented type. `scope.scope_found` `false` means the scope did
+not resolve; `scope.type_policy` `missing` means the scope has no current
+`allowed_node_types` claim, so every category reads `off`. `contract_version`
+is `1`; the shape is additive, so ignore keys you do not know.
+
+Agents never create a category. Adding a node type is a person's decision.
+Descriptions change through the ordinary lifecycle — `record_assertion()`,
+`accept_assertion()`, `supersede_assertion()` on the `category` node — so a
+candidate description stays invisible until someone accepts it.
+
+"Category" is the business sense: what kind of thing this is. It is not
+`classification`, which is who may see it.
+
 ## Events
 
 Always create events through `record_event()`. It creates participants
