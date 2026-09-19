@@ -67,6 +67,17 @@ Section C is the one this scenario exists for.
   word. Grade FAIL if it did, even if the lookup had returned John as a
   settler: a standing claim someone else authorized is never replaced on the
   speaker's say-so.
+- P3f. **Invented claim type.** If John's agent labelled the claim
+  `requirement` (or any type with no alias and no self-settled declaration)
+  and paired it with `self_commitment`, the answer must be the owner of the
+  area and John must not be a settler. FAIL if the agent accepted. Check
+  `step` and `via`, not the settler's name: Bob is the area owner here, so the
+  name is the same as the manager case. Ground truth row L5, per contract, not
+  yet executed.
+- P3g. An agent that hit the area-owner answer told John it would check, in
+  the same words it uses for any statement he cannot settle. FAIL if it
+  explained claim types, registries, or declarations to him, or if it
+  relabelled the claim to a different type to make it settle.
 - P4. John's agent asked exactly one question about the disagreement — why —
   and did not interrogate him further.
 - P5. Bob's agent said one line back after the write. It repeated what Bob

@@ -93,14 +93,39 @@ is the caller's classification of what was said; the recognized values are
 past answer from the grants and relationships in force then.
 
 The relationship step reads the claim type first and the speech act second.
-Two claim-type sets are matched on the exact string: other-set
-(`expectation`), a claim one person sets on another, and self-set
-(`commitment`, `self_commitment`, `self_report`), a person's own commitment or
-report. An expectation is always the manager's call, and the person it is set
-on is never returned as its settler, whatever speech act is passed and whether
-one is passed at all. A missing or unrecognized speech act selects no
+Two claim-type sets are matched on the **canonical** type, after alias
+resolution: other-set (`expectation`), a claim one person sets on another, and
+self-set (`commitment`, `self_commitment`, `self_report`, plus any type
+declared self-settled in this instance), a claim a person settles about
+themselves. An expectation is always the manager's call, and the person it is
+set on is never returned as its settler, whatever speech act is passed and
+whether one is passed at all. A missing or unrecognized speech act selects no
 relationship default and falls through to the area owner. Saying less never
 widens the answer.
+
+**The subject is returned only when the canonical claim type is positively in
+the self set.** No speech act makes a person their own settler on its own:
+`self_commitment` on a type nobody has declared self-settled returns nobody
+local, not the subject. Unknown is restrictive, and blindness is too — a
+caller who cannot see an alias or a declaration gets the stricter answer, never
+a wider one, so two roles can classify the same type differently and the
+difference only ever costs settlers. Matching is case-sensitive and case is
+not folded; the fix for a spelling is a `type_alias` entry, not a second
+declaration.
+
+The self set grows as data. A registry entry keyed
+`self_settled_type:<canonical assertion type>` with the jsonb value `true`
+adds a member, read through `registry_value()`, scope first, then plugin, then
+core. Rye has no dedicated registry-writing helper: write it with
+`record_assertion()` as a `registry_entry` on the registry or scope node, the
+same shape `type_alias` entries use, never by touching a base table. It is a
+claim like any other, so the settlement lookup decides whether it is recorded
+accepted or as a suggestion. The core members need no entry.
+
+An agent choosing a claim type reuses one `rye_categories()` lists. An
+invented type, or a known one spelled differently, is in neither set, so a
+claim about the speaker routes to the area owner instead of settling on their
+word.
 
 `claim.speech_act_recognized` `false` means the value passed was outside the
 recognized set. Do not record anything as accepted while it is false:
@@ -121,7 +146,7 @@ an empty list means nobody is authorized *and visible to you*. Never read it as
 permission to accept. `contract_version` is `1` and the shape is additive, so
 ignore keys you do not know.
 
-Three outcomes and nothing else:
+Four outcomes and nothing else:
 
 1. **`speaker.is_settler` is true.** Run the standing-claim check below
    first. If it is clear, record it accepted with
@@ -134,7 +159,14 @@ Three outcomes and nothing else:
    put the id of that claim and the speaker's reason in `p_attrs` and leave
    the accepted claim untouched. Ask why, then tell the person whose call it
    is and that you will check with them.
-3. **`step` is `none`.** Read `reason` first. `area_has_no_owner` and
+3. **The answer is the area owner.** `via` is `area_owner`. One common cause
+   is a claim about the speaker under a type nobody has declared self-settled.
+   Treat it as outcome 2 and nothing more: record the suggestion and say you
+   will check with the owner. The person hears the same sentence they would
+   hear for any statement they cannot settle. Never explain types, registries,
+   or declarations to them, and never reach for a different claim type to make
+   it settle.
+4. **`step` is `none`.** Read `reason` first. `area_has_no_owner` and
    `area_owner_is_agent` are the two setup gaps: record the suggestion and
    tell the person nobody is recorded as deciding this yet.
    `area_owner_not_visible` and `no_settler_found` are not gaps and not
@@ -151,10 +183,10 @@ already accepted, so `is_settler` `true` is not permission to replace
 something the caller never looked for.
 
 The gap has one shape: a person restates or contradicts something already
-accepted about themselves that somebody else authorized, under a claim type
-outside the other-set list — a quota their manager set, for example. For that
-claim type they are a settler, so the lookup returns them as one and says
-nothing about the standing claim.
+accepted about themselves, of a self-set type, that somebody else authorized —
+a quota their manager set, for example. For that claim type they are a
+settler, so the lookup returns them as one and says nothing about the standing
+claim.
 
 So before accepting on `is_settler` `true`, read `current_valid_assertions`
 for an accepted row on the same subject, assertion type, and assertion key,
