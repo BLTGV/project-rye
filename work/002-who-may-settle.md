@@ -365,4 +365,24 @@ Learned: phrase the guard as "the authorizer is the speaker" and let
 everything else fall to a suggestion; "someone other than the speaker"
 fails open on every row written before the convention.
 
+### Builder schema, 2026-09-19, five-rule relationship step (commit dc91cc1)
+Result: done. 0021 rewritten to the five ordered rules with literal
+c_other_set and c_self_set arrays; union deleted; COMMENT rewritten; three
+raw VT and NBSP bytes in E'' literals converted to explicit escapes. Test
+29 extended; CLI help, docs/cli.md, docs/data-dictionary.md updated.
+Tested: `./scripts/docker-test.sh test --reset --profiles crm,pm` passed
+end to end; database torn down. Test 29 fails on 71908a1 at the first new
+case with exactly the reported answer and passes after. Five calls executed
+through `./scripts/rye --json settlers` on a live install (John reports_to
+Bob, area owned by Dana): John/expectation/no act: [Bob], is_settler false;
+John/expectation/self_commitment: [Bob], false, recognized true;
+John/commitment/no act: [John], true; Bob/expectation/no act: [Bob], true;
+John/expectation/banana: [Bob], false, recognized false. All match the
+Architect's expected answers.
+
+### Lead, 2026-09-19, integration of the corrected lookup
+Base revision 01758a1. Merged worktree-agent-ae27942de1b4935c1 (dc91cc1)
+and worktree-agent-a7f18ff71cb202bfc (35e5b47, 320d361) with no conflicts.
+Final tree 716692f. Combined suite and Verifier pass in progress.
+
 ## Close
