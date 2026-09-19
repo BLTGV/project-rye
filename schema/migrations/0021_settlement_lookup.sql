@@ -156,6 +156,62 @@ $$ LANGUAGE plpgsql STABLE;
 COMMENT ON FUNCTION rye_settler_is_agent(text, uuid) IS
     'True when a candidate settler is an agent. Fails closed on the prefix: a ref whose first non-whitespace characters are ''agent'' followed by a colon is an agent whether or not an agent_identities row backs it, in any case and with any whitespace at the front or around the colon — space, tab, CR, LF, form feed, vertical tab, and the non-breaking space U+00A0, which PostgreSQL''s trim() does not strip. Otherwise the ref is matched on its slug, because create_agent_identity() stores rye_slugify_key(agent_key) — so ''my-agent'', ''My Agent'', and ''my_agent'' are one key, while ''person:my-agent'' slugifies to ''person_my_agent'' and is not an agent. An inactive agent identity is still an agent; the active flag is not consulted. A node is an agent when its node_type is ''agent'' or its attrs->>''actor_kind'' is ''agent''. Unicode lookalike letters are out of scope: such a ref matches no identity and no node and comes back unbound. rye_settlers() drops agents before choosing a step and counts them in excluded_agents.';
 
+-- Is this canonical claim type one a person settles about themselves?
+--
+-- The core members need no configuration, so a fresh instance works with none.
+-- Beyond them the set is data: a registry entry keyed
+-- `self_settled_type:<canonical assertion type>` whose jsonb value is exactly
+-- true. Any other value, including false and null, is not a member. Write one
+-- with record_assertion('registry_entry', '{"value": true}', <core registry
+-- node>, p_assertion_key := 'self_settled_type:<type>').
+--
+-- Read with registry_value() and the DEFAULT_SCOPE, the same way type_alias
+-- entries are read, so a scope's entry wins over the organization's.
+--
+-- Blindness is restrictive by construction. registry_value() reads
+-- current_valid_assertions under the caller's RLS, so an entry this caller
+-- cannot see, or one still waiting as a candidate, simply is not a member and
+-- the subject is not returned. That is the point: an authority answer must
+-- never widen because a configuration row happened to be visible. There is
+-- deliberately no SECURITY DEFINER resolver here.
+CREATE OR REPLACE FUNCTION rye_settler_self_settled(p_canonical_type text)
+RETURNS boolean
+SET search_path = rye, pg_catalog
+AS $$
+DECLARE
+    v_type    text := nullif(trim(p_canonical_type), '');
+    v_default jsonb;
+    v_scope   uuid;
+    v_value   jsonb;
+BEGIN
+    IF v_type IS NULL THEN
+        RETURN false;
+    END IF;
+
+    IF v_type IN ('commitment', 'self_commitment', 'self_report') THEN
+        RETURN true;
+    END IF;
+
+    v_default := registry_value('DEFAULT_SCOPE', NULL);
+    IF v_default IS NOT NULL AND jsonb_typeof(v_default) <> 'null' THEN
+        BEGIN
+            v_scope := (v_default #>> '{}')::uuid;
+        EXCEPTION WHEN invalid_text_representation THEN
+            RAISE EXCEPTION 'DEFAULT_SCOPE registry value must be a scope UUID';
+        END;
+    END IF;
+
+    v_value := registry_value('self_settled_type:' || v_type, v_scope);
+
+    RETURN v_value IS NOT NULL
+       AND jsonb_typeof(v_value) = 'boolean'
+       AND v_value = 'true'::jsonb;
+END;
+$$ LANGUAGE plpgsql STABLE;
+
+COMMENT ON FUNCTION rye_settler_self_settled(text) IS
+    'True when a canonical assertion type is one a person settles about themselves. The core members commitment, self_commitment and self_report need no configuration. Beyond them the set is data: a registry entry keyed self_settled_type:<canonical type> whose jsonb value is exactly true, read with registry_value() under the DEFAULT_SCOPE, the same way type_alias entries are read. Any other value, including false and null, is not a member. Reads run under the caller''s RLS, so an entry a caller cannot see is not a member for that caller: blindness is restrictive, never permissive, and there is no SECURITY DEFINER resolver.';
+
 -- node_type to the settler `kind` vocabulary in contracts/sql-surface.md.
 CREATE OR REPLACE FUNCTION rye_settler_node_kind(p_node_type text)
 RETURNS text
@@ -191,12 +247,11 @@ CREATE OR REPLACE FUNCTION rye_settlers(
 SET search_path = rye, pg_catalog
 AS $$
 DECLARE
-    -- Which claim types are claims one person sets on another, and which are
-    -- a person's own commitment or report about themselves. Literal, exact
-    -- string match, additive. Stated in contracts/sql-surface.md and here and
-    -- nowhere else: there is no table to configure and no migration to run.
+    -- Claim types one person sets on another. Exact string match on the
+    -- canonical type, additive, stated in contracts/sql-surface.md and here.
+    -- The other-set is closed and literal. The self set is core members plus
+    -- registry entries, so it lives in rye_settler_self_settled().
     c_other_set constant text[] := ARRAY['expectation'];
-    c_self_set  constant text[] := ARRAY['commitment', 'self_commitment', 'self_report'];
 
     v_as_of        timestamptz := coalesce(p_as_of, now());
     v_claim_type   text := nullif(trim(p_claim_type), '');
@@ -206,6 +261,7 @@ DECLARE
     v_domain_key_in text := nullif(trim(p_domain_key), '');
 
     v_recognized   boolean := false;
+    v_self_settled boolean := false;
     v_want_self    boolean := false;
     v_want_manager boolean := false;
     v_want_owner   boolean := false;
@@ -449,6 +505,15 @@ BEGIN
     --   3. self-set claim type           -> self only
     --   4. anything else                 -> fall through to the area owner
     --
+    -- The governing rule the table is a consequence of: the subject is
+    -- returned only when the claim type is positively known to be one a person
+    -- settles about themselves. Membership in the self set is the only thing
+    -- that makes the subject its own settler; no speech act does it alone.
+    -- self_commitment on a claim type nobody has declared self-settled returns
+    -- nobody, not the subject. Unknown is restrictive, and every way of making
+    -- a claim type look unrecognised -- a typo, a different case, an alias this
+    -- caller cannot see -- therefore costs settlers rather than granting them.
+    --
     -- There is no union. A null or unrecognized speech act never widens who
     -- may settle: saying less buys a smaller answer, never a larger one.
     -- ----------------------------------------------------------------------
@@ -457,6 +522,8 @@ BEGIN
         'statement_about_other', 'statement_about_thing',
         'agreement', 'decision', 'outside_report', 'agent_inference'
     ), false);
+
+    v_self_settled := rye_settler_self_settled(v_canonical);
 
     IF coalesce(v_canonical, '') IN ('reports_to', 'owns') THEN
         -- Rule 0. Neither end of a relationship settles that it exists.
@@ -470,12 +537,13 @@ BEGIN
         v_want_manager := true;
 
     ELSIF v_recognized THEN
-        -- Rule 2.
+        -- Rule 2. A self speech act reaches the subject only on a claim type
+        -- known to be self-settled; otherwise it selects nobody.
         IF v_speech_act IN ('self_commitment', 'self_report') THEN
-            v_want_self := true;
+            v_want_self := v_self_settled;
         ELSIF v_speech_act = 'statement_about_other' THEN
-            v_want_self := true;
             v_want_manager := true;
+            v_want_self := v_self_settled;
         ELSIF v_speech_act = 'statement_about_thing' THEN
             v_want_owner := true;
         ELSE
@@ -483,9 +551,9 @@ BEGIN
             NULL;
         END IF;
 
-    ELSIF v_canonical = ANY (c_self_set) THEN
+    ELSIF v_self_settled THEN
         -- Rule 3. A person's own commitment or report about themselves still
-        -- settles with no setup and no speech act.
+        -- settles with no speech act, no registry row, and no area at all.
         v_want_self := true;
 
     ELSE
@@ -704,4 +772,4 @@ END;
 $$ LANGUAGE plpgsql STABLE;
 
 COMMENT ON FUNCTION rye_settlers(uuid, text, uuid, text, text, text, timestamptz, text) IS
-    'Who may settle this claim, and which of three steps said so. One lookup: a recorded grant in domain_authorities for this claim type, then the relationship between speaker and subject (self, manager via reports_to, owner via owns), then knowledge_domains.owner_node_id for the area. Contract: contracts/sql-surface.md, section "Settlement lookup" (contract_version 1). SECURITY INVOKER and read-only: it writes nothing, refuses nothing, and raises nothing for a missing answer. p_claim_type is the assertion type, resolved through canonical_type(''assertion_type'', ...) first so the organization''s type aliases classify a claim the same way the rest of the schema stores it; claim.claim_type echoes what was asked and claim.canonical_claim_type reports what it resolved to. Grants match on the canonical type on both sides, so a grant naming an alias covers a call naming the canonical type and the other way round. Matching is case-sensitive after resolution, and a null or empty claim type is not resolved at all. The canonical claim type is the first selector: the relationship step tries five ordered rules and the first that applies wins. 0, a relationship edge type (reports_to, owns) falls through. 1, an other-set claim type (expectation) or a speech act of ''expectation'' gives the manager only and never self, so a missing or wrong speech act cannot make a person the settler of an expectation set on them. 2, a recognized p_speech_act gives its documented default. 3, a self-set claim type (commitment, self_commitment, self_report) gives self only. 4, anything else falls through to the area owner. There is no union: a null or unrecognized speech act never widens who may settle. Both claim-type sets are literal strings here and in the contract, matched exactly and growing additively; no table configures them. The lookup reads no assertion, so is_settler true is not permission to replace an accepted claim the caller did not check for. p_as_of filters effective windows only. An agent identity is never returned: any ref beginning with ''agent:'' is excluded whether or not an identity backs it, other refs are matched on the slug create_agent_identity() stores, an inactive identity is still an agent, and a node that is an agent by node_type or attrs->>''actor_kind'' is excluded wherever it stands. Dropped candidates are counted in excluded_agents. step ''none'' with settlers [] and a reason is an answer, not an error, and an empty list never means nobody is authorized, only nobody authorized and visible to this caller.';
+    'Who may settle this claim, and which of three steps said so. One lookup: a recorded grant in domain_authorities for this claim type, then the relationship between speaker and subject (self, manager via reports_to, owner via owns), then knowledge_domains.owner_node_id for the area. Contract: contracts/sql-surface.md, section "Settlement lookup" (contract_version 1). SECURITY INVOKER and read-only: it writes nothing, refuses nothing, and raises nothing for a missing answer. p_claim_type is the assertion type, resolved through canonical_type(''assertion_type'', ...) first so the organization''s type aliases classify a claim the same way the rest of the schema stores it; claim.claim_type echoes what was asked and claim.canonical_claim_type reports what it resolved to. Grants match on the canonical type on both sides, so a grant naming an alias covers a call naming the canonical type and the other way round. Matching is case-sensitive after resolution, and a null or empty claim type is not resolved at all. The canonical claim type is the first selector: the relationship step tries five ordered rules and the first that applies wins. 0, a relationship edge type (reports_to, owns) falls through. 1, an other-set claim type (expectation) or a speech act of ''expectation'' gives the manager only and never self, so a missing or wrong speech act cannot make a person the settler of an expectation set on them. 2, a recognized p_speech_act gives its documented default, except that self_commitment and self_report reach the subject only when the canonical claim type is self-set, and statement_about_other returns the subject''s manager always and the subject only when it is. 3, a self-set claim type gives self only. 4, anything else falls through to the area owner. There is no union: a null or unrecognized speech act never widens who may settle. The subject is returned only when the claim type is positively known to be one a person settles about themselves; no speech act does it alone, and unknown is restrictive. The self set is commitment, self_commitment and self_report plus any canonical type with a registry entry self_settled_type:<type> whose value is true, read under the caller''s RLS, so a caller who cannot see the entry or an alias gets the more restrictive answer and never the subject. The other-set is literal here and in the contract; the self set is those literals plus registry entries. The lookup reads no assertion, so is_settler true is not permission to replace an accepted claim the caller did not check for. p_as_of filters effective windows only. An agent identity is never returned: any ref beginning with ''agent:'' is excluded whether or not an identity backs it, other refs are matched on the slug create_agent_identity() stores, an inactive identity is still an agent, and a node that is an agent by node_type or attrs->>''actor_kind'' is excluded wherever it stands. Dropped candidates are counted in excluded_agents. step ''none'' with settlers [] and a reason is an answer, not an error, and an empty list never means nobody is authorized, only nobody authorized and visible to this caller.';

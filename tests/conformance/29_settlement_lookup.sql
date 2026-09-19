@@ -16,6 +16,7 @@ DECLARE
     v_agent_node  uuid;
     v_case        text;
     v_core        uuid;
+    v_marcus      uuid;
     v_delegate    uuid;
     v_delegate_edge uuid;
     v_bot_two     uuid;
@@ -72,11 +73,14 @@ BEGIN
     );
 
     -- ------------------------------------------------------------------
-    -- A person settles claims about themselves, with no setup at all.
+    -- A person settles claims about themselves, with no setup at all --
+    -- but only on a claim type known to be one a person settles about
+    -- themselves. `commitment` is a core member, so this needs no registry
+    -- row and no area.
     -- ------------------------------------------------------------------
     v_answer := rye_settlers(
         p_subject_id := v_john,
-        p_claim_type := 'availability',
+        p_claim_type := 'commitment',
         p_speaker_id := v_john,
         p_domain_key := 'conformance-settling',
         p_speech_act := 'self_commitment'
@@ -101,7 +105,32 @@ BEGIN
         RAISE EXCEPTION 'Expected John to settle a claim about himself, got %', v_answer;
     END IF;
 
-    IF v_answer->'claim'->>'assertion_type' <> 'availability'
+    -- The same speech act on a claim type nobody has declared self-settled
+    -- returns nobody local, not the subject. Unknown is restrictive.
+    v_answer := rye_settlers(
+        p_subject_id := v_john,
+        p_claim_type := 'availability',
+        p_speaker_id := v_john,
+        p_domain_key := 'conformance-settling',
+        p_speech_act := 'self_commitment'
+    );
+
+    IF v_answer->>'step' <> 'area_owner'
+       OR v_answer->'settlers'->0->>'node_id' <> v_dana::text
+       OR (v_answer->'speaker'->>'is_settler')::boolean IS DISTINCT FROM false
+    THEN
+        RAISE EXCEPTION 'A self speech act on an undeclared claim type must not reach the subject, got %', v_answer;
+    END IF;
+
+    v_answer := rye_settlers(
+        p_subject_id := v_john,
+        p_claim_type := 'commitment',
+        p_speaker_id := v_john,
+        p_domain_key := 'conformance-settling',
+        p_speech_act := 'self_commitment'
+    );
+
+    IF v_answer->'claim'->>'assertion_type' <> 'commitment'
        OR (v_answer->'claim'->>'speech_act_recognized')::boolean IS DISTINCT FROM true
     THEN
         RAISE EXCEPTION 'Expected the claim block to echo the assertion type, got %', v_answer->'claim';
@@ -378,7 +407,7 @@ BEGIN
 
     v_answer := rye_settlers(
         p_subject_id := v_john,
-        p_claim_type := 'anything_at_all',
+        p_claim_type := 'commitment',
         p_speaker_id := v_john,
         p_speech_act := 'self_report'
     );
@@ -387,7 +416,24 @@ BEGIN
        OR v_answer->'settlers'->0->>'node_id' <> v_john::text
        OR (v_answer->'speaker'->>'is_settler')::boolean IS DISTINCT FROM true
     THEN
-        RAISE EXCEPTION 'A self speech act must settle with no area at all, got %', v_answer;
+        RAISE EXCEPTION 'A core self type must settle with no area at all, got %', v_answer;
+    END IF;
+
+    -- A self speech act on a type in neither set reaches nobody, even here.
+    v_answer := rye_settlers(
+        p_subject_id := v_john,
+        p_claim_type := 'anything_at_all',
+        p_speaker_id := v_john,
+        p_speech_act := 'self_report'
+    );
+
+    IF EXISTS (
+        SELECT 1
+        FROM jsonb_array_elements(v_answer->'settlers') AS s(value)
+        WHERE s.value->>'node_id' = v_john::text
+    ) OR (v_answer->'speaker'->>'is_settler')::boolean IS DISTINCT FROM false
+    THEN
+        RAISE EXCEPTION 'A self speech act on an undeclared type must reach nobody, got %', v_answer;
     END IF;
 
     -- ------------------------------------------------------------------
@@ -451,6 +497,152 @@ BEGIN
     END IF;
 
     -- ------------------------------------------------------------------
+    -- statement_about_other: the subject's manager always, and the subject
+    -- as well only when the claim type is one they settle about themselves.
+    -- ------------------------------------------------------------------
+    INSERT INTO nodes (node_type, label, external_source, external_id)
+    VALUES ('person', 'Marcus', 'conformance_org', 'marcus')
+    RETURNING id INTO v_marcus;
+
+    -- Dana reports to Priya, so Dana has a manager to be named alongside her.
+    INSERT INTO edges (edge_type, source_id, target_id, effective_from)
+    VALUES ('reports_to', v_dana, v_priya, v_then);
+
+    v_answer := rye_settlers(
+        p_subject_id := v_dana,
+        p_claim_type := 'commitment',
+        p_speaker_id := v_marcus,
+        p_domain_key := 'conformance-settling',
+        p_speech_act := 'statement_about_other'
+    );
+
+    IF v_answer->>'step' <> 'relationship'
+       OR (v_answer->>'settler_count')::int <> 2
+       OR v_answer->'settlers'->0->>'node_id' <> v_dana::text
+       OR v_answer->'settlers'->0->>'relationship' <> 'self'
+       OR v_answer->'settlers'->1->>'node_id' <> v_priya::text
+       OR v_answer->'settlers'->1->>'relationship' <> 'manager'
+       OR (v_answer->'speaker'->>'is_settler')::boolean IS DISTINCT FROM false
+    THEN
+        RAISE EXCEPTION 'statement_about_other on a self type must name the subject and her manager, got %', v_answer;
+    END IF;
+
+    -- On a claim type in neither set, only the manager. `requirement` has no
+    -- alias registered yet, so it is exactly that.
+    v_answer := rye_settlers(
+        p_subject_id := v_john,
+        p_claim_type := 'requirement',
+        p_speaker_id := v_marcus,
+        p_domain_key := 'conformance-settling',
+        p_speech_act := 'statement_about_other'
+    );
+
+    IF v_answer->>'step' <> 'relationship'
+       OR (v_answer->>'settler_count')::int <> 1
+       OR v_answer->'settlers'->0->>'node_id' <> v_bob::text
+       OR v_answer->'settlers'->0->>'relationship' <> 'manager'
+       OR (v_answer->'speaker'->>'is_settler')::boolean IS DISTINCT FROM false
+    THEN
+        RAISE EXCEPTION 'statement_about_other on an undeclared type must name the manager alone, got %', v_answer;
+    END IF;
+
+    -- ------------------------------------------------------------------
+    -- The self set is extensible as data. A registry entry keyed
+    -- self_settled_type:<canonical type> with the jsonb value true adds a
+    -- member; anything else, including false, does not.
+    -- ------------------------------------------------------------------
+    SELECT id INTO v_core
+    FROM nodes
+    WHERE external_source = 'rye_registry'
+      AND external_id = 'core'
+      AND archived_at IS NULL;
+
+    IF v_core IS NULL THEN
+        RAISE EXCEPTION 'The core registry node is missing; registry entries cannot be written';
+    END IF;
+
+    -- Before any entry exists.
+    v_answer := rye_settlers(
+        p_subject_id := v_john,
+        p_claim_type := 'preference',
+        p_speaker_id := v_john,
+        p_domain_key := 'conformance-settling',
+        p_speech_act := 'self_report'
+    );
+
+    IF v_answer->>'step' <> 'area_owner'
+       OR v_answer->'settlers'->0->>'node_id' <> v_dana::text
+       OR (v_answer->'speaker'->>'is_settler')::boolean IS DISTINCT FROM false
+    THEN
+        RAISE EXCEPTION 'An undeclared preference must fall through to the area owner, got %', v_answer;
+    END IF;
+
+    PERFORM record_assertion(
+        'registry_entry', '{"value": true}', v_core,
+        p_assertion_key := 'self_settled_type:preference',
+        p_basis := 'assumed'
+    );
+
+    -- A value of false is not a member.
+    PERFORM record_assertion(
+        'registry_entry', '{"value": false}', v_core,
+        p_assertion_key := 'self_settled_type:not_really',
+        p_basis := 'assumed'
+    );
+
+    -- Declared confidential, so a role below that classification cannot see
+    -- it and must get the restrictive answer.
+    PERFORM record_assertion(
+        'registry_entry', '{"value": true}', v_core,
+        p_assertion_key := 'self_settled_type:private_note',
+        p_basis := 'assumed',
+        p_classification := 'confidential'
+    );
+
+    v_answer := rye_settlers(
+        p_subject_id := v_john,
+        p_claim_type := 'preference',
+        p_speaker_id := v_john,
+        p_domain_key := 'conformance-settling',
+        p_speech_act := 'self_report'
+    );
+
+    IF v_answer->>'step' <> 'relationship'
+       OR (v_answer->>'settler_count')::int <> 1
+       OR v_answer->'settlers'->0->>'node_id' <> v_john::text
+       OR v_answer->'settlers'->0->>'relationship' <> 'self'
+       OR (v_answer->'speaker'->>'is_settler')::boolean IS DISTINCT FROM true
+    THEN
+        RAISE EXCEPTION 'A declared self-settled type must reach the person, got %', v_answer;
+    END IF;
+
+    -- And with no speech act at all, by rule 3.
+    v_answer := rye_settlers(
+        p_subject_id := v_john,
+        p_claim_type := 'preference',
+        p_speaker_id := v_john,
+        p_domain_key := 'conformance-settling'
+    );
+
+    IF v_answer->>'step' <> 'relationship'
+       OR v_answer->'settlers'->0->>'node_id' <> v_john::text
+    THEN
+        RAISE EXCEPTION 'Rule 3 must honour a declared self-settled type, got %', v_answer;
+    END IF;
+
+    v_answer := rye_settlers(
+        p_subject_id := v_john,
+        p_claim_type := 'not_really',
+        p_speaker_id := v_john,
+        p_domain_key := 'conformance-settling',
+        p_speech_act := 'self_report'
+    );
+
+    IF v_answer->>'step' <> 'area_owner' THEN
+        RAISE EXCEPTION 'A registry value of false must not add a member, got %', v_answer;
+    END IF;
+
+    -- ------------------------------------------------------------------
     -- Type aliases. The lookup classifies a claim the same way the rest of
     -- the schema stores it: an organization that calls an expectation a
     -- `requirement` gets the expectation rules, so the person it is set on
@@ -467,10 +659,13 @@ BEGIN
         RAISE EXCEPTION 'The core registry node is missing; type aliases cannot be registered';
     END IF;
 
+    -- Classified confidential on purpose: a role that cannot read it must
+    -- not thereby gain the subject as a settler.
     PERFORM record_assertion(
         'registry_entry', '{"value":"expectation"}', v_core,
         p_assertion_key := 'type_alias:assertion_type:requirement',
-        p_basis := 'assumed'
+        p_basis := 'assumed',
+        p_classification := 'confidential'
     );
 
     PERFORM record_assertion(
@@ -537,8 +732,11 @@ BEGIN
     END IF;
 
     -- Documented and pinned: matching is case-sensitive after resolution.
-    -- `Expectation` is a different claim type with no alias of its own, so it
-    -- is unclassified and its speech act decides.
+    -- `Expectation` with no alias of its own is a different claim type, in
+    -- neither set, so it takes the restrictive branch. It does not become an
+    -- expectation, and it does not make John the settler of one either. The
+    -- fix is an alias, the same fix the rest of the schema uses for a
+    -- spelling.
     v_answer := rye_settlers(
         p_subject_id := v_john,
         p_claim_type := 'Expectation',
@@ -547,13 +745,126 @@ BEGIN
         p_speech_act := 'self_commitment'
     );
 
+    IF v_answer->>'step' <> 'area_owner'
+       OR v_answer->'settlers'->0->>'node_id' <> v_dana::text
+       OR v_answer->'claim'->>'canonical_claim_type' <> 'Expectation'
+       OR (v_answer->'speaker'->>'is_settler')::boolean IS DISTINCT FROM false
+    THEN
+        RAISE EXCEPTION 'A differently-cased claim type must take the restrictive branch, got %', v_answer;
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM jsonb_array_elements(v_answer->'settlers') AS s(value)
+        WHERE s.value->>'node_id' = v_john::text
+    ) THEN
+        RAISE EXCEPTION 'John must not settle a differently-cased expectation, got %', v_answer;
+    END IF;
+
+    -- ------------------------------------------------------------------
+    -- Blindness is restrictive. The requirement alias and the private_note
+    -- registry entry are both confidential, so a role below that
+    -- classification cannot read them. It must get the more restrictive
+    -- answer, never the subject.
+    --
+    -- This only proves anything when RLS is actually in force. The suite runs
+    -- these files under a non-superuser role (scripts/conformance.sh SET ROLEs
+    -- to RYE_TEST_ROLE when the login is a superuser), and the first check
+    -- below fails loudly if that is not so.
+    -- ------------------------------------------------------------------
+    PERFORM set_config('app.current_role', 'viewer', true);
+
+    IF canonical_type('assertion_type', 'requirement') <> 'requirement' THEN
+        RAISE EXCEPTION
+            'Precondition failed: a confidential alias is visible to the viewer role, so RLS is not in force here (running as a superuser?)';
+    END IF;
+
+    v_answer := rye_settlers(
+        p_subject_id := v_john,
+        p_claim_type := 'requirement',
+        p_speaker_id := v_john,
+        p_domain_key := 'conformance-settling',
+        p_speech_act := 'self_commitment'
+    );
+
+    IF v_answer->>'step' <> 'area_owner'
+       OR v_answer->'settlers'->0->>'node_id' <> v_dana::text
+       OR v_answer->'claim'->>'canonical_claim_type' <> 'requirement'
+       OR (v_answer->'speaker'->>'is_settler')::boolean IS DISTINCT FROM false
+    THEN
+        RAISE EXCEPTION 'A caller blind to the alias must get the area owner, got %', v_answer;
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM jsonb_array_elements(v_answer->'settlers') AS s(value)
+        WHERE s.value->>'node_id' = v_john::text
+    ) THEN
+        RAISE EXCEPTION 'A caller blind to the alias must never gain the subject, got %', v_answer;
+    END IF;
+
+    -- A self-settled entry it cannot read is not a member either.
+    v_answer := rye_settlers(
+        p_subject_id := v_john,
+        p_claim_type := 'private_note',
+        p_speaker_id := v_john,
+        p_domain_key := 'conformance-settling',
+        p_speech_act := 'self_report'
+    );
+
+    IF v_answer->>'step' <> 'area_owner'
+       OR (v_answer->'speaker'->>'is_settler')::boolean IS DISTINCT FROM false
+    THEN
+        RAISE EXCEPTION 'A caller blind to a self_settled_type entry must get the area owner, got %', v_answer;
+    END IF;
+
+    -- A visible entry still works for the same role.
+    v_answer := rye_settlers(
+        p_subject_id := v_john,
+        p_claim_type := 'preference',
+        p_speaker_id := v_john,
+        p_domain_key := 'conformance-settling',
+        p_speech_act := 'self_report'
+    );
+
     IF v_answer->>'step' <> 'relationship'
        OR v_answer->'settlers'->0->>'node_id' <> v_john::text
-       OR v_answer->'settlers'->0->>'relationship' <> 'self'
-       OR v_answer->'claim'->>'canonical_claim_type' <> 'Expectation'
-       OR (v_answer->'speaker'->>'is_settler')::boolean IS DISTINCT FROM true
     THEN
-        RAISE EXCEPTION 'Claim type matching must stay case-sensitive, got %', v_answer;
+        RAISE EXCEPTION 'A visible self_settled_type entry must work for any role, got %', v_answer;
+    END IF;
+
+    PERFORM set_config('app.current_role', 'admin', true);
+
+    -- Admin reads both, and gets the manager for the aliased expectation and
+    -- the person for the private note.
+    v_answer := rye_settlers(
+        p_subject_id := v_john,
+        p_claim_type := 'requirement',
+        p_speaker_id := v_john,
+        p_domain_key := 'conformance-settling',
+        p_speech_act := 'self_commitment'
+    );
+
+    IF v_answer->>'step' <> 'relationship'
+       OR v_answer->'settlers'->0->>'node_id' <> v_bob::text
+       OR v_answer->'claim'->>'canonical_claim_type' <> 'expectation'
+       OR (v_answer->'speaker'->>'is_settler')::boolean IS DISTINCT FROM false
+    THEN
+        RAISE EXCEPTION 'Admin must still see the alias and answer the manager, got %', v_answer;
+    END IF;
+
+    v_answer := rye_settlers(
+        p_subject_id := v_john,
+        p_claim_type := 'private_note',
+        p_speaker_id := v_john,
+        p_domain_key := 'conformance-settling',
+        p_speech_act := 'self_report'
+    );
+
+    IF v_answer->>'step' <> 'relationship'
+       OR v_answer->'settlers'->0->>'node_id' <> v_john::text
+    THEN
+        RAISE EXCEPTION 'Admin must see the private self_settled_type entry, got %', v_answer;
     END IF;
 
     -- A claim type with no alias reports itself as its own canonical form.

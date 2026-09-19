@@ -143,7 +143,14 @@ of the area. `step` names the step that produced the answer, and
 accepted, false means record a suggestion and ask the people listed.
 
 `--claim` is the assertion type, and it is the first selector of the
-relationship step. It is resolved through the organization's type aliases
+relationship step. The person a claim is about is returned only when the claim
+type is known to be one a person settles about themselves — `commitment`,
+`self_commitment`, `self_report`, or a type declared with a
+`self_settled_type` registry entry. `--speech-act self_commitment` on an
+undeclared type returns the area owner, not the person: unknown is restrictive,
+and that includes a type whose alias your role cannot read.
+
+It is resolved through the organization's type aliases
 before anything is matched against it, so if this organization calls an
 expectation a `requirement`, `--claim requirement` gets the expectation rules
 and a grant on either name covers a call using the other. The answer reports

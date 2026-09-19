@@ -463,15 +463,49 @@ order and the first one to produce a settler wins:
    |---|---|---|
    | 0 | `p_claim_type` is `reports_to` or `owns` | none, fall through |
    | 1 | `p_claim_type` is other-set, or `p_speech_act` is `expectation` | manager only; self never |
-   | 2 | `p_speech_act` is recognized | `self_commitment`/`self_report` → self; `statement_about_other` → the subject then the subject's manager; `statement_about_thing` → owner; `agreement`/`decision`/`outside_report`/`agent_inference` → none |
-   | 3 | `p_claim_type` is self-set | self only |
+   | 2 | `p_speech_act` is recognized | `self_commitment`/`self_report` → self **when the canonical type is self-set**, else none; `statement_about_other` → the subject's manager always, and the subject as well when the canonical type is self-set; `statement_about_thing` → owner; `agreement`/`decision`/`outside_report`/`agent_inference` → none |
+   | 3 | the canonical claim type is self-set | self only |
    | 4 | otherwise | none, fall through |
 
-   *Other-set* claim types are claims one person sets on another: `expectation`.
-   *Self-set* claim types are a person's own commitment or report about
-   themselves: `commitment`, `self_commitment`, `self_report`. Both sets are
-   literal strings in the function and in the contract, matched exactly, and
-   grow additively — there is no table to configure.
+   **The subject is returned only when the claim type is positively known to be
+   one a person settles about themselves.** Membership in the self set is the
+   only thing that makes the subject its own settler. No speech act does it on
+   its own: `self_commitment` on a type nobody has declared self-settled
+   returns nobody, not the subject. Unknown is restrictive.
+
+   *Other-set* claim types are claims one person sets on another. The core set
+   is `expectation`, literal in the function and in the contract.
+
+   *Self-set* claim types are ones a person settles about themselves. The core
+   members are `commitment`, `self_commitment`, `self_report` and need no
+   configuration. Beyond them the set is data: an organization declares one
+   with a registry entry keyed `self_settled_type:<canonical assertion type>`
+   whose jsonb value is exactly `true`, written with `record_assertion()` on
+   the core registry node and read with `registry_value()`, the same way
+   `type_alias` entries are written and read:
+
+   ```sql
+   SELECT rye.record_assertion(
+       'registry_entry', '{"value": true}',
+       (SELECT id FROM rye.nodes
+        WHERE external_source = 'rye_registry' AND external_id = 'core'),
+       p_assertion_key := 'self_settled_type:preference',
+       p_basis := 'assumed'
+   );
+   ```
+
+   Any other value, including `false` and null, is not a member. The type in
+   the key is the canonical one — an alias is registered as an alias, not as a
+   second entry. `rye_settler_self_settled()` answers membership.
+
+   **Blindness is always restrictive.** `registry_value()` and
+   `canonical_type()` both read `current_valid_assertions` under the caller's
+   RLS, so a caller who cannot see an alias or a `self_settled_type` entry —
+   because it is classified above their role, or is still a candidate — gets
+   the answer for a claim type it cannot classify, and that answer is never the
+   subject. Two roles can classify the same claim type differently; the
+   difference can only cost a caller settlers, never grant them. There is
+   deliberately no `SECURITY DEFINER` resolver.
 
    Rule 1 is the point of the ordering: an expectation is set on a person by
    someone else, so the person it is set on is never its settler, whatever the
@@ -492,7 +526,10 @@ type on both sides, so a grant naming either name covers a call naming either.
 The answer reports the requested type as `claim.claim_type` (with
 `claim.assertion_type` beside it, unchanged) and the resolved one as
 `claim.canonical_claim_type`. Matching is case-sensitive after resolution, a
-null or empty claim type is not resolved at all, and an alias cycle raises.
+null or empty claim type is not resolved at all, and an alias cycle raises
+rather than falling back to the raw string. `Expectation` with no alias of its
+own is a different type in neither set, so it takes the restrictive branch; the
+fix is to register `type_alias:assertion_type:Expectation`.
 `canonical_type()` and not `canonical_type_in_scope()`: the lookup has no
 onboarding-scope argument — `p_scope_ref` matches a grant's `scope_ref` and is
 not a scope node — so it resolves through the `DEFAULT_SCOPE` registry entry,
@@ -562,6 +599,23 @@ this", from one lookup rather than from its own judgment. `SECURITY INVOKER` and
 read-only: it writes nothing, not even an audit row, and it refuses nothing. The
 jsonb shape is governed by the "Settlement lookup" section of
 `contracts/sql-surface.md`.
+
+#### `rye_settler_self_settled()`
+
+```
+rye_settler_self_settled(p_canonical_type text) → boolean
+```
+
+True when a canonical assertion type is one a person settles about themselves:
+the core members `commitment`, `self_commitment`, `self_report`, or a type with
+a `self_settled_type:<type>` registry entry whose value is `true`. Read with
+`registry_value()` under the `DEFAULT_SCOPE`, so it obeys scope exactly as
+`type_alias` does, and under the caller's RLS, so an entry a caller cannot see
+is not a member for that caller.
+
+**Why it exists:** it is the single gate on returning the subject as its own
+settler. `SECURITY INVOKER` on purpose — a definer-rights resolver would let a
+configuration row a caller cannot read widen that caller's authority answer.
 
 #### `rye_settler_resolve_ref()` and `rye_settler_is_agent()`
 
