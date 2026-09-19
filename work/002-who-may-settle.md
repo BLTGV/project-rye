@@ -271,4 +271,49 @@ the prefix rule and survives as an unbound settler; no agent is returned as
 itself. Lead: sent to the builder to harden and pin with tests; lookalike
 unicode letters declared out of scope.
 
+### Builder schema, 2026-09-19, whitespace hardening (commit ecea31a)
+Result: done. rye_settler_is_agent() btrims space, tab, CR, LF, form feed,
+vertical tab, U+00A0 and tests the prefix with a case-insensitive regex
+that ignores whitespace before the colon. Four new cases in test 29. Five
+malformed refs that returned an agent settler before now return step
+relationship, excluded_agents 1. person:probe-bot stays a person. Test 29
+fails at bot_claim_tab on 54dcde4 and passes on ecea31a.
+
+### Verifier, 2026-09-19, fourth pass on ecea31a: PASS, conditional on the suite
+Criterion 7 verified by execution across every whitespace and case
+spelling. No over-exclusion: agents:team-x, agent-smith, management:ops,
+"Agent Smith", agentic:team all return as ordinary settlers. No
+backtracking: 200k whitespace characters answered in 4 ms. Functions still
+SECURITY INVOKER with own search_path, no dynamic SQL. One low finding for
+the Architect: the contract's "after trimming" under-specifies what the
+code now does.
+
+### Lead, 2026-09-19, combined suite on the final tree 4701e1a: PASSED
+Base 8d8342c plus merge of worktree-agent-ae27942de1b4935c1 (54dcde4,
+ecea31a). `./scripts/test-all.sh`: Docker flow passed (install,
+conformance including 29_settlement_lookup.sql, security, concurrency,
+scenarios, host-run 21, 22, 23), admin build and check:routes passed, site
+build passed. Criterion 8 then verified by execution on a fresh full
+install: with the fixture loaded and an `owns` edge added,
+rye_categories() lists `reports_to` and `owns` under person as_source and
+`owns` under org as_target.
+
+### Lead, 2026-09-19, FOUND BY EXECUTION: a fail-open path. Item stays open.
+On the same full install, `./scripts/rye settlers --claim expectation
+--subject <John> --speaker <John> --domain sales-operations` WITHOUT
+--speech-act returns settlers John (self) and Bob (manager) with
+speaker.is_settler true. With --speech-act expectation it returns Bob only,
+is_settler false. The contract says a null or unrecognized speech act gives
+the union of self, owner, and manager, so the code matches the contract and
+the contract is wrong: an agent that omits one optional flag is told John
+may settle the expectation set on him. That contradicts acceptance
+criterion 3 and is the first failure the model must prevent. Test 29 and
+the replay fixture always pass the speech act, so they never saw it. Routed
+to the Architect to decide the rule (Lead's recommendation: the claim type
+selects the default where it can; a null or unrecognized speech act never
+widens who may settle; zero-setup self statements must survive; the
+objection path for other claim types is named as not covered). Then the
+schema builder implements, the agent-kit builder updates the skill, and the
+Verifier rechecks.
+
 ## Close
