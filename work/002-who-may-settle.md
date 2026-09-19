@@ -160,4 +160,24 @@ Outstanding for Architect: amend the contract for the three extra reason
 values and the unknown-explicit-key short-circuit. Lead: findings sent to
 the agent-kit builder as fix attempt 1.
 
+### Builder agent-kit, 2026-09-19, fix attempt 1 (commit d63b88e)
+Result: done. Changed: scenario setup.sql (area created with
+ensure_knowledge_domain(); nodes and edges stay direct because no general
+helper exists), ground_truth.md (stored key sales_operations, either
+spelling accepted, lookup table marked executed), SKILL.md,
+docs/agent-ops-guide.md, docs/conventions-catalog.md (setup_gap reworded;
+all six reason values covered; domain_not_found and domain_not_resolved are
+the agent's own mistake, never said to the person). Tested by execution on
+the PostgreSQL 16.2 stand-in with 0021 from the schema branch: Bob setting
+the expectation returns step relationship, one settler Bob via reports_to,
+speaker.is_settler true; John objecting returns the same settlers with
+speaker.is_settler false; unchanged with the area key omitted except
+domain.mode. Intake check passes; 19 of 19 manifests valid (ad hoc);
+22_secure_mcp_simulation.sh still blocked by Docker. Learned: see
+docs/areas/agent-kit.md entries dated 2026-09-19; notably rye_settlers()
+has six reason values, not the contract's three. Questions: ground truth
+must be re-run if the schema branch changes before merge (Lead: will re-run
+once after integration); the scenario cannot run end to end until the CLI
+subcommand merges (Lead: agreed).
+
 ## Close
