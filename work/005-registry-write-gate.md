@@ -83,4 +83,27 @@ configuration types. Questions: the wider promotion hole as its own item
 (Lead: yes, flagged separately); settle_gate() as a new read function
 (Lead: accepted).
 
+### Builder schema, 2026-09-19 (commit 9502c63, branch worktree-agent-a857af82028ec3665)
+Result: done. schema/migrations/0023_configuration_settle_gate.sql: `settle`
+operation on assertion_type_access (inline CHECK dropped and re-added; two
+admin-only rows seeded inside a DO block that sets the admin role locally);
+assertion_settle_roles(), may_settle_assertion_type(), settle_gate();
+record_assertion() replaced with the demotion placed before the
+review-policy demotion, so the requested status is what is gated and the
+mark appears under strict and candidates_only too, and before supersession;
+assertion_settle_gate_guard() with trg_assertion_settle_gate.
+tests/conformance/30_configuration_gate.sql covers all 11 obligations; each
+was confirmed to fail on a live install before the migration, including
+the defect itself: under agent:t, rye_settlers(John, expectation,
+self_commitment) flipped from Bob/manager to John/self; after the migration
+it stays Bob/manager for admin, agent, and viewer. Full Docker flow passed
+from an empty volume on port 54339 (another agent held the default).
+Learned: see docs/areas/schema.md entries dated 2026-09-19. Questions: a
+remaining path, erasure: a non-admin can UPDATE an already accepted gated
+row's superseded_at with app.write_path = 'supersede_assertion', ending an
+accepted alias without creating an accepted row; the trigger deliberately
+lets accepted-to-accepted updates through (Lead: routed to the separate
+promotion-and-erasure item; Verifier asked to reproduce it and report the
+lookup's answer afterwards). Criterion 8 is agent-kit's (Lead: dispatched).
+
 ## Close
