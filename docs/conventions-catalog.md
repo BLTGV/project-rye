@@ -199,8 +199,42 @@ then the relationship, then `knowledge_domains.owner_node_id`. The claim type
 is the `assertion_type` verbatim; there is no second vocabulary. Agents are
 never settlers — agent identities are dropped before a step is chosen.
 
-- A settler answer records the claim with `record_assertion(..., p_status :=
-  'accepted')`.
+Callers pass both the claim type and the speech act. The relationship step
+reads the claim type first:
+
+- Other-set claim types are claims one person sets on another. The set is
+  `expectation`. These give the manager only, never the person the claim is
+  about, whatever speech act is passed and whether one is passed at all.
+- Self-set claim types are a person's own commitment or report about
+  themselves. The set is `commitment`, `self_commitment`, `self_report`.
+  These give self.
+- Otherwise a recognized speech act selects the default, and a null or
+  unrecognized one selects none and falls through to the area owner. Saying
+  less never widens the answer.
+- `claim.speech_act_recognized` `false` means the caller passed a value
+  outside the recognized set. Nothing is recorded as accepted while it is
+  false: classify again, pass a recognized act, and look again.
+
+The lookup reads no assertion, so it answers who may settle a claim and not
+who may unsettle one. Before accepting on `is_settler` `true`, check
+`current_valid_assertions` for an accepted row on the same subject, assertion
+type, and assertion key, and read its evidence `attrs.authorizer`. Otherwise a
+person restating a quota their manager set would overwrite it.
+
+The check fails closed. One recorded authorizer lets the write through, the
+speaker's own:
+
+- No accepted row: accept.
+- `authorizer` is the speaker: accept. A person correcting their own earlier
+  words goes straight through with the one-line echo.
+- `authorizer` is somebody else: record a suggestion.
+- No `authorizer` recorded: record a suggestion. Rows written before this
+  convention carry nothing, and a missing field is never permission. Do not
+  guess whose call it is — run the lookup, confirm with a settler other than
+  the speaker or with the area owner, and say so to the person.
+
+- A settler answer with no standing claim from another authorizer records the
+  claim with `record_assertion(..., p_status := 'accepted')`.
 - A non-settler answer records the same claim with `p_status := 'candidate'`
   and the speaker's words as its backing. Nothing is refused and nothing is
   dropped.
@@ -271,6 +305,11 @@ are provenance, not authorization.
 
 Evidence rows are append-only, so the pair is durable and never rewritten.
 Both fields are internal identifiers and never appear in what a person hears.
+
+An assertion with no recorded `authorizer` — anything written before this
+convention — reads as unknown, never as unauthorized and never as open. The
+Settlement Convention's standing-claim check treats a missing field the same
+way it treats somebody else's name: record a suggestion and confirm first.
 
 ## Registry and Confidence Convention
 
