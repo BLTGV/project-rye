@@ -62,6 +62,148 @@ say why the existing ones do not fit. "Category" is the business sense, what
 kind of thing this is; it is not `classification`, which is who may see it.
 Ignore reply keys you do not recognize — the shape is additive.
 
+## Ask Who May Settle It Before You Accept
+
+Before you record any statement as accepted, ask who may settle that claim.
+One lookup answers it, and every agent gets the same answer: a recorded grant
+for that kind of claim, then the relationship (the person themselves, their
+manager, the owner of the thing), then the owner of the area. The reply's
+shape is the settlement lookup section of `contracts/sql-surface.md`.
+
+```bash
+./scripts/rye settlers --subject <uuid> --claim <assertion-type> \
+  --speaker <uuid> --speech-act <act> --domain <key> --json
+```
+
+Over SQL or the API this is `rye_settlers(p_subject_id, p_claim_type,
+p_speaker_id, p_speaker_ref, p_domain_key, p_speech_act, p_as_of,
+p_scope_ref)`. Pass `--speaker-ref <source-identity>` instead of `--speaker`
+when the speaker is a channel account with no person node. Pass `--as-of` to
+reconstruct a past answer.
+
+`p_claim_type` is the claim's `assertion_type` verbatim — there is no separate
+vocabulary and nothing to register. `p_speech_act` is your classification of
+what was said (`self_commitment`, `self_report`, `expectation`,
+`statement_about_other`, `statement_about_thing`, `agreement`, `decision`,
+`outside_report`, `agent_inference`); it selects which relationship default
+applies. An unrecognized value returns the union of the defaults rather than
+an error, with `speech_act_recognized` false.
+
+Read three fields and act on them:
+
+| Field | Act on it |
+|---|---|
+| `speaker.is_settler` | `true`: record it as accepted. `false`: record a suggestion. |
+| `settlers` | Who to check with. `step` says which of `grant`, `relationship`, `area_owner` produced them. |
+| `step` = `none` | Nobody settles it here. `reason` says why; `setup_gap` `true` is a gap for a Rye admin, and `reason` says which. |
+
+The lookup is advisory. It writes nothing, refuses nothing, and no write path
+calls it. It is your discipline, not a wall the database holds.
+
+### The speaker is a settler
+
+Record the claim as accepted through `record_assertion(...)`. Keep the person
+and the agent distinct in the evidence: the person is the authorizer, you are
+the executor, and the utterance is the source event.
+
+```sql
+SELECT record_assertion(
+    p_assertion_type := 'expectation',
+    p_claim          := '{"value": "log sales calls in the CRM"}'::jsonb,
+    p_subject_node_id := '<subject_uuid>'::uuid,
+    p_assertion_key  := 'sales_call_logging',
+    p_status         := 'accepted',
+    p_basis          := 'reported',
+    p_evidence       := ARRAY[jsonb_build_object(
+        'kind', 'source',
+        'event_id', '<utterance_event_uuid>',
+        'witness_node_id', '<speaker_uuid>',
+        'attrs', jsonb_build_object(
+            'authorizer', '<speaker_uuid>',
+            'executor', '<agent_key>',
+            'settled_via', 'relationship',
+            'settled_relationship', 'manager'
+        )
+    )]
+);
+```
+
+Then say one line back, in the person's own words, so they can correct it on
+the spot. See the echo rules under "What a person hears" below.
+
+### The speaker is not a settler
+
+Record the same claim as a suggestion — `p_status := 'candidate'` — on the
+same subject, type, and key, with the speaker's words as its backing and the
+settlers from the lookup in `p_attrs`. Nothing is refused and nothing is
+dropped.
+
+When the suggestion contradicts a claim that is already accepted, keep the
+accepted one exactly as it is and record the id of the claim being objected
+to in the suggestion's `p_attrs`, with the speaker's reason. Do not supersede,
+end, or archive the accepted claim. Then ask the person one question: why.
+The reason is what a settler needs to answer.
+
+Then tell the person whose call it is and that you will check with them. Name
+the settler. Do not tell them they lack authority and do not name a status.
+
+### Nobody settles it
+
+When `step` is `none`, record the suggestion anyway. `setup_gap` `true` is a
+gap for a Rye admin to fill, not an error and not something to work around,
+and `reason` says which gap it is. Read `reason` before you say anything:
+
+| `reason` | What it is, and what you do |
+|---|---|
+| `area_has_no_owner` | Nobody owns the area. Setup gap. Record the suggestion and tell the person nobody is recorded as deciding this yet. |
+| `area_owner_is_agent` | The area is owned by an agent, which settles nothing. Setup gap. Same as above to the person; it needs a Rye admin to name a person. |
+| `area_owner_not_visible` | There is an owner and you cannot see them. Not a gap and not permission to accept. Record the suggestion and say you are finding out who settles it. |
+| `no_settler_found` | The steps ran and produced nobody. Record the suggestion and say the same. |
+| `domain_not_resolved` | You did not name an area and more than one is active, or none is. Your mistake: name the area and ask again. |
+| `domain_not_found` | The area key you passed does not exist. Your mistake: correct the key and ask again. Do not report it to the person. |
+
+The last two are yours to fix, not news for the person. Ask again with the
+right area before you say anything at all.
+
+An empty `settlers` list can also mean RLS hid the settler from you, so never
+read it as "nobody is authorized, so I may accept it".
+
+### What a person hears
+
+Use the words in `docs/glossary.md` and no others. Say "settle", "decide",
+"suggestion", "objection", "expectation". Never say candidate, assertion,
+scope, basis, supersede, review queue, or the name of a policy. Internal
+identifiers — node uuids, assertion types, agent keys, step names — stay
+canonical in anything durable and never appear in what you say.
+
+- Accepted: "Noted — John logs his sales calls from now on."
+- Not the speaker's to settle: "That's Bob's call. I'll check with him and
+  let you know."
+- Nobody recorded: "Nobody's recorded as deciding that yet. I've kept what you
+  said and I'll find out who settles it."
+- Asked about an unsettled claim: say the claim exists, say it is unsettled,
+  and say who said it. Do not hide it and do not answer with it.
+
+### What you must never do
+
+- Never relabel a statement's basis or speech act to get it through.
+- Never switch to an identity with wider grants, and never ask a more
+  permissive agent to write it for you.
+- Never treat your own inference as a settled claim. You carry the authority
+  of the person you act for and none of your own; no lookup ever returns an
+  agent as a settler.
+- Never accept a claim on silence. A settler who has not answered has not
+  agreed, and there is no clock that turns silence into a yes.
+- Never overwrite an accepted claim with a later statement from someone who
+  cannot settle it. Accepted stays accepted until a settler changes it.
+
+`reports_to` and `owns` are the relationships the lookup reads, declared by
+the `rye-org` plugin and pinned in `contracts/plugin-manifest.md`:
+`reports_to` runs from the report to the manager, `owns` from the owner to
+the thing owned. Neither is settled by the people it connects — a claim about
+either falls through to the owner of the area. Propose them; never settle
+them. End one with `effective_to`, never by deleting the edge.
+
 ## Why Rye Uses SQL Helpers
 
 Rye's durable contract lives in PostgreSQL because the database is the shared

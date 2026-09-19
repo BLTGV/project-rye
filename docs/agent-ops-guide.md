@@ -61,6 +61,92 @@ candidate description stays invisible until someone accepts it.
 "Category" is the business sense: what kind of thing this is. It is not
 `classification`, which is who may see it.
 
+## Ask who may settle it before you accept
+
+Never record a statement as accepted without asking who may settle that claim.
+`rye_settlers()` answers it, and every agent asking the same question gets the
+same answer. The settlement lookup section of `contracts/sql-surface.md` is the
+normative shape; it is read-only, advisory, computed on read, and never cached.
+
+```sql
+SELECT rye_settlers(
+    p_subject_id := '<subject_uuid>'::uuid,
+    p_claim_type := 'expectation',
+    p_speaker_id := '<speaker_uuid>',
+    p_speech_act := 'expectation',
+    p_domain_key := 'sales-operations'
+);
+```
+
+```bash
+./scripts/rye settlers --subject <uuid> --claim <assertion-type> \
+  --speaker <uuid> --speech-act <act> --domain <key> --json
+```
+
+`p_claim_type` is the claim's `assertion_type` verbatim — one vocabulary, no
+mapping table. `p_speech_act` is your classification of what was said, and it
+selects the relationship default. `p_speaker_ref` carries a source identity
+such as `slack:U0123` when the speaker has no person node. `p_as_of`
+reconstructs a past answer from the grants and relationships in force then.
+
+| Key | Read it as |
+|---|---|
+| `speaker.is_settler` | The field you act on. `true`: record accepted. `false`: record a suggestion and ask the listed settlers. |
+| `settlers` | Who may settle it. Each carries `kind`, `node_id`, `ref`, `label`, `via`, `relationship`, `bound`. |
+| `step` | Which step answered: `grant`, `relationship`, `area_owner`, or `none`. A grant displaces the relationship defaults for that claim type. |
+| `bound` | `false` means an unbound source identity or a ref that resolves to no node. Do not treat it as a person record. |
+| `reason`, `setup_gap` | Why there is no settler. `setup_gap` `true` is a gap for a Rye admin to fill, not an error, and `reason` says which. |
+| `excluded_agents` | Agent identities dropped before a step was chosen. Tells nobody apart from nobody eligible. |
+
+`settlers` is empty exactly when `step` is `none`. Because RLS silence applies,
+an empty list means nobody is authorized *and visible to you*. Never read it as
+permission to accept. `contract_version` is `1` and the shape is additive, so
+ignore keys you do not know.
+
+Three outcomes and nothing else:
+
+1. **`speaker.is_settler` is true.** Record it accepted with
+   `record_assertion(..., p_status := 'accepted')`, with the utterance as
+   source evidence and the authorizer/executor convention in the evidence
+   `attrs`. Echo one line.
+2. **It is false.** Record the same claim with `p_status := 'candidate'` on
+   the same subject, type, and key, the speaker's words as its backing, and
+   the settlers in `p_attrs`. If it contradicts something already accepted,
+   put the id of that claim and the speaker's reason in `p_attrs` and leave
+   the accepted claim untouched. Ask why, then tell the person whose call it
+   is and that you will check with them.
+3. **`step` is `none`.** Read `reason` first. `area_has_no_owner` and
+   `area_owner_is_agent` are the two setup gaps: record the suggestion and
+   tell the person nobody is recorded as deciding this yet.
+   `area_owner_not_visible` and `no_settler_found` are not gaps and not
+   permission to accept: record the suggestion and say you are finding out
+   who settles it. `domain_not_resolved` and `domain_not_found` are your own
+   mistake — you named no area or the wrong one. Correct the key and ask
+   again. Say nothing to the person about either.
+
+Accepted stays accepted until a settler changes it. A later statement from
+someone who cannot settle a claim does not overwrite it and does not vanish —
+it is recorded and routed. Nothing is accepted on silence, and there is no
+clock that turns silence into agreement.
+
+An agent carries the authority of the person it acts for and none of its own.
+Never relabel a basis or a speech act to get a write through, never switch to
+an identity with wider grants, and never ask a more permissive agent to write
+it. `rye_settlers()` drops agent identities before choosing a step, so no
+lookup ever returns an agent.
+
+`reports_to` and `owns` are the relationships the lookup reads, declared by the
+`rye-org` plugin and pinned in `contracts/plugin-manifest.md`. `reports_to`
+runs from the report to the manager. `owns` runs from the owner to the thing
+owned. Both are temporal and never deleted: end one with `effective_to`, and
+archive only a line recorded in error. Neither is settled by the people it
+connects — a claim whose type is `reports_to` or `owns` has no relationship
+default and falls through to the owner of the area.
+
+Anything a person hears uses `docs/glossary.md` words. Internal identifiers —
+uuids, assertion types, step names, agent keys — stay canonical in what is
+stored and stay out of what is said.
+
 ## Events
 
 Always create events through `record_event()`. It creates participants
