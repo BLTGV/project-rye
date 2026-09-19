@@ -697,11 +697,21 @@ $$;
 DO $$
 DECLARE
     v_scope uuid := (SELECT v::uuid FROM gov_fixture WHERE k = 'scope');
+    v_agent_two uuid := (SELECT v::uuid FROM gov_fixture WHERE k = 'agent_two');
 BEGIN
     PERFORM set_config('app.current_role', 'agent:rls_gov_agent_one', true);
     PERFORM set_config('app.current_user_id', 'someone:human-operator', true);
     IF NOT agent_can_promote_in_scope(v_scope) THEN
         RAISE EXCEPTION 'the role named the agent that holds the grant and was refused';
+    END IF;
+
+    -- The discriminating case. The role names the agent that holds the grant;
+    -- the label names a different existing agent, by the id form the previous
+    -- body resolved first. A label-first body resolves to agent two, whose
+    -- grants this session cannot see, and returns false.
+    PERFORM set_config('app.current_user_id', v_agent_two::text, true);
+    IF NOT agent_can_promote_in_scope(v_scope) THEN
+        RAISE EXCEPTION 'a label naming another agent overrode the role that holds the grant';
     END IF;
 
     -- The role names an agent that holds nothing; the label names the one that
