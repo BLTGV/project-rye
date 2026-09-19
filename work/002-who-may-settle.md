@@ -247,4 +247,28 @@ documented the bug as behavior (Lead: sent back to Architect to correct);
 authority_kind has a CHECK that already forbids 'agent', guard kept without
 a test (Lead: accepted). Lead: sent to Verifier for an adversarial recheck.
 
+### Architect, 2026-09-19, contract correction (commit 2144f23)
+The earlier amendment had recorded the verbatim-match defect as behavior.
+contracts/sql-surface.md now states: an `agent:` prefix excludes whether
+or not an identity row exists; otherwise a ref is an agent when its slug
+equals a stored agent_key; an inactive identity is still an agent; the
+test covers grant and node-derived settlers alike and authority_kind
+`agent`; exclusions are counted and the lookup continues. Decision 0005
+records the defect as found at contract review and fixed inside work/002.
+Acknowledged cost: `agent:` is now a reserved ref prefix.
+
+### Verifier, 2026-09-19, third pass on 54dcde4 (schema): PASS-STATIC
+Criterion 7 verified by execution, including the hyphenated-key case. Test
+29 passes on the fixed 0021 and fails at the first new case on the pre-fix
+0021, so the new cases are not vacuous. Ten hostile refs tried: excluded
+were AGENT:my-agent, `agent:`, agent:no-such-identity, an inactive
+identity, and bare "My Agent". Node-derived paths with actor_kind agent
+(manager, owner, self-commitment, area owner) all excluded correctly.
+`person:my-agent` is correctly NOT excluded, so a real person is never
+excluded for sharing a slug with an agent. Finding, LOW: trim() strips
+spaces only, so a tab or non-breaking-space prefix, or `agent :x`, dodges
+the prefix rule and survives as an unbound settler; no agent is returned as
+itself. Lead: sent to the builder to harden and pin with tests; lookalike
+unicode letters declared out of scope.
+
 ## Close
