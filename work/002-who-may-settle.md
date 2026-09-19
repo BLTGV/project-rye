@@ -119,4 +119,26 @@ rye_settlers() and the CLI subcommand merge; the scenario's domain key and
 owner are scenario-local; adding rye_settlers to the skill's requires
 follows the rye_categories precedent.
 
+### Builder schema, 2026-09-19
+Result: done. Branch worktree-agent-ae27942de1b4935c1, commit 1c8c386.
+Changed: schema/migrations/0021_settlement_lookup.sql (new: rye_settlers()
+plus helpers rye_settler_resolve_ref, rye_settler_is_agent,
+rye_settler_node_kind), tests/conformance/29_settlement_lookup.sql (new),
+scripts/rye (`settlers` subcommand), scripts/verify.sh, docs/cli.md,
+docs/data-dictionary.md. Tested: the area test command could NOT run
+(Docker refuses this user; no PostgreSQL server installed). Substitute, all
+passing: PostgreSQL 16.2 from the `pgserver` PyPI wheel, a prelude
+extracted verbatim from 0001/0013/0016, then 0021 applied and test 29 run
+unmodified; a deliberately flipped copy failed, so assertions fire. Checked
+not SECURITY DEFINER, STABLE, own search_path, verify.sh signatures
+resolve, CLI human and --json output, exit 0 with no settler. UNVERIFIED:
+RLS interaction, migration ordering in a full install, every other suite.
+Learned: see docs/areas/schema.md entries dated 2026-09-19. Questions: an
+unknown explicit domain key short-circuits to step `none` and suppresses
+even the self default, as the contract is written (Lead: accepted as the
+safe failure; noted for Architect); three additive `reason` values
+area_owner_not_visible, area_owner_is_agent, no_settler_found (Lead:
+accepted, contract to be amended at close); fixtures create the edges
+directly so nothing depends on the agent-kit manifest edit (Lead: agreed).
+
 ## Close
