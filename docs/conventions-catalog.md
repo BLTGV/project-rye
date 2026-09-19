@@ -205,8 +205,12 @@ never settlers — agent identities are dropped before a step is chosen.
   and the speaker's words as its backing. Nothing is refused and nothing is
   dropped.
 - No settler at all (`step` `none`) still records the candidate. `setup_gap`
-  `true` means the area has no owner: a setup gap for a Rye admin, not an
-  error.
+  `true` is a setup gap for a Rye admin, not an error, and `reason` says
+  which: `area_has_no_owner` or `area_owner_is_agent`.
+- The other reasons are not gaps. `area_owner_not_visible` and
+  `no_settler_found` still mean record the candidate. `domain_not_resolved`
+  and `domain_not_found` mean the caller named no area or the wrong one, and
+  the caller fixes the key and asks again.
 - An empty `settlers` list may be RLS silence. It is never grounds to accept.
 
 `contracts/sql-surface.md` holds the normative shape. The lookup writes

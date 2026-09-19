@@ -3,8 +3,12 @@
 -- will read. Run once against a throwaway database after Rye is installed.
 --
 -- Builds: Bob Ferris and John Reyes as people, a reports_to edge from John to
--- Bob in effect since 2025-01-06, and a sales-operations area owned by Bob.
+-- Bob in effect since 2025-01-06, and a sales operations area owned by Bob.
 -- No grants, no assertions, no events. The relationship step decides.
+--
+-- The area goes in through ensure_knowledge_domain(), which is the helper that
+-- owns that table. Nodes and edges are inserted directly because Rye ships no
+-- general helper for them; that is what every conformance fixture does.
 --
 -- All names are invented.
 
@@ -65,16 +69,15 @@ BEGIN
         VALUES ('reports_to', v_john, v_bob, timestamptz '2025-01-06 00:00:00+00', NULL);
     END IF;
 
-    INSERT INTO knowledge_domains (domain_key, label, purpose, owner_node_id)
-    VALUES (
-        'sales-operations',
-        'Sales Operations',
-        'How the regional sales team works: who covers what, and what is expected of them.',
-        v_bob
-    )
-    ON CONFLICT (domain_key) DO UPDATE
-        SET owner_node_id = EXCLUDED.owner_node_id,
-            archived_at = NULL,
-            updated_at = now();
+    -- ensure_knowledge_domain(), not a raw INSERT. It runs the key through
+    -- rye_slugify_key(), so the row is stored as `sales_operations` and
+    -- rye_settlers(p_domain_key := 'sales-operations') resolves to it. A raw
+    -- INSERT of 'sales-operations' is never found by the lookup.
+    PERFORM ensure_knowledge_domain(
+        p_domain_key    := 'sales-operations',
+        p_label         := 'Sales Operations',
+        p_purpose       := 'How the regional sales team works: who covers what, and what is expected of them.',
+        p_owner_node_id := v_bob
+    );
 END;
 $$;

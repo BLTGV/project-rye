@@ -6,11 +6,11 @@ Tamarack Supply is an invented distributor. No real business is described here.
 
 ## The people
 
-- **Bob Ferris** — regional sales manager. Owns the `sales-operations` area.
+- **Bob Ferris** — regional sales manager. Owns the sales operations area.
 - **John Reyes** — account executive. Reports to Bob since 2025-01-06; the
   reporting line is still in effect.
-- Nobody else is involved. There is no grant for any claim type in
-  `sales-operations`, so the relationship step decides.
+- Nobody else is involved. There is no grant for any claim type in that
+  area, so the relationship step decides.
 
 ## What actually happens
 
@@ -42,11 +42,20 @@ speech act, with John as the subject.
 John is not returned. Neither agent is returned. The answer is identical for
 both agents because it comes from the same lookup.
 
+Both rows were executed against `rye_settlers()` with this fixture loaded on
+2026-09-19 and came back as written, with `domain.mode` `explicit` when the
+area is named and `single_active` when it is not. If a run produces anything
+else, the run is wrong, not this table.
+
 ## Starting state
 
 `setup.sql` builds it: two person nodes, one `reports_to` edge from John to
-Bob effective 2025-01-06 with no end, and a `sales-operations` knowledge
+Bob effective 2025-01-06 with no end, and a sales operations knowledge
 domain owned by Bob. No grants, no assertions, no events.
+
+The area's key is stored slugified, as `sales_operations`, and that is the
+form every answer reports in `domain.domain_key`. An agent may pass either
+spelling to `--domain`: the lookup slugifies what it is given.
 
 ## Prerequisite
 

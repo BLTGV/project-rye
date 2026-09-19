@@ -95,7 +95,7 @@ Read three fields and act on them:
 |---|---|
 | `speaker.is_settler` | `true`: record it as accepted. `false`: record a suggestion. |
 | `settlers` | Who to check with. `step` says which of `grant`, `relationship`, `area_owner` produced them. |
-| `step` = `none` | Nobody settles it here. `reason` says why; `setup_gap` `true` means an area with no owner. |
+| `step` = `none` | Nobody settles it here. `reason` says why; `setup_gap` `true` is a gap for a Rye admin, and `reason` says which. |
 
 The lookup is advisory. It writes nothing, refuses nothing, and no write path
 calls it. It is your discipline, not a wall the database holds.
@@ -149,11 +149,24 @@ the settler. Do not tell them they lack authority and do not name a status.
 
 ### Nobody settles it
 
-When `step` is `none`, record the suggestion anyway and say so plainly: nobody
-is recorded as deciding this yet. When `setup_gap` is `true` the area has no
-owner, which is a gap for a Rye admin to fill, not an error and not something
-to work around. An empty `settlers` list can also mean RLS hid the settler
-from you, so never read it as "nobody is authorized, so I may accept it".
+When `step` is `none`, record the suggestion anyway. `setup_gap` `true` is a
+gap for a Rye admin to fill, not an error and not something to work around,
+and `reason` says which gap it is. Read `reason` before you say anything:
+
+| `reason` | What it is, and what you do |
+|---|---|
+| `area_has_no_owner` | Nobody owns the area. Setup gap. Record the suggestion and tell the person nobody is recorded as deciding this yet. |
+| `area_owner_is_agent` | The area is owned by an agent, which settles nothing. Setup gap. Same as above to the person; it needs a Rye admin to name a person. |
+| `area_owner_not_visible` | There is an owner and you cannot see them. Not a gap and not permission to accept. Record the suggestion and say you are finding out who settles it. |
+| `no_settler_found` | The steps ran and produced nobody. Record the suggestion and say the same. |
+| `domain_not_resolved` | You did not name an area and more than one is active, or none is. Your mistake: name the area and ask again. |
+| `domain_not_found` | The area key you passed does not exist. Your mistake: correct the key and ask again. Do not report it to the person. |
+
+The last two are yours to fix, not news for the person. Ask again with the
+right area before you say anything at all.
+
+An empty `settlers` list can also mean RLS hid the settler from you, so never
+read it as "nobody is authorized, so I may accept it".
 
 ### What a person hears
 

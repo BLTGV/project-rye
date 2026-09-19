@@ -95,7 +95,7 @@ reconstructs a past answer from the grants and relationships in force then.
 | `settlers` | Who may settle it. Each carries `kind`, `node_id`, `ref`, `label`, `via`, `relationship`, `bound`. |
 | `step` | Which step answered: `grant`, `relationship`, `area_owner`, or `none`. A grant displaces the relationship defaults for that claim type. |
 | `bound` | `false` means an unbound source identity or a ref that resolves to no node. Do not treat it as a person record. |
-| `reason`, `setup_gap` | Why there is no settler. `setup_gap` `true` is a gap for a Rye admin to fill, not an error. |
+| `reason`, `setup_gap` | Why there is no settler. `setup_gap` `true` is a gap for a Rye admin to fill, not an error, and `reason` says which. |
 | `excluded_agents` | Agent identities dropped before a step was chosen. Tells nobody apart from nobody eligible. |
 
 `settlers` is empty exactly when `step` is `none`. Because RLS silence applies,
@@ -115,8 +115,14 @@ Three outcomes and nothing else:
    put the id of that claim and the speaker's reason in `p_attrs` and leave
    the accepted claim untouched. Ask why, then tell the person whose call it
    is and that you will check with them.
-3. **`step` is `none`.** Record the suggestion and say plainly that nobody is
-   recorded as deciding this yet.
+3. **`step` is `none`.** Read `reason` first. `area_has_no_owner` and
+   `area_owner_is_agent` are the two setup gaps: record the suggestion and
+   tell the person nobody is recorded as deciding this yet.
+   `area_owner_not_visible` and `no_settler_found` are not gaps and not
+   permission to accept: record the suggestion and say you are finding out
+   who settles it. `domain_not_resolved` and `domain_not_found` are your own
+   mistake — you named no area or the wrong one. Correct the key and ask
+   again. Say nothing to the person about either.
 
 Accepted stays accepted until a settler changes it. A later statement from
 someone who cannot settle a claim does not overwrite it and does not vanish —
