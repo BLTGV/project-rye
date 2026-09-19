@@ -7,6 +7,7 @@
     "dev": "vite",
     "dev:ui": "vite",
     "dev:api": "tsx src/server/node-dev.ts",
+    "check:routes": "tsx scripts/route-policy-check.ts",
     "build": "tsc -b && vite build",
     "preview": "wrangler dev",
     "deploy": "npm run build && wrangler deploy",
