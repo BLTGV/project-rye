@@ -70,6 +70,50 @@ categorization. v0.3 fixes that imbalance.
 - Being the operational UI for domain applications.
 - Storage pruning and garbage collection.
 
+## What v0.4 is for
+v0.3 teaches an agent how to file things. v0.4 is about the person on the
+other side of the agent. People know Rye is in use and never learn its
+vocabulary. They talk to their agent and it remembers, answers, corrects,
+says who said what, and asks only when unsure. They never pick a category,
+an area, a policy, or a status, and they never visit a queue.
+
+The rule underneath is that acceptance follows authority. An agent carries
+the authority of the person it acts for and none of its own. Who may settle
+a claim comes from one lookup: a recorded grant for that kind of claim,
+then the relationship (yourself, your manager, the owner of the thing),
+then the owner of the area. Nothing a person says is refused or lost. If
+they cannot settle it, it is recorded as a suggestion and their agent
+checks with someone who can. An objection to something already accepted is
+kept as a record and routed by its reason. Accepted stays accepted until a
+settler changes it.
+
+The full reasoning is in `design/proposals/human-agent-scaling.md`.
+
+## What done for v0.4 looks like
+- Two people who trust each other, each with their own agent, share one
+  area. Neither learns a Rye word. Replay cases cover: a self-commitment
+  accepted at once; a statement about the other person routed to them and
+  settled by their reply; a manager's expectation objected to by the
+  report, routed by the reason, and settled once by the manager; a topical
+  grant made in plain words ("Priya decides pricing"); and a claim no one
+  is named for, which falls to the area owner.
+- Every write is echoed back in one line the person can correct.
+- One request tells a person's agent which questions that person owes,
+  most important first, so any of their agents can ask.
+- No fixed caps or clocks. How often an agent asks and what happens when a
+  settler is silent follow importance, and a person adjusts both in plain
+  words.
+- A scoped agent token can reach only the routes and rows its grants
+  allow (GitHub issue 16).
+
+## Out of scope for v0.4
+- Channel agents, source identity binding, and conditional auto-accept
+  rules.
+- Objectives, importance scoring, and parked suggestions.
+- Rye databases working together.
+- Enforcing the lookup against direct database users. They are trusted by
+  construction; enforcement applies to callers that come through the API.
+
 ## Constraints
 - No customer names in committed examples or fixtures.
 - Internals keep canonical vocabulary; only human-facing surfaces use the
