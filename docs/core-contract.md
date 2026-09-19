@@ -40,6 +40,40 @@ Use `schedule_assertion_change()` for future-effective accepted knowledge.
 Use `record_distillation()` for inferred digests and
 `resolve_knowledge_gap()` for answers to accepted gaps.
 
+## Configuration writes need an admin
+
+Some assertion types are Rye's own configuration rather than knowledge about
+the world, and Rye reads them to decide how it treats every other write. Those
+types are gated by data: an `assertion_type_access` row with
+`operation = 'settle'` names the roles that may make an assertion of that type
+accepted. A type with no `settle` row is ungated. Two rows ship, both
+`ARRAY['admin']`:
+
+| `assertion_type` | Why |
+|---|---|
+| `registry_entry` | Type aliases, `self_settled_type:*`, `governed_type:*`, `DEFAULT_SCOPE`, basis priors, half lives, digest facets |
+| `review_policy` | Decides whether other writes land accepted at all |
+
+`record_assertion()` demotes rather than refuses: a non-admin's accepted write
+of a gated type lands as a candidate carrying
+`attrs.settle_gate = {"pending": true, ...}`, appears in `review_queue`, and an
+admin accepts or rejects it there. Nothing said is lost, and no incumbent is
+superseded.
+
+Every other route to an accepted gated row raises, through one trigger on
+`assertions`: a direct `INSERT`, any `UPDATE` that moves a row to `accepted`
+(including `accept_assertion()` and a raw `UPDATE` by a caller who sets
+`app.write_path` itself), `supersede_assertion()`, and `record_distillation()`.
+`schedule_assertion_change()` and `record_scope_policy()` route through
+`record_assertion()` and so demote. An agent capability grant
+(`rye.authoritative.promote`) does not open the gate.
+
+`settle_gate(assertion_type)` answers
+`{assertion_type, gated, allowed_roles, current_role, may_settle}` so a client
+can ask before it offers. The gate reads `app.current_role` only, and an unset
+role is not an admin: a migration or script that seeds configuration must set
+the role first.
+
 ## Confidence
 
 Stored `confidence` is a prior, not the final belief score.
