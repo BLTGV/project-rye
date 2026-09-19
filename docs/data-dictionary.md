@@ -483,8 +483,22 @@ order and the first one to produce a settler wins:
    source of an `owns` edge to the subject; both in effect at `p_as_of`.
 3. **Area owner.** `knowledge_domains.owner_node_id` for the resolved area.
 
-`p_claim_type` is the assertion type verbatim — one vocabulary, no mapping
-table. The area resolves from `p_domain_key`, or from the single active
+`p_claim_type` is the assertion type — one vocabulary, no mapping table. It is
+resolved through `canonical_type('assertion_type', ...)` before anything is
+matched against it, so the organization's type aliases classify a claim the way
+the rest of the schema stores it: alias `requirement` to `expectation` and
+`p_claim_type := 'requirement'` takes rule 1. Grants match on the canonical
+type on both sides, so a grant naming either name covers a call naming either.
+The answer reports the requested type as `claim.claim_type` (with
+`claim.assertion_type` beside it, unchanged) and the resolved one as
+`claim.canonical_claim_type`. Matching is case-sensitive after resolution, a
+null or empty claim type is not resolved at all, and an alias cycle raises.
+`canonical_type()` and not `canonical_type_in_scope()`: the lookup has no
+onboarding-scope argument — `p_scope_ref` matches a grant's `scope_ref` and is
+not a scope node — so it resolves through the `DEFAULT_SCOPE` registry entry,
+exactly as the salience views and 0019 do.
+
+The area resolves from `p_domain_key`, or from the single active
 knowledge domain when it is omitted. `p_as_of` filters effective windows only.
 
 `speech_act_recognized` false is an instruction, not a detail: classify the

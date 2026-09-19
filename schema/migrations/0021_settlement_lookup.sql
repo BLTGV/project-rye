@@ -200,6 +200,7 @@ DECLARE
 
     v_as_of        timestamptz := coalesce(p_as_of, now());
     v_claim_type   text := nullif(trim(p_claim_type), '');
+    v_canonical    text;
     v_speech_act   text := nullif(trim(p_speech_act), '');
     v_speaker_ref  text := nullif(trim(p_speaker_ref), '');
     v_domain_key_in text := nullif(trim(p_domain_key), '');
@@ -241,6 +242,35 @@ DECLARE
 
     r              record;
 BEGIN
+    -- ----------------------------------------------------------------------
+    -- Resolve the claim type through the organization's type aliases, so this
+    -- lookup classifies a claim the same way the rest of the schema stores it.
+    -- An organization that aliases `requirement` to `expectation` has
+    -- record_assertion() writing `expectation`, governing_scope() and the
+    -- salience views reading `expectation`, and now this lookup applying the
+    -- rules for `expectation` too. Without it, asking about `requirement`
+    -- skipped rule 1 and the person an expectation was set on came back as its
+    -- settler.
+    --
+    -- canonical_type() and not canonical_type_in_scope(): rye_settlers() has no
+    -- onboarding-scope argument. p_scope_ref is free text for matching a
+    -- grant's scope_ref and is not a scope node. canonical_type() resolves the
+    -- scope from the DEFAULT_SCOPE registry entry, which is what the salience
+    -- views and 0019 do, so the same alias resolves the same way here as there.
+    -- Adding a scope argument would change the contracted signature.
+    --
+    -- Matching stays case-sensitive afterwards. `Expectation` with no alias is
+    -- a different claim type, unclassified, and falls through like any other.
+    -- Alias resolution reads current_valid_assertions, so an alias hidden from
+    -- this caller by RLS does not apply, as everywhere else.
+    -- canonical_type() raises on a null value and on an alias cycle: a null or
+    -- empty claim type is not resolved at all and behaves as it always did, and
+    -- a cycle is a misconfiguration that raises rather than answering wrongly.
+    -- ----------------------------------------------------------------------
+    IF v_claim_type IS NOT NULL THEN
+        v_canonical := canonical_type('assertion_type', v_claim_type);
+    END IF;
+
     -- ----------------------------------------------------------------------
     -- Resolve the area. Step 1 needs it to find grants and step 3 is the
     -- owner of it, so it resolves before anything else runs.
@@ -324,17 +354,31 @@ BEGIN
               AND da.effective_at <= v_as_of
               AND (da.effective_to IS NULL OR da.effective_to > v_as_of)
               AND (
-                  cardinality(da.claim_types) = 0
-                  OR (v_claim_type IS NOT NULL AND v_claim_type = ANY (da.claim_types))
-              )
-              AND (
                   da.scope_ref IS NULL
                   OR p_scope_ref IS NULL
                   OR da.scope_ref = p_scope_ref
               )
             ORDER BY da.authority_kind, da.authority_ref, da.id
         LOOP
-            v_matches := true;
+            -- Claim type, both sides canonicalized. A grant that names the
+            -- alias covers a call that names the canonical type and the other
+            -- way round; an empty claim_types still means every claim type.
+            IF cardinality(r.claim_types) = 0 THEN
+                v_matches := true;
+            ELSIF v_canonical IS NULL THEN
+                v_matches := false;
+            ELSE
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM unnest(r.claim_types) AS ct(value)
+                    WHERE CASE
+                              WHEN nullif(trim(ct.value), '') IS NULL THEN NULL
+                              ELSE canonical_type('assertion_type', ct.value)
+                          END = v_canonical
+                ) INTO v_matches;
+            END IF;
+
+            CONTINUE WHEN NOT v_matches;
 
             -- Subject narrowing lives in properties, never in a new column.
             -- An absent key means the grant covers every subject in the area.
@@ -396,6 +440,9 @@ BEGIN
     -- its own, so omitting the optional speech act and mistyping it both land
     -- in the same place as classifying it correctly would.
     --
+    -- The claim type read here is the canonical one, so an alias classifies
+    -- exactly as the type it resolves to.
+    --
     --   0. relationship edge type        -> fall through
     --   1. other-set, or act expectation -> manager only, never self
     --   2. recognized speech act         -> its documented default
@@ -411,11 +458,11 @@ BEGIN
         'agreement', 'decision', 'outside_report', 'agent_inference'
     ), false);
 
-    IF coalesce(v_claim_type, '') IN ('reports_to', 'owns') THEN
+    IF coalesce(v_canonical, '') IN ('reports_to', 'owns') THEN
         -- Rule 0. Neither end of a relationship settles that it exists.
         NULL;
 
-    ELSIF v_claim_type = ANY (c_other_set)
+    ELSIF v_canonical = ANY (c_other_set)
        OR v_speech_act = 'expectation' THEN
         -- Rule 1, and the point of the ordering. An expectation is set on a
         -- person by someone else, so the person it is set on is never its
@@ -436,7 +483,7 @@ BEGIN
             NULL;
         END IF;
 
-    ELSIF v_claim_type = ANY (c_self_set) THEN
+    ELSIF v_canonical = ANY (c_self_set) THEN
         -- Rule 3. A person's own commitment or report about themselves still
         -- settles with no setup and no speech act.
         v_want_self := true;
@@ -635,6 +682,7 @@ BEGIN
         'claim', jsonb_build_object(
             'claim_type',             v_claim_type,
             'assertion_type',         v_claim_type,
+            'canonical_claim_type',   v_canonical,
             'speech_act',             v_speech_act,
             'speech_act_recognized',  v_recognized
         ),
@@ -656,4 +704,4 @@ END;
 $$ LANGUAGE plpgsql STABLE;
 
 COMMENT ON FUNCTION rye_settlers(uuid, text, uuid, text, text, text, timestamptz, text) IS
-    'Who may settle this claim, and which of three steps said so. One lookup: a recorded grant in domain_authorities for this claim type, then the relationship between speaker and subject (self, manager via reports_to, owner via owns), then knowledge_domains.owner_node_id for the area. Contract: contracts/sql-surface.md, section "Settlement lookup" (contract_version 1). SECURITY INVOKER and read-only: it writes nothing, refuses nothing, and raises nothing for a missing answer. p_claim_type is the assertion type verbatim, and it is the first selector: the relationship step tries five ordered rules and the first that applies wins. 0, a relationship edge type (reports_to, owns) falls through. 1, an other-set claim type (expectation) or a speech act of ''expectation'' gives the manager only and never self, so a missing or wrong speech act cannot make a person the settler of an expectation set on them. 2, a recognized p_speech_act gives its documented default. 3, a self-set claim type (commitment, self_commitment, self_report) gives self only. 4, anything else falls through to the area owner. There is no union: a null or unrecognized speech act never widens who may settle. Both claim-type sets are literal strings here and in the contract, matched exactly and growing additively; no table configures them. The lookup reads no assertion, so is_settler true is not permission to replace an accepted claim the caller did not check for. p_as_of filters effective windows only. An agent identity is never returned: any ref beginning with ''agent:'' is excluded whether or not an identity backs it, other refs are matched on the slug create_agent_identity() stores, an inactive identity is still an agent, and a node that is an agent by node_type or attrs->>''actor_kind'' is excluded wherever it stands. Dropped candidates are counted in excluded_agents. step ''none'' with settlers [] and a reason is an answer, not an error, and an empty list never means nobody is authorized, only nobody authorized and visible to this caller.';
+    'Who may settle this claim, and which of three steps said so. One lookup: a recorded grant in domain_authorities for this claim type, then the relationship between speaker and subject (self, manager via reports_to, owner via owns), then knowledge_domains.owner_node_id for the area. Contract: contracts/sql-surface.md, section "Settlement lookup" (contract_version 1). SECURITY INVOKER and read-only: it writes nothing, refuses nothing, and raises nothing for a missing answer. p_claim_type is the assertion type, resolved through canonical_type(''assertion_type'', ...) first so the organization''s type aliases classify a claim the same way the rest of the schema stores it; claim.claim_type echoes what was asked and claim.canonical_claim_type reports what it resolved to. Grants match on the canonical type on both sides, so a grant naming an alias covers a call naming the canonical type and the other way round. Matching is case-sensitive after resolution, and a null or empty claim type is not resolved at all. The canonical claim type is the first selector: the relationship step tries five ordered rules and the first that applies wins. 0, a relationship edge type (reports_to, owns) falls through. 1, an other-set claim type (expectation) or a speech act of ''expectation'' gives the manager only and never self, so a missing or wrong speech act cannot make a person the settler of an expectation set on them. 2, a recognized p_speech_act gives its documented default. 3, a self-set claim type (commitment, self_commitment, self_report) gives self only. 4, anything else falls through to the area owner. There is no union: a null or unrecognized speech act never widens who may settle. Both claim-type sets are literal strings here and in the contract, matched exactly and growing additively; no table configures them. The lookup reads no assertion, so is_settler true is not permission to replace an accepted claim the caller did not check for. p_as_of filters effective windows only. An agent identity is never returned: any ref beginning with ''agent:'' is excluded whether or not an identity backs it, other refs are matched on the slug create_agent_identity() stores, an inactive identity is still an agent, and a node that is an agent by node_type or attrs->>''actor_kind'' is excluded wherever it stands. Dropped candidates are counted in excluded_agents. step ''none'' with settlers [] and a reason is an answer, not an error, and an empty list never means nobody is authorized, only nobody authorized and visible to this caller.';
