@@ -134,6 +134,56 @@ Maps roles to the classification levels they can access. Used by `redact_propert
 
 **Key columns:** `role_name` (PK), `classifications` (text array of accessible levels). Roles not in this table default to `['public']` only.
 
+It is also the instance's list of role names. The governance policies below read it to decide whether a session is a named role, so adding a role stays an insert rather than a migration.
+
+#### Governance tables — who reads, who writes
+
+Nine tables say which areas exist, who holds authority in them, which channels
+feed them, which agents exist, what each agent may do, and what each agent did:
+`knowledge_domains`, `domain_authorities`, `channel_domain_subscriptions`,
+`domain_claim_policies`, `agent_identities`, `agent_capability_grants`,
+`agent_action_log`, `api_idempotency_keys`, `agent_api_tokens`. RLS is enabled
+and forced on all nine. `app.current_role` decides, and nothing else does.
+
+| table | admin | named role | bound agent | agent-shaped only | unknown |
+|---|---|---|---|---|---|
+| `knowledge_domains` | read all; insert, update, delete | read all | read areas it holds | nothing | nothing |
+| `domain_authorities` | read all; insert, update, delete | read all | read rows of areas it holds | nothing | nothing |
+| `channel_domain_subscriptions` | read all; insert, update, delete | read all | read rows of areas it holds | nothing | nothing |
+| `domain_claim_policies` | read all; insert, update, delete | read all | read rows of areas it holds | nothing | nothing |
+| `agent_identities` | read all; insert, update, delete | read all | read all | read all | nothing |
+| `agent_capability_grants` | read all; insert, update, delete | nothing | read own rows | nothing | nothing |
+| `agent_action_log` | read all; insert only | nothing | read own rows | nothing | nothing |
+| `api_idempotency_keys` | read all; insert, delete | nothing | read own rows | nothing | nothing |
+| `agent_api_tokens` | read all; insert, update, delete | nothing | nothing | nothing | nothing |
+
+**Session shapes.** *Agent-shaped* is `app.current_role` of the form
+`agent:<key>`, decided from the session variable alone. *Bound agent* is an
+agent-shaped session whose key names an `active` `agent_identities` row. Two
+read-only helpers are the definition: `rye_current_agent_key()` returns the key
+or null, and `rye_current_agent_id()` returns the identity id or null. Own rows
+everywhere means `agent_id = rye_current_agent_id()`.
+
+**Holding an area.** An agent holds an area when it has an active, unexpired row
+in `agent_capability_grants` whose `domain_id` is that area or null. The
+capability name is not part of the rule.
+
+**Writes go through the helpers, and the policies enforce it.**
+`ensure_knowledge_domain`, `subscribe_channel_to_domain`,
+`grant_domain_authority`, `create_agent_identity`, and `grant_agent_capability`
+are `SECURITY INVOKER` with no role check in the body. What stops a non-admin is
+the admin-only write policy on the table each one writes. Two writes are made on
+behalf of a non-admin caller and use the `app.write_path` gate:
+`record_agent_action()` inserting into `agent_action_log`, and
+`agent_create_candidate()` inserting into `api_idempotency_keys`.
+
+`agent_action_log` is append-only for everyone, admin included. There is no
+UPDATE or DELETE policy on it.
+
+Full rules, including the order in which one table's policy may read another,
+are in `contracts/sql-surface.md` and
+`docs/decisions/0007-agent-governance-visibility.md`.
+
 #### `crm_code_counters` — Human-Readable Code Generation
 
 Counters for generating sequential codes in the format `{PREFIX}-{YYMM}-{SEQ}`.

@@ -1098,17 +1098,22 @@ EOF
       [[ -n "$key" ]] || die "agents create requires --key."
       [[ -n "$label" ]] || die "agents create requires --label."
 
+      # The governance tables are admin-only for writes, so the role is set in
+      # the same statement. It is a FROM item, not a CTE, because the target
+      # list is evaluated after the FROM and the ordering has to be certain.
       if [[ "$OUTPUT_JSON" -eq 1 ]]; then
         psql_json "SELECT jsonb_build_object(
   'agent_id', rye.create_agent_identity($(sql_literal "$key"), $(sql_literal "$label"), $(sql_literal "$runtime"), nullif($(sql_literal "$scope_ref"), '')),
   'agent_key', rye.rye_slugify_key($(sql_literal "$key")),
   'label', $(sql_literal "$label"),
   'runtime', $(sql_literal "$runtime")
-);"
+)
+FROM (SELECT set_config('app.current_role', 'admin', false)) cfg;"
         return
       fi
 
-      psql_exec "SELECT rye.create_agent_identity($(sql_literal "$key"), $(sql_literal "$label"), $(sql_literal "$runtime"), nullif($(sql_literal "$scope_ref"), '')) AS agent_id;"
+      psql_exec "SELECT rye.create_agent_identity($(sql_literal "$key"), $(sql_literal "$label"), $(sql_literal "$runtime"), nullif($(sql_literal "$scope_ref"), '')) AS agent_id
+FROM (SELECT set_config('app.current_role', 'admin', false)) cfg;"
       ;;
     grant)
       local key=""
@@ -1162,11 +1167,13 @@ EOF
   'capability', $(sql_literal "$capability"),
   'domain_key', rye.rye_slugify_key(nullif($(sql_literal "$domain_key"), '')),
   'scope_ref', nullif($(sql_literal "$scope_ref"), '')
-);"
+)
+FROM (SELECT set_config('app.current_role', 'admin', false)) cfg;"
         return
       fi
 
-      psql_exec "SELECT rye.grant_agent_capability($(sql_literal "$key"), $(sql_literal "$capability"), nullif($(sql_literal "$domain_key"), ''), nullif($(sql_literal "$scope_ref"), ''), nullif($(sql_literal "$expires_at"), '')::timestamptz) AS grant_id;"
+      psql_exec "SELECT rye.grant_agent_capability($(sql_literal "$key"), $(sql_literal "$capability"), nullif($(sql_literal "$domain_key"), ''), nullif($(sql_literal "$scope_ref"), ''), nullif($(sql_literal "$expires_at"), '')::timestamptz) AS grant_id
+FROM (SELECT set_config('app.current_role', 'admin', false)) cfg;"
       ;;
     issue-token)
       local key=""
@@ -1203,14 +1210,18 @@ EOF
       [[ -n "$key" ]] || die "agents issue-token requires --key."
 
       if [[ "$OUTPUT_JSON" -eq 1 ]]; then
-        psql_json "SELECT rye.issue_agent_token_record($(sql_literal "$key"), nullif($(sql_literal "$label"), ''), nullif($(sql_literal "$expires_at"), '')::timestamptz);"
+        psql_json "SELECT rye.issue_agent_token_record($(sql_literal "$key"), nullif($(sql_literal "$label"), ''), nullif($(sql_literal "$expires_at"), '')::timestamptz)
+FROM (SELECT set_config('app.current_role', 'admin', false)) cfg;"
         return
       fi
 
       psql_exec "SELECT
   issued->>'token_id' AS token_id,
   issued->>'token' AS one_time_token
-FROM rye.issue_agent_token_record($(sql_literal "$key"), nullif($(sql_literal "$label"), ''), nullif($(sql_literal "$expires_at"), '')::timestamptz) AS issued;"
+FROM (
+  SELECT rye.issue_agent_token_record($(sql_literal "$key"), nullif($(sql_literal "$label"), ''), nullif($(sql_literal "$expires_at"), '')::timestamptz) AS issued
+  FROM (SELECT set_config('app.current_role', 'admin', false)) cfg
+) t;"
       echo "Token is shown once. Rye stores only its SHA-256 hash."
       ;;
     revoke-token)
@@ -1238,15 +1249,22 @@ EOF
       [[ -n "$token_id" ]] || die "agents revoke-token requires --token-id."
 
       if [[ "$OUTPUT_JSON" -eq 1 ]]; then
-        psql_json "SELECT jsonb_build_object('token_id', $(sql_literal "$token_id"), 'revoked', rye.revoke_agent_token($(sql_literal "$token_id")::uuid, 'scripts/rye agents revoke-token'));"
+        psql_json "SELECT jsonb_build_object('token_id', $(sql_literal "$token_id"), 'revoked', rye.revoke_agent_token($(sql_literal "$token_id")::uuid, 'scripts/rye agents revoke-token'))
+FROM (SELECT set_config('app.current_role', 'admin', false)) cfg;"
         return
       fi
 
-      psql_exec "SELECT rye.revoke_agent_token($(sql_literal "$token_id")::uuid, 'scripts/rye agents revoke-token') AS revoked;"
+      psql_exec "SELECT rye.revoke_agent_token($(sql_literal "$token_id")::uuid, 'scripts/rye agents revoke-token') AS revoked
+FROM (SELECT set_config('app.current_role', 'admin', false)) cfg;"
       ;;
     list)
+      # A scan carries its RLS qual, so the role has to be set before the scan
+      # starts, not merely in the same statement. A lateral reference to cfg is
+      # what makes the planner put cfg first.
       if [[ "$OUTPUT_JSON" -eq 1 ]]; then
-        psql_json "WITH cfg AS (SELECT set_config('app.current_role','admin',false))
+        psql_json "SELECT agents
+FROM (SELECT set_config('app.current_role','admin',false) AS role_set) cfg
+CROSS JOIN LATERAL (
 SELECT jsonb_build_object(
   'agents', COALESCE(jsonb_agg(jsonb_build_object(
     'agent_id', ai.id,
@@ -1276,27 +1294,33 @@ SELECT jsonb_build_object(
       WHERE g.agent_id = ai.id
     )
   ) ORDER BY ai.agent_key), '[]'::jsonb)
-)
-FROM rye.agent_identities ai, cfg;"
+) AS agents
+FROM rye.agent_identities ai
+WHERE cfg.role_set IS NOT NULL
+) listing;"
         return
       fi
 
-      psql_exec "WITH cfg AS (SELECT set_config('app.current_role','admin',false))
-SELECT
-  ai.agent_key,
-  ai.label,
-  ai.runtime,
-  ai.default_scope_ref,
-  ai.active,
-  (
-    SELECT COUNT(*)::int
-    FROM rye.agent_api_tokens tok
-    WHERE tok.agent_id = ai.id
-      AND tok.revoked_at IS NULL
-      AND (tok.expires_at IS NULL OR tok.expires_at > now())
-  ) AS active_token_count
-FROM rye.agent_identities ai, cfg
-ORDER BY ai.agent_key;
+      psql_exec "SELECT agent_key, label, runtime, default_scope_ref, active, active_token_count
+FROM (SELECT set_config('app.current_role','admin',false) AS role_set) cfg
+CROSS JOIN LATERAL (
+  SELECT
+    ai.agent_key,
+    ai.label,
+    ai.runtime,
+    ai.default_scope_ref,
+    ai.active,
+    (
+      SELECT COUNT(*)::int
+      FROM rye.agent_api_tokens tok
+      WHERE tok.agent_id = ai.id
+        AND tok.revoked_at IS NULL
+        AND (tok.expires_at IS NULL OR tok.expires_at > now())
+    ) AS active_token_count
+  FROM rye.agent_identities ai
+  WHERE cfg.role_set IS NOT NULL
+) listing
+ORDER BY agent_key;
 
 SELECT
   ai.agent_key,
@@ -1333,7 +1357,10 @@ EOF
       [[ "$limit" =~ ^[0-9]+$ ]] || die "agents audit --limit must be an integer."
 
       if [[ "$OUTPUT_JSON" -eq 1 ]]; then
-        psql_json "SELECT jsonb_build_object(
+        psql_json "SELECT actions
+FROM (SELECT set_config('app.current_role','admin',false) AS role_set) cfg
+CROSS JOIN LATERAL (
+SELECT jsonb_build_object(
   'actions', COALESCE(jsonb_agg(jsonb_build_object(
     'id', l.id,
     'agent_key', ai.agent_key,
@@ -1346,33 +1373,41 @@ EOF
     'reason', l.reason,
     'created_at', l.created_at
   ) ORDER BY l.created_at DESC), '[]'::jsonb)
-)
+) AS actions
 FROM (
   SELECT *
   FROM rye.agent_action_log
+  WHERE cfg.role_set IS NOT NULL
   ORDER BY created_at DESC
   LIMIT ${limit}
 ) l
 LEFT JOIN rye.agent_identities ai ON ai.id = l.agent_id
-LEFT JOIN rye.knowledge_domains kd ON kd.id = l.domain_id;"
+LEFT JOIN rye.knowledge_domains kd ON kd.id = l.domain_id
+) audited;"
         return
       fi
 
-      psql_exec "SELECT
-  l.created_at,
-  ai.agent_key,
-  l.action,
-  l.capability,
-  kd.domain_key,
-  l.scope_ref,
-  l.target_ref,
-  l.allowed,
-  l.reason
-FROM rye.agent_action_log l
-LEFT JOIN rye.agent_identities ai ON ai.id = l.agent_id
-LEFT JOIN rye.knowledge_domains kd ON kd.id = l.domain_id
-ORDER BY l.created_at DESC
-LIMIT ${limit};"
+      psql_exec "SELECT created_at, agent_key, action, capability, domain_key, scope_ref, target_ref, allowed, reason
+FROM (SELECT set_config('app.current_role','admin',false) AS role_set) cfg
+CROSS JOIN LATERAL (
+  SELECT
+    l.created_at,
+    ai.agent_key,
+    l.action,
+    l.capability,
+    kd.domain_key,
+    l.scope_ref,
+    l.target_ref,
+    l.allowed,
+    l.reason
+  FROM rye.agent_action_log l
+  LEFT JOIN rye.agent_identities ai ON ai.id = l.agent_id
+  LEFT JOIN rye.knowledge_domains kd ON kd.id = l.domain_id
+  WHERE cfg.role_set IS NOT NULL
+  ORDER BY l.created_at DESC
+  LIMIT ${limit}
+) audited
+ORDER BY created_at DESC;"
       ;;
     -h|--help|help|"")
       cat <<'EOF'
