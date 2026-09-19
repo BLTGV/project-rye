@@ -575,7 +575,7 @@ lands as a candidate and has no effect. Rule 1 itself is sound:
 self_settled_type:expectation alone leaves expectation with the manager.
 Smallest fix named: an assertion_type_access write row limiting
 registry_entry to admin, and the same for the lifecycle helpers. Lead:
-opened as work/004.
+opened as work/005 (work/004 is the separate RLS item).
 
 ## Close
-done 2026-09-19. Merged to agent-roles at e90bbbe; combined suite passed. rye_settlers() is read-only and advisory. Follow-ups: work/004 registry write gate (HIGH, pre-existing, found here); let plugin manifests contribute self-settled types so rye-org can ship a starter list (needs a manifest schema change); a replay runner so manager-expectation runs end to end; the agent creates the first area with the person as owner, so zero setup covers decisions as well as self statements; then the next v0.4 items in order: write echo, the questions a person owes, objections, and calling the lookup from the acceptance path for API callers.
+done 2026-09-19. Merged to agent-roles at e90bbbe; combined suite passed. rye_settlers() is read-only and advisory. Follow-ups: work/005 registry write gate (HIGH, pre-existing, found here); let plugin manifests contribute self-settled types so rye-org can ship a starter list (needs a manifest schema change); a replay runner so manager-expectation runs end to end; the agent creates the first area with the person as owner, so zero setup covers decisions as well as self statements; then the next v0.4 items in order: write echo, the questions a person owes, objections, and calling the lookup from the acceptance path for API callers.
