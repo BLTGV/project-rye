@@ -220,24 +220,48 @@ act second. The rules are tried in this order, and the first that applies wins:
 | # | Condition | Relationship default |
 |---|---|---|
 | 0 | `p_claim_type` is a relationship edge type: `reports_to`, `owns` | none, fall through |
-| 1 | `p_claim_type` is other-set, or `p_speech_act` is `expectation` | manager only. Self is never returned |
-| 2 | `p_speech_act` is recognized | `self_commitment`, `self_report`: self. `statement_about_other`: the subject, then the subject's manager. `statement_about_thing`: owner. `agreement`, `decision`, `outside_report`, `agent_inference`: none, fall through |
-| 3 | `p_claim_type` is self-set | self only |
-| 4 | Otherwise: no claim type class and the speech act is null or unrecognized | none, fall through |
+| 1 | The canonical claim type is other-set, or `p_speech_act` is `expectation` | manager only. Self is never returned |
+| 2 | `p_speech_act` is recognized | `self_commitment`, `self_report`: self when the canonical claim type is self-set, otherwise none, fall through. `statement_about_other`: the subject's manager, and the subject as well when the canonical claim type is self-set. `statement_about_thing`: owner. `agreement`, `decision`, `outside_report`, `agent_inference`: none, fall through |
+| 3 | The canonical claim type is self-set | self only |
+| 4 | Otherwise | none, fall through |
 
-*Other-set* claim types are claims one person sets on another. The set is
-`expectation`. *Self-set* claim types are a person's own commitment or report
-about themselves. The set is `commitment`, `self_commitment`, `self_report`.
-Membership is tested on the canonical claim type, after alias resolution. Both
-sets may grow additively, and a claim type in neither set selects nothing.
-Membership is stated here and nowhere else. There is no table to configure and
-no migration to run.
+**The subject is returned only when the claim type is positively known to be
+one a person settles about themselves.** That is the governing rule, and the
+table is its consequence. Membership in the self set is the only thing that
+makes the subject its own settler. No speech act does it on its own.
+`self_commitment` on a claim type nobody has declared self-settled returns
+nobody, not the subject. Unknown is restrictive.
+
+*Other-set* claim types are claims one person sets on another. The core set is
+`expectation`. *Self-set* claim types are ones a person settles about
+themselves. The core set is `commitment`, `self_commitment`, `self_report`.
+Both are tested on the canonical claim type, after alias resolution.
+
+The self set is extensible as data, not code. A registry entry with the key
+`self_settled_type:<canonical assertion type>` and the jsonb value `true` adds
+a member. It is read with `registry_value()`, the same way `type_alias` entries
+are read, so it is an accepted assertion of type `registry_entry` and it obeys
+scope the same way. Any other value, including `false` and null, is not a
+member. The type in the key is the canonical one: an alias is registered as an
+alias, not as a second self-settled entry. The core members above need no
+registry row, so a fresh instance works with none. Plugin manifests cannot
+contribute self-settled types today, because `contributes` in
+`plugins/rye-plugin.schema.json` is a closed object; adding them is a manifest
+schema change and is not promised here.
+
+**Blindness is always restrictive.** A caller who cannot see an alias, a
+self-settled registry entry, or the assertion that carries one gets the answer
+for a claim type it cannot classify. That answer is never the subject. RLS
+hides a configuration row from one role and not another, and a candidate
+registry entry is invisible until it is accepted, so two callers can classify
+the same claim type differently. The difference can only ever cost a caller
+settlers, never grant them. An authority answer never widens because a
+configuration row happened to be visible.
 
 Matching is case-sensitive, and resolution does not fold case. `Expectation`
-with no alias registered for it is a different type, it is in neither set, and
-with a self speech act it returns the subject as its own settler. That is the
-limit already named in "What the lookup does not answer", and the fix for it is
-an alias, the same fix the rest of the schema uses for a spelling. Register
+with no alias registered for it is a different type and is in neither set, so
+it takes the restrictive branch and falls through to the area owner. The fix is
+an alias, the same fix the rest of the schema uses for a spelling: register
 `type_alias:assertion_type:Expectation` and it resolves like any other.
 
 An alias cycle raises, exactly as `canonical_type()` raises. The lookup does
@@ -255,6 +279,14 @@ may settle. It selects no relationship default at all, exactly as `agreement`
 does, and the lookup falls through to the area owner. The union of self, owner,
 and manager is not returned, and the caller gets a smaller answer for saying
 less, not a larger one.
+
+What this costs is worth stating. A person whose agent invents a claim type
+about them, or spells a known one differently, no longer settles it themselves.
+It goes to the area owner. For a lone person that owner is themselves once
+their first area exists, so the cost is nothing. On a team it is one question
+to the area owner, and the answer is a `self_settled_type` registry entry that
+settles every later claim of that type. A claim of a core self type still
+settles with no registry rows and no area at all.
 
 `speech_act_recognized` is false for a value outside the recognized set, and no
 error is raised. A caller must not record a statement as accepted while
@@ -274,14 +306,12 @@ either end of it.
 
 ### What the lookup does not answer
 
-It reads no assertion. It cannot see that a claim on this subject is already
-accepted, so it cannot tell a new statement from a contradiction of an old one.
-One case follows, and it is not solved here. A person restates or contradicts
-an accepted claim about themselves that somebody else authorized, under a claim
-type that is not in the other-set list. A quota their manager set is the
-example. The lookup may well return that person as a settler, because for that
-claim type and that speech act they are one, and nothing in the answer says an
-accepted claim is already standing.
+It reads no standing claim. It cannot see that a claim on this subject is
+already accepted, so it cannot tell a new statement from a contradiction of an
+old one. One case follows, and it is not solved here. A person restates or
+contradicts an accepted claim about themselves of a self-set type that somebody
+else authorized. The lookup returns that person as a settler, correctly, and
+nothing in the answer says an accepted claim is already standing.
 
 That is the objection path, and it is a later work item. Accepted stays
 accepted until a settler changes it, and an objection is a record of its own,

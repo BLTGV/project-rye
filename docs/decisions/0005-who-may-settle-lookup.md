@@ -223,3 +223,43 @@ they are data rather than code, and they work for `requirement` as well as for
 unclassified type and, with a self speech act, returns the subject. That cost
 is named in the contract under "What the lookup does not answer", and the
 remedy is one registry row.
+
+**The subject settles only a claim type positively known to be self-settled,
+and the self set is registry data.** Three fail-open findings landed in a row:
+a null speech act returned the union, an aliased claim type skipped the
+manager rule, and an alias hidden by RLS did the same. They share one root.
+The subject was returned whenever the claim type was *not* recognized as set
+on a person, so unrecognized was the permissive default, and every way of
+making a type look unrecognized reopened the hole: omission, a synonym, a
+capital letter, an alias the caller cannot see, an alias still a candidate, an
+alias in another scope. The polarity is now reversed. The subject is a settler
+only when the canonical claim type is in the self set. `self_commitment`,
+`self_report`, and the subject half of `statement_about_other` all require
+membership; without it they select nobody, and `statement_about_other` returns
+the subject's manager alone. Unknown is restrictive, so every blindness
+resolves to the area owner or to `step` `none`, which is the safe side. The
+practical result is that a caller who cannot see a configuration row loses
+settlers and never gains them, which is the property an authority answer
+needs: visibility of a config row must not decide who may settle.
+
+Convention over schema survives because the set is data. A registry entry
+`self_settled_type:<canonical assertion type>` with the value `true` adds a
+member, read with `registry_value()` exactly as `type_alias` entries are, so a
+new self-settled type needs no migration. The core members `commitment`,
+`self_commitment`, and `self_report` are literal in the function, so a fresh
+instance with no registry rows and no area still lets a person settle claims
+about themselves, which is what work item 002 requires. The honest cost is
+that an unclassified claim type about a person now goes to the area owner
+instead of to them. For a lone person that owner is themselves. On a team it
+is one question, answered once, by a registry entry.
+
+Two alternatives were rejected. The first was a `SECURITY DEFINER` alias
+resolver, so alias lookup would read past RLS and every caller would classify
+alike. It was declined because it fixes one of the three paths and leaves
+omission and capitalisation open, and because it makes an advisory read the
+one thing in this lookup that sees past the caller's RLS, which is a
+privilege escalation surface added to buy a partial fix. The second was
+refusing classified aliases at write time, so an alias could never be hidden.
+It was declined for the same reason, plus two more: it cannot reach aliases
+already written, and it makes a legitimate governance choice, classifying
+configuration, into an error.
