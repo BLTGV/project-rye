@@ -141,4 +141,23 @@ area_owner_not_visible, area_owner_is_agent, no_settler_found (Lead:
 accepted, contract to be amended at close); fixtures create the edges
 directly so nothing depends on the agent-kit manifest edit (Lead: agreed).
 
+### Verifier, 2026-09-19, pass on 1c8c386 (schema) and a5b42c9 (agent-kit): FAIL
+Schema diff clean against the contract. Executed on PostgreSQL 16.2
+(pgserver stand-in, own instance): prelude from 0001/0013/0016, then 0021,
+then tests/conformance/29_settlement_lookup.sql passed; a mutated copy
+failed, so not vacuous. Criteria 1-7 and 9 verified by execution; 8
+(discovery visibility) by reading; 10 CLI executed, skill read. Function is
+SECURITY INVOKER, STABLE, own search_path, no current_user or pg_has_role,
+no dynamic SQL, no new tables or columns. Findings, both agent-kit: (1)
+HIGH: the replay fixture inserts knowledge_domains directly with key
+'sales-operations'; rye_settlers() slugifies explicit keys to
+'sales_operations', so the lookup returns step none, domain_not_found, the
+inverse of the scenario's ground truth. Reproduced by execution; using
+ensure_knowledge_domain() fixes it. (2) LOW: skill and guide say setup_gap
+means no owner, but the function also sets it for area_owner_is_agent.
+Still unexecuted: the area test command and the full suite, pending Docker.
+Outstanding for Architect: amend the contract for the three extra reason
+values and the unknown-explicit-key short-circuit. Lead: findings sent to
+the agent-kit builder as fix attempt 1.
+
 ## Close
