@@ -117,9 +117,42 @@ verifier can assert it directly:
 
 Both are `STABLE`. **Own rows** below always means
 `agent_id = rye_current_agent_id()`, which is null for every shape that is not a
-bound agent, so nothing else owns anything. `app.current_user_id` carries the
-same `agent:<key>` string by convention and is not authoritative for any rule
-here.
+bound agent, so nothing else owns anything.
+
+### `app.current_user_id` is a label, not a binding
+
+Which agent a session **is** comes from `app.current_role` and from nowhere
+else. `app.current_user_id` is the actor label that helpers write into events,
+`created_by`, and audit payloads; it is free text, it is frequently a human or a
+test marker, and no rule in this contract reads it. A session whose
+`app.current_user_id` names a different agent than its `app.current_role` is
+**not** an error and is **not** denied: the label is ignored, and the session is
+the agent its role names, or no agent at all.
+
+One function disagreed and is corrected by the same migration, keeping its
+signature: `agent_can_promote_in_scope(uuid)` from `0019` resolved the acting
+agent from `app.current_user_id` first and fell back to `app.current_role`. It
+now resolves through `rye_current_agent_id()` only. The gate that calls it
+already fires on `app.current_role LIKE 'agent:%'` alone, so one variable now
+decides both whether the rule applies and who it applies to. The narrowing is
+the point: before, a session could declare itself `agent:anything` to trip the
+gate and then name a capable agent in the label to pass it.
+
+Every other function that touches the governance tables takes the agent as an
+explicit `p_agent_id` argument and is unaffected:
+
+| site | reads an agent from | disposition |
+|---|---|---|
+| `agent_can_promote_in_scope` (0019) | `app.current_user_id`, then `app.current_role` | replaced from the new migration, `rye_current_agent_id()` only |
+| `has_agent_capability`, `authorize_agent_action`, `agent_get_context_pack`, `agent_submit_observation`, `agent_create_candidate`, `record_agent_action` (0016) | `p_agent_id` argument | unchanged; the caller's own grants are visible to a bound agent, and admin sees all |
+| `authenticate_agent_token`, `issue_agent_token_record`, `revoke_agent_token` (0016) | the token, or `p_agent_key` | unchanged; admin-only, as above |
+| `rye_settlers`, `rye_settler_is_agent` (0021) | the roster, by ref | unchanged; agent-shaped and wider can read the roster |
+| `record_assertion`, `create_knowledge_candidate`, `describe_category`, `resolve_knowledge_gap`, and the profile helpers (0002, 0009–0012, 0017, 0020, 0100+) | `app.current_user_id` as an actor label only | unchanged; they never resolve an identity or check a capability with it |
+
+A test or client that sets `app.current_role` to `agent:<key>` must use the
+stored key of the identity whose grants it expects. Setting the role to one
+agent and the label to another is the inconsistency this section resolves, and
+it fails closed.
 
 The key must be the stored slug. `agent:my-agent` is agent-shaped but is not a
 bound agent when the stored key is `my_agent` — the same trap as "Area keys and
@@ -160,17 +193,6 @@ than "names an active identity": at level 1 there is nothing left to ask. The
 cost is the agent-shaped hole above, and it is small because
 `agent_identities` holds a key, a label, a runtime, a default scope, and
 properties — no token, no capability, no area.
-
-### Holding an area
-
-An agent **holds** an area when it has a row in `agent_capability_grants` with
-`active` true, `expires_at` null or in the future, and `domain_id` either equal
-to that area or null. A null `domain_id` is an instance-wide grant and holds
-every area, which is what `has_agent_capability()` already means by it. The
-capability name is not part of the rule: any grant holds the area for reading
-that area's governance rows. This is deliberately wider than the capability
-filter the agent functions apply to their own answers, so RLS never subtracts
-from what `agent_get_context_pack()` would have returned.
 
 ### Holding an area
 

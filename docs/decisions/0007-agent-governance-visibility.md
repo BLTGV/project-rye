@@ -63,6 +63,32 @@ the secret-free roster. It gains nothing else — every other rule needs a real
 identity row — and the criterion that a session with no role set reads zero rows
 from all nine tables still holds.
 
+**One session variable says which agent you are, and it is
+`app.current_role`.** Added 2026-09-19, after the Verifier found conformance
+test 26 failing. `agent_can_promote_in_scope()` resolved the acting agent from
+`app.current_user_id` first, while the new grants policy binds own rows from
+`app.current_role`, and test 26 sets the two to different agents — role
+`agent:test`, label `governance_agent` — so the grants went invisible and the
+promotion gate closed. The function is replaced from the new migration with the
+same signature and resolves through `rye_current_agent_id()` only, and the test
+is corrected to name one agent in both places. The rejected alternative was to
+widen the binding so a session is whichever agent either variable names. It is
+implementable — `agent_key = rye_slugify_key(current_setting('app.current_user_id'))`
+reads no table, so the level-1 policy stays row-local and the order stays
+acyclic — and it is not obviously worse in the direct-SQL threat model, where a
+session can set either variable freely. It was declined because it makes one
+session two agents at once and leaves which one wins depending on which function
+you call, which is the bug in the first place, and because it turns a label into
+a credential: `app.current_user_id` is free text that helpers copy into events,
+`created_by`, and audit payloads, and a trusted layer that sets the role from a
+verified token while copying a caller-supplied actor string into the label would
+hand out another agent's grants. The narrowing closes a real escape hatch: the
+promotion gate already fires on `app.current_role LIKE 'agent:%'` alone, so
+before this a session could declare itself `agent:anything` to trip the gate and
+then name a capable agent in the label to pass it. Every other function that
+touches the governance tables takes the agent as an explicit argument, so the
+correction is one function and one test.
+
 **The five write helpers stay `SECURITY INVOKER` and admin-only write policies
 do the enforcing.** `ensure_knowledge_domain`, `subscribe_channel_to_domain`,
 `grant_domain_authority`, `create_agent_identity`, and `grant_agent_capability`
