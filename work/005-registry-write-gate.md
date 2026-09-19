@@ -151,4 +151,29 @@ builder as fix attempt 1. Cookbook: 39 statements executed, 3 failed from
 one ordering bug, 3 were silent no-ops (SET LOCAL outside a transaction);
 everything else confirmed correct; sent to the cookbook author.
 
+### Builder schema, 2026-09-19, fix attempt 1 (commit 0c6f77e)
+Result: done. 0023 edited in place: assertion_settle_gate_guard() now
+raises, for a gated type and a caller not in allowed_roles, both when a row
+becomes accepted and when an already accepted row is changed in any way; on
+UPDATE the gated spelling is taken from OLD, so an accepted configuration
+row stays configuration; candidates untouched. New obligation 5b in test
+30. Pre-fix reproduction under agent:t on the non-superuser role: ending an
+accepted registry_entry succeeded; narrowing effective_to succeeded;
+rewriting attrs through the assertion_outcome path succeeded; ending the
+scope's review_policy succeeded, scope_review_policy fell strict to open,
+and the next ordinary agent write landed ACCEPTED. Post-fix all are
+refused, the policy stays strict, and that write lands as a candidate.
+Full Docker flow passed from an empty volume. Learned:
+assertion_delete_policy is USING (false), so no role deletes an assertion,
+admin included, and DELETE returns 0 rows silently, so tests must check
+ROW_COUNT; app.write_path = 'assertion_outcome' is the one path the 0019
+immutability guard lets attrs through.
+
+### Builder agent-kit, 2026-09-19, session context in two docs (commit 85df91b)
+docs/agent-ops-guide.md "Start a session" now uses plain SET;
+docs/conventions-catalog.md "Session Variable Convention" keeps SET LOCAL
+and gains BEGIN and COMMIT. No SET LOCAL in any SKILL.md; the two script
+hits emit BEGIN on the line before. Intake check passes. Found while
+executing the small product team cookbook; rides on this branch.
+
 ## Close
