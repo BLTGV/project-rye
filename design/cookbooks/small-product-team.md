@@ -524,7 +524,59 @@ SELECT accept_assertion(
 She hears one line: **"Opened #412, and I have it down that Wandercrate and
 Bellwether both asked for it."**
 
-### Step 6. A PR references the issue
+### Step 6. Ines promises Wandercrate a date
+
+Jo emails asking when. Ines tells her agent:
+
+> Tell Jo it lands in the next release, out on the 19th.
+
+That is a self-commitment. `commitment` is a core self-settled type, so the
+lookup returns Ines herself and it lands accepted on her word. The customer is
+not the subject: the promise is a fact about the person who made it.
+
+```sql
+SELECT record_event(
+    p_event_type        := 'statement_made',
+    p_summary           := 'Ines promised Wandercrate the export fix in the next release',
+    p_properties        := '{"channel": "email", "recipient": "jo@wandercrate.example"}',
+    p_participant_ids   := ARRAY['<ines_uuid>', '<wandercrate_uuid>', '<issue_412_uuid>']::uuid[],
+    p_participant_roles := ARRAY['speaker', 'regarding', 'regarding'],
+    p_actor             := 'agent:ines-coding',
+    p_occurred_at       := '2026-03-12T11:05:00Z'::timestamptz
+);
+
+SELECT record_assertion(
+    p_assertion_type  := 'commitment',
+    p_claim           := '{"value": "CSV export fix ships to Wandercrate in the next release"}',
+    p_subject_node_id := '<ines_uuid>'::uuid,
+    p_assertion_key   := 'wandercrate:export_fix',
+    p_effective_at    := '2026-03-19T00:00:00Z'::timestamptz,
+    p_status          := 'accepted',
+    p_basis           := 'reported',
+    p_confidence      := 1.0,
+    p_evidence        := ARRAY[jsonb_build_object(
+        'kind', 'source',
+        'event_id', '<promise_event_uuid>',
+        'witness_node_id', '<ines_uuid>',
+        'attrs', jsonb_build_object(
+            'authorizer', '<ines_uuid>',
+            'executor', 'agent:ines-coding',
+            'settled_via', 'relationship',
+            'settled_relationship', 'self')
+    )],
+    p_attrs           := '{"promised_to": "Wandercrate Ltd",
+                           "tracked_as": "quillstone/api#412"}'
+);
+```
+
+`promised_to` is the customer's label and `tracked_as` is the issue's
+`external_id`, which is what `link_record()` stored. Those two keys are what
+makes the promise findable later, and the third query in section 6 reads both.
+
+She hears: **"Noted. You've told Wandercrate it ships on the 19th, against
+#412."**
+
+### Step 7. A PR references the issue
 
 The sync sees `Closes #412` on PR #419. It records the PR as a task of type
 `pull_request`, the `resolves` edge, and the merge event. No diff, no review
@@ -557,7 +609,7 @@ SELECT advance_task_status(
 );
 ```
 
-### Step 7. Ines says why
+### Step 8. Ines says why
 
 > We're paginating rather than streaming.
 
@@ -618,7 +670,7 @@ wrote it down" is still reconstructible.
 She hears: **"Got it. Exports paginate, not stream, and that is on the record
 against #412."**
 
-### Step 8. The release ships
+### Step 9. The release ships
 
 ```sql
 SELECT link_record('github', 'release', 'quillstone/api@v0.9.0', 'release', 'v0.9.0',
@@ -698,6 +750,11 @@ WHERE a.assertion_type = 'commitment'
 ORDER BY a.effective_at;
 ```
 
+Run against the walk it returns one row: Ines Vaz, the export fix promise,
+promised for 2026-03-19, tracked as `quillstone/api#412`, status `done`. The
+status comes from the issue's own `task_status`, so the promise and whether it
+was kept read together.
+
 ### What is asked for most and has no issue?
 
 ```sql
@@ -755,7 +812,7 @@ accepted claim is refused nothing.
 
 **The standing-claim guard is manual.** The lookup reads no assertion, so
 `is_settler` `true` is not permission to replace something already accepted.
-The check in step 7 is the guard, and the agent has to run it itself.
+The check in step 8 is the guard, and the agent has to run it itself.
 
 **Routing is proposed, not built.** "Tell Ines that Tomas suggested this" has
 no mechanism. `review_queue` is the durable backing and a person still has to
