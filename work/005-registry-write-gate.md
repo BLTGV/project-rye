@@ -53,4 +53,34 @@ policy changes.
 ## Reports
 Paste each role's report here as it arrives.
 
+### Architect, 2026-09-19
+Result: done. Changed: contracts/sql-surface.md (new "Configuration writes
+need an admin"), docs/decisions/0007-configuration-writes-need-an-admin.md
+(with 11 test obligations). Mechanism: assertion_type_access `write` rows
+refuse through the RLS INSERT policy and would discard the statement, so
+the table gains a third operation value `settle` (data, admin-writable,
+readable by every role so the gate is never invisible to the caller it
+binds). record_assertion() demotes to candidate at the same point as the
+review-policy demotion, BEFORE the block that supersedes the incumbent, or
+the key would be erased. One BEFORE INSERT OR UPDATE trigger on assertions
+raises on every other route, and fires inside SECURITY DEFINER helpers.
+Lifecycle: demote in record_assertion() only; refuse in accept_assertion,
+supersede_assertion, record_distillation, raw INSERT, raw UPDATE;
+schedule_assertion_change and record_scope_policy route through
+record_assertion and demote. Set covered: registry_entry, review_policy.
+Deferred with reasons: scope_status (demotion fails open), plugin
+enablement (an edge, not an assertion), other scope policy types,
+domain_authorities. Existing flows: every registry and scope-policy write
+in tests, scripts/rye, and sync_plugin_metadata.sh already runs as admin;
+migrations must set the role. Caller is told through attrs.settle_gate on
+the candidate, visible in review_queue, plus a read function
+settle_gate(type) to ask first. Learned: a non-admin can insert an accepted
+assertion directly today, and can promote ANY candidate with a raw UPDATE
+after setting app.write_path and app.accept_assertion_id, because the RLS
+update policy trusts those settings and the 0019 immutability guard no
+longer lists status. Wider than this item; gated here only for
+configuration types. Questions: the wider promotion hole as its own item
+(Lead: yes, flagged separately); settle_gate() as a new read function
+(Lead: accepted).
+
 ## Close

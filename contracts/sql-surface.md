@@ -22,7 +22,7 @@ client of it. This contract says what a client may depend on.
   status, or basis.
 - **Reads are views and `SELECT`-returning functions**: `rye_catalog()`,
   `rye_agent_context()`, `rye_categories()`, `rye_settlers()`,
-  `agent_node_summary()`, and the views above. `rye_categories()` has its own
+  `settle_gate()`, `agent_node_summary()`, and the views above. `rye_categories()` has its own
   contract, `contracts/category-vocabulary.md`, which governs its jsonb shape;
   `rye_settlers()` is governed by the "Settlement lookup" section below.
   Base-table reads carry no promise beyond the data dictionary's columns.
@@ -54,12 +54,109 @@ exist for tables passed to `track_table()`.
 - A refused write raises, and clients surface the message rather than
   retrying. Refusals are load-bearing: teams without a classification, an
   assertion without evidence when basis is not `assumed`, a supersession
-  across subjects, a term outside the scope's enabled plugins.
+  across subjects, a term outside the scope's enabled plugins, an accepted
+  configuration assertion from a caller who is not a Rye admin.
 - RLS failures are silent by construction: an invisible node yields zero rows,
   not an error, so a client reading zero rows must not conclude the row is
   absent. `INSERT ... RETURNING` on RLS-protected tables fails; use the helper.
 - No path in this contract deletes an event or mutates an accepted assertion
   in place.
+
+## Configuration writes need an admin
+
+Some assertion types are not knowledge about the world. They are Rye's own
+configuration, and Rye reads them to decide how it treats every other write.
+`registry_entry` carries the type aliases and the self-settled type list that
+`canonical_type()`, `registry_value()`, and `rye_settlers()` read.
+`review_policy` decides whether a write lands accepted at all. A caller who
+can set either of those can change every later answer, so only a Rye admin
+settles them.
+
+**The gate is data.** `assertion_type_access` gains a third `operation`
+value, `settle`, beside `read` and `write`. A row
+`(assertion_type, 'settle', allowed_roles)` means: only a caller whose
+`app.current_role` is in `allowed_roles` may make an assertion of that type
+accepted. A type with no `settle` row is ungated. The table is readable by
+every role and writable only by `admin`, as it already was, so no caller is
+blind to the gate and no caller can widen it. Adding a type to the gate is an
+`INSERT`, not a migration.
+
+At this version two rows are seeded, both `ARRAY['admin']`:
+
+| `assertion_type` | Why |
+|---|---|
+| `registry_entry` | Type aliases, `self_settled_type:*`, `governed_type:*`, `DEFAULT_SCOPE`, basis priors, half lives, digest facets. Every reader of configuration reads this type. |
+| `review_policy` | Decides whether other writes land accepted. Ungated, it is the key to every other lock. |
+
+Deliberately not gated yet, each for a stated reason:
+
+- `scope_status`. Demoting it fails open, not closed. An inactive scope is not
+  selected by `governing_scope()`, so its review policy stops applying and
+  subjects it would have governed fall back to `open`. Gating it would make a
+  non-admin onboarding run leave governance weaker than it is today. The fix
+  is for scope creation to run as an admin, which is a separate item.
+- Plugin enablement. What `registry_value()` and `compile_scope_policy()` read
+  is the `scope_enables_plugin` edge. The `plugin_policy_binding` assertion is
+  a record of the act, not the act. Gating an assertion would not gate the
+  edge, and an edge gate is a different mechanism.
+- The other scope policy types written by `record_scope_policy()`
+  (`expected_contexts`, `retention_policy`, `source_of_truth`, conventions).
+  They shape what agents are told, not what Rye computes. They also all escape
+  the review policy today, because `governing_scope()` returns null for a
+  scope node's own policy assertions. That leak is its own item, and it is not
+  narrowed or widened here.
+- `domain_authorities` grants, which also decide who may settle. They are
+  table rows, not assertions, and their own RLS is a separate item.
+
+**What a non-admin gets.** `record_assertion()` demotes rather than refuses.
+When the type is gated and the caller is not allowed, the requested status
+`accepted` becomes `candidate` before anything else happens, so no incumbent
+is superseded and nothing said is lost. The row carries
+`attrs.settle_gate = {"pending": true, "requested_status": "accepted",
+"allowed_roles": [...]}`. It appears in `review_queue` like any other
+candidate, with those attrs, and an admin accepts or rejects it there. The
+demotion is independent of the review policy: it applies under `open`,
+`candidates_only`, `strict`, and when no policy is recorded at all.
+
+**Every other path refuses.** Because `record_assertion()` has already
+demoted, an accepted row of a gated type can only reach the table by some
+other route, and every other route raises:
+
+- A direct `INSERT INTO assertions` with `status = 'accepted'`.
+- Any `UPDATE` that moves a gated row from another status to `accepted`,
+  including `accept_assertion()` and including a raw `UPDATE` by a caller who
+  sets `app.write_path` itself.
+- `supersede_assertion()` and `record_distillation()`, which insert accepted
+  rows directly. Refusing rather than demoting is deliberate: both mark or
+  displace an incumbent first, and a silent demotion there would leave the key
+  with no accepted value at all.
+
+A refusal here loses nothing, because the statement can be recorded with
+`record_assertion()` and become a suggestion. The check lives in one place, a
+trigger on `assertions`, so a `SECURITY DEFINER` helper does not escape it and
+neither does a direct write. An agent capability grant
+(`rye.authoritative.promote`) does not open this gate.
+
+**The gated type is the stored spelling.** The trigger compares
+`assertion_type` as written, with no alias resolution, because every reader of
+configuration does the same: `registry_value()` and `governing_scope()` match
+the stored literal. A row stored under another spelling is not read as
+configuration, so it does not need to be gated as configuration.
+`record_assertion()` canonicalizes before it inserts, so an alias of a gated
+type is gated.
+
+**Asking first.** `settle_gate(p_assertion_type text) RETURNS jsonb` answers
+`{assertion_type, gated, allowed_roles, current_role, may_settle}`. It is
+`STABLE`, `SECURITY INVOKER`, and writes nothing. A client calls it before
+offering to record configuration, so it can tell the person what will happen.
+The schema returns facts only. The sentence a person hears is the client's, not
+the database's.
+
+**Installing and seeding.** The gate treats an unset `app.current_role` as not
+allowed. A migration or script that seeds configuration must set
+`app.current_role` to `admin` first, as `sync_plugin_metadata.sh` does.
+Migrations applied before the gate existed are unaffected, and on a fresh
+install the core registry seeds run before the gate is created.
 
 ## Settlement lookup
 
@@ -243,7 +340,10 @@ a member. It is read with `registry_value()`, the same way `type_alias` entries
 are read, so it is an accepted assertion of type `registry_entry` and it obeys
 scope the same way. Any other value, including `false` and null, is not a
 member. The type in the key is the canonical one: an alias is registered as an
-alias, not as a second self-settled entry. The core members above need no
+alias, not as a second self-settled entry. Only a Rye admin settles that entry,
+and only a Rye admin settles an alias. Anyone may propose one, and a proposal
+is a candidate with no effect on this lookup until an admin accepts it. See
+"Configuration writes need an admin". The core members above need no
 registry row, so a fresh instance works with none. Plugin manifests cannot
 contribute self-settled types today, because `contributes` in
 `plugins/rye-plugin.schema.json` is a closed object; adding them is a manifest
