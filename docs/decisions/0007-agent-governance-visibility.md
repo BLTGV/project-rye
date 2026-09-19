@@ -19,7 +19,8 @@ roles are while its policies depended on there being one.
 
 **An agent reads the whole agent roster, and that is what keeps "agents settle
 nothing" fail-closed.** `agent_identities` is readable by admin, by every named
-role, and by every agent session, which makes its read set a strict superset of
+role, and by every session whose `app.current_role` has the `agent:<key>` form,
+which makes its read set a strict superset of
 the read set of `knowledge_domains` and `domain_authorities`. That superset is
 the whole argument: the ref half of `rye_settler_is_agent()` only ever matters
 for a settler whose ref came from a governance table, and any caller that can
@@ -35,6 +36,32 @@ declined too — it hides other agents from the deny-list, which is precisely th
 fail-open case. The honest cost is that the roster is not secret; it holds a
 key, a label, and a runtime, while the tokens and the capabilities stay
 admin-only.
+
+**Which agent you are is asked one level down, because the roster's own policy
+cannot ask it.** Added 2026-09-19, after the Lead found the self-reference. The
+first version of this record defined an agent session as one naming an *active*
+identity, which puts a read of `agent_identities` inside `agent_identities`' own
+policy. That is not implementable. Verified on PostgreSQL 16 with a
+non-superuser owner and `FORCE ROW LEVEL SECURITY`: a policy that subqueries its
+own table raises `infinite recursion detected in policy for relation`, and a
+policy that calls a function reading its own table recurses to `stack depth
+limit exceeded` — `SECURITY DEFINER` included, which is the paragraph above seen
+from the other side. The session shape therefore splits. **Agent-shaped** is the
+`agent:<key>` form, decided from the session variable alone, and it governs
+exactly one rule: reading the roster. **Bound agent** resolves that key to an
+active identity and governs everything else. The tables are ordered
+`role_classification_access` → `agent_identities` → the four agent tables → the
+four area tables, and a policy may read only levels strictly below its own, so
+the chain area → grants → identities → roles terminates. The rejected
+alternative was to keep the active-identity check on the roster and move the
+resolution into a second session variable such as `app.current_agent_id`, set by
+the trusted layer. It was declined because it adds another thing every caller
+must set correctly for RLS to be right, and a caller that sets it wrong reads
+another agent's grants, which is the one failure this item exists to prevent.
+The accepted cost is that a session can call itself `agent:` anything and read
+the secret-free roster. It gains nothing else — every other rule needs a real
+identity row — and the criterion that a session with no role set reads zero rows
+from all nine tables still holds.
 
 **The five write helpers stay `SECURITY INVOKER` and admin-only write policies
 do the enforcing.** `ensure_knowledge_domain`, `subscribe_channel_to_domain`,

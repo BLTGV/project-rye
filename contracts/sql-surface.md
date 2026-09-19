@@ -82,7 +82,7 @@ shape is untouched. It is recorded in `docs/decisions/0007-agent-governance-visi
 because clients that read these tables without setting a role will start reading
 zero rows.
 
-### Four session shapes
+### Session shapes
 
 `app.current_role` decides. Nothing else decides — not `current_user`, not
 `pg_has_role()`, not the bearer token, which only chooses what the API puts in
@@ -92,27 +92,85 @@ zero rows.
 |---|---|
 | **admin** | `admin` |
 | **named role** | any value equal to a `role_classification_access.role_name`: at install `admin`, `manager`, `deal_manager`, `team_lead`, `hr_admin`, `finance`, `team_member`, `viewer`. `admin` matches here too and always takes the wider branch. |
-| **agent** | `agent:<agent_key>`, where `<agent_key>` is the stored key of an `agent_identities` row with `active` true |
-| **unknown** | anything else, including unset, and `agent:<key>` naming no active identity |
+| **agent-shaped** | `agent:<key>` for any non-empty `<key>`, whether or not an identity by that key exists |
+| **bound agent** | `agent:<agent_key>` where `<agent_key>` is the stored key of an `agent_identities` row with `active` true. Every bound agent is agent-shaped. |
+| **unknown** | anything else, including unset |
 
 A new role is a row in `role_classification_access`, not an edit to a policy.
 That table is already the instance's role list and already readable by every
 session, which is why it and not a hardcoded list is the definition here.
 
-Two published read-only helpers are the only definition of the agent match, so
-a verifier can assert it directly: `rye_current_agent_key() RETURNS text` gives
-the part after `agent:` when `app.current_role` has that form and null
-otherwise, and `rye_current_agent_id() RETURNS uuid` gives the `agent_identities.id`
-of the active row with that key and null otherwise. Both are `STABLE` and read
-`app.current_role` alone. **Own rows** below always means
-`agent_id = rye_current_agent_id()`, which is null for every non-agent shape, so
-no non-agent session owns anything. `app.current_user_id` carries the same
-`agent:<key>` string by convention and is not authoritative for any rule here.
+The two agent shapes are separate because one of them has to be decidable
+without reading `agent_identities`; see "Which policy may read which table".
+Only one rule uses **agent-shaped**: reading the roster. Everything else — own
+rows, holding an area, what the agent functions answer — uses **bound agent**.
+The practical effect is that a session can name itself `agent:` anything and
+read the secret-free roster, and gets nothing else anywhere.
 
-The key must be the stored slug. `agent:my-agent` names no identity whose stored
-key is `my_agent`, so that session is **unknown**, not an agent — the same trap
-as "Area keys and agent keys are slugs" below, and the same fix: write the ref
-against the stored slug.
+Two published read-only helpers are the only definition of the match, so a
+verifier can assert it directly:
+
+| helper | returns | reads |
+|---|---|---|
+| `rye_current_agent_key() RETURNS text` | the part after `agent:` when `app.current_role` has that form, else null. Agent-shaped is `rye_current_agent_key() IS NOT NULL`. | `app.current_role` only. No table. Safe in any policy. |
+| `rye_current_agent_id() RETURNS uuid` | the `agent_identities.id` of the `active` row whose `agent_key` equals that key, else null. Bound agent is `rye_current_agent_id() IS NOT NULL`. | `agent_identities`, under that table's own read rule. Usable only in policies on tables below `agent_identities` in the order. |
+
+Both are `STABLE`. **Own rows** below always means
+`agent_id = rye_current_agent_id()`, which is null for every shape that is not a
+bound agent, so nothing else owns anything. `app.current_user_id` carries the
+same `agent:<key>` string by convention and is not authoritative for any rule
+here.
+
+The key must be the stored slug. `agent:my-agent` is agent-shaped but is not a
+bound agent when the stored key is `my_agent` — the same trap as "Area keys and
+agent keys are slugs" below, and the same fix: write the ref against the stored
+slug.
+
+### Which policy may read which table
+
+No policy may read its own table, directly or through a function, and the rule
+is not a style preference. Verified on PostgreSQL 16 against a non-superuser
+owner with `FORCE ROW LEVEL SECURITY`: a policy whose expression subqueries its
+own table raises `infinite recursion detected in policy for relation "..."` at
+rewrite time, and a policy that calls a function reading its own table — including
+a `SECURITY DEFINER` one owned by the table owner — recurses at run time until
+`stack depth limit exceeded`. Neither is catchable in any useful way, and the
+second appears only when the policy fires.
+
+So the nine tables are ordered, and a policy may read only tables strictly below
+its own level:
+
+| level | tables | its policies may read |
+|---|---|---|
+| 0 | `role_classification_access`, `assertion_type_access`, `field_classifications` | nothing; readable to every session, which is what earlier migrations already do for `redact_properties()` |
+| 1 | `agent_identities` | level 0 and session variables only |
+| 2 | `agent_capability_grants`, `agent_action_log`, `api_idempotency_keys`, `agent_api_tokens` | levels 0–1 |
+| 3 | `knowledge_domains`, `domain_authorities`, `channel_domain_subscriptions`, `domain_claim_policies` | levels 0–2 |
+
+Reading the chain downward: an area's policy asks `agent_capability_grants`
+whether this agent holds it; the grants policy asks `agent_identities` which
+identity this session is; the identity policy asks `role_classification_access`
+whether this is a named role and `app.current_role` whether it is agent-shaped;
+and that table's policy asks nothing. Four levels, no cycle. A level-3 policy
+never reads another level-3 table, so the four area tables are independent of
+each other.
+
+This is the whole reason the roster's read rule is row-local and key-only rather
+than "names an active identity": at level 1 there is nothing left to ask. The
+cost is the agent-shaped hole above, and it is small because
+`agent_identities` holds a key, a label, a runtime, a default scope, and
+properties — no token, no capability, no area.
+
+### Holding an area
+
+An agent **holds** an area when it has a row in `agent_capability_grants` with
+`active` true, `expires_at` null or in the future, and `domain_id` either equal
+to that area or null. A null `domain_id` is an instance-wide grant and holds
+every area, which is what `has_agent_capability()` already means by it. The
+capability name is not part of the rule: any grant holds the area for reading
+that area's governance rows. This is deliberately wider than the capability
+filter the agent functions apply to their own answers, so RLS never subtracts
+from what `agent_get_context_pack()` would have returned.
 
 ### Holding an area
 
@@ -127,17 +185,23 @@ from what `agent_get_context_pack()` would have returned.
 
 ### The rules
 
-| table | admin | named role | agent session | unknown |
-|---|---|---|---|---|
-| `knowledge_domains` | read all; insert, update, delete | read all | read areas it holds | nothing |
-| `domain_authorities` | read all; insert, update, delete | read all | read rows of areas it holds | nothing |
-| `channel_domain_subscriptions` | read all; insert, update, delete | read all | read rows of areas it holds | nothing |
-| `domain_claim_policies` | read all; insert, update, delete | read all | read rows of areas it holds | nothing |
-| `agent_identities` | read all; insert, update, delete | read all | read all | nothing |
-| `agent_capability_grants` | read all; insert, update, delete | nothing | read own rows | nothing |
-| `agent_action_log` | read all; insert only | nothing | read own rows | nothing |
-| `api_idempotency_keys` | read all; insert, delete | nothing | read own rows | nothing |
-| `agent_api_tokens` | read all; insert, update, delete | nothing | nothing | nothing |
+Every row of this table is decidable at its own level of the order above.
+
+| table | admin | named role | bound agent | agent-shaped only | unknown |
+|---|---|---|---|---|---|
+| `knowledge_domains` | read all; insert, update, delete | read all | read areas it holds | nothing | nothing |
+| `domain_authorities` | read all; insert, update, delete | read all | read rows of areas it holds | nothing | nothing |
+| `channel_domain_subscriptions` | read all; insert, update, delete | read all | read rows of areas it holds | nothing | nothing |
+| `domain_claim_policies` | read all; insert, update, delete | read all | read rows of areas it holds | nothing | nothing |
+| `agent_identities` | read all; insert, update, delete | read all | read all | read all | nothing |
+| `agent_capability_grants` | read all; insert, update, delete | nothing | read own rows | nothing | nothing |
+| `agent_action_log` | read all; insert only | nothing | read own rows | nothing | nothing |
+| `api_idempotency_keys` | read all; insert, delete | nothing | read own rows | nothing | nothing |
+| `agent_api_tokens` | read all; insert, update, delete | nothing | nothing | nothing | nothing |
+
+`agent_identities` is the only table whose column differs between the last two
+agent columns, and it is the only table whose rule is decided without reading a
+table at all. A session with no role set still reads zero rows from all nine.
 
 Four rules sit behind that table and are worth stating in words.
 
@@ -147,8 +211,9 @@ else.** `agent_identities` carries no secret — tokens live in
 deny-list for the one rule the settlement model rests on, that an agent is never
 a settler. A deny-list some callers cannot read is a deny-list that fails open.
 Its read set is therefore a superset of the read set of `knowledge_domains` and
-`domain_authorities`, and that superset is the promise: any session that can see
-a grant or an area can see the roster that filters agents out of it.
+`domain_authorities` — admin, named role, and every agent-shaped session, which
+includes every bound agent — and that superset is the promise: any session that
+can see a grant or an area can see the roster that filters agents out of it.
 
 **Capability grants, tokens, and the action log are admin-only for reads other
 than an agent's own.** They are the instance's security configuration and its
@@ -201,7 +266,9 @@ the Supabase case and the one that must hold, a `SECURITY DEFINER` function is
 still subject to every policy, evaluated with the caller's session variables,
 because `app.current_role` is session state and the function does not change it.
 So marking a function `DEFINER` buys nothing here and no function is made
-`DEFINER` to solve visibility. The agent functions keep working by exactly the
+`DEFINER` to solve visibility — including `rye_current_agent_id()`, which
+returns null rather than a bypass when the caller cannot read the roster.
+The agent functions keep working by exactly the
 two mechanisms the schema already uses: the rows they must read are readable to
 the session that calls them (as `field_classifications`, `assertion_type_access`,
 and `role_classification_access` are readable to every session for the sake of
@@ -210,7 +277,7 @@ gate. Concretely:
 
 - `has_agent_capability`, `authorize_agent_action`, `agent_get_context_pack`,
   `agent_submit_observation`, and `agent_create_candidate` read the roster and
-  the caller's own grants, both of which an agent session can see, and the area
+  the caller's own grants, both of which a bound agent can see, and the area
   tables for areas it holds, which is wider than their own capability filter.
   For a valid agent asking about itself the answers are unchanged.
 - The same four asked about **another** agent's id answer as if that agent held
@@ -292,8 +359,8 @@ them; the content is not.
 |---|---|
 | admin | every answer this document describes |
 | named role | the same answers: it reads every area and every grant, and node-derived settlers are filtered by node visibility as they always were |
-| agent | narrowed to the areas it holds. An area it holds no grant on is invisible, so the answer is `step` `none`, `settlers` `[]`, `domain_found` false, `reason` `domain_not_found` — the same answer as for an area key that names nothing, and deliberately indistinguishable from it. An area is not a thing an agent gets told exists. |
-| unknown | no area resolves and no grant is visible, so only the relationship step can produce anything, from nodes it can see |
+| bound agent | narrowed to the areas it holds. An area it holds no grant on is invisible, so the answer is `step` `none`, `settlers` `[]`, `domain_found` false, `reason` `domain_not_found` — the same answer as for an area key that names nothing, and deliberately indistinguishable from it. An area is not a thing an agent gets told exists. |
+| agent-shaped but not bound, or unknown | no area resolves and no grant is visible, so only the relationship step can produce anything, from nodes it can see |
 
 **The agent exclusion cannot fail open where it can matter.** The ref half of
 the check reads `agent_identities`, and the roster is readable by every shape
