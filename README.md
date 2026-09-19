@@ -110,6 +110,8 @@ the fast-start commands.
 
 - `docs/onboarding.md` describes onboarding scopes, source/channel/context
   separation, expected contexts, context gaps, and plugin policy helpers.
+- `docs/agent-authorization-strategy.md` covers trusted direct-database agents,
+  API-connected teams, and proposed conditional approval rules with realistic examples.
 - `docs/roadmap.md` records the undated improvement roadmap.
 - `docs/conventions-catalog.md` lists graph conventions and type vocabulary.
 - `docs/vocabulary-contract.md` fixes the internal/plain-language boundary for
