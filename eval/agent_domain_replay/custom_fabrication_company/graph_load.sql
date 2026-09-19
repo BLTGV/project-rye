@@ -1,4 +1,5 @@
 SET search_path = rye, public, pg_catalog;
+SELECT set_config('app.current_role', 'admin', false);
 
 SELECT rye.ensure_knowledge_domain('quote-pipeline', 'Quote Pipeline', 'Quote stages, values, owners, and customer commitments.');
 SELECT rye.ensure_knowledge_domain('engineering-review', 'Engineering Review', 'Drawing readiness, design risk, and engineering approval.');

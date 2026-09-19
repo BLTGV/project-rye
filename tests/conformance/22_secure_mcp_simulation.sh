@@ -33,6 +33,7 @@ status_code() {
 
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q <<'SQL' >/dev/null
 SET search_path = rye, public, pg_catalog;
+SELECT set_config('app.current_role', 'admin', false);
 SELECT rye.ensure_knowledge_domain('mcp-account-updates', 'MCP Account Updates', 'MCP security simulation domain.');
 SELECT rye.create_agent_identity('mcp-read-agent', 'MCP Read Agent', 'conformance');
 SELECT rye.create_agent_identity('mcp-candidate-agent', 'MCP Candidate Agent', 'conformance');
@@ -44,11 +45,13 @@ SQL
 
 read_token="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atq <<'SQL'
 SET search_path = rye, public, pg_catalog;
+SELECT set_config('app.current_role', 'admin', false) \gset
 SELECT rye.issue_agent_token('mcp-read-agent', 'mcp read token');
 SQL
 )"
 candidate_token="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atq <<'SQL'
 SET search_path = rye, public, pg_catalog;
+SELECT set_config('app.current_role', 'admin', false) \gset
 SELECT rye.issue_agent_token('mcp-candidate-agent', 'mcp candidate token');
 SQL
 )"
