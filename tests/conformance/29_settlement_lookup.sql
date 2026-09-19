@@ -15,6 +15,7 @@ DECLARE
     v_agent_id    uuid;
     v_agent_node  uuid;
     v_case        text;
+    v_core        uuid;
     v_delegate    uuid;
     v_delegate_edge uuid;
     v_bot_two     uuid;
@@ -450,6 +451,123 @@ BEGIN
     END IF;
 
     -- ------------------------------------------------------------------
+    -- Type aliases. The lookup classifies a claim the same way the rest of
+    -- the schema stores it: an organization that calls an expectation a
+    -- `requirement` gets the expectation rules, so the person it is set on
+    -- is still never its settler. Aliases are registry_entry assertions on
+    -- the core registry node, as in test 26.
+    -- ------------------------------------------------------------------
+    SELECT id INTO v_core
+    FROM nodes
+    WHERE external_source = 'rye_registry'
+      AND external_id = 'core'
+      AND archived_at IS NULL;
+
+    IF v_core IS NULL THEN
+        RAISE EXCEPTION 'The core registry node is missing; type aliases cannot be registered';
+    END IF;
+
+    PERFORM record_assertion(
+        'registry_entry', '{"value":"expectation"}', v_core,
+        p_assertion_key := 'type_alias:assertion_type:requirement',
+        p_basis := 'assumed'
+    );
+
+    PERFORM record_assertion(
+        'registry_entry', '{"value":"commitment"}', v_core,
+        p_assertion_key := 'type_alias:assertion_type:promise',
+        p_basis := 'assumed'
+    );
+
+    IF canonical_type('assertion_type', 'requirement') <> 'expectation' THEN
+        RAISE EXCEPTION 'The requirement alias did not register';
+    END IF;
+
+    -- An alias of an other-set type takes rule 1, mislabelled speech act and
+    -- all. This is the fail-open path the alias opened.
+    v_answer := rye_settlers(
+        p_subject_id := v_john,
+        p_claim_type := 'requirement',
+        p_speaker_id := v_john,
+        p_domain_key := 'conformance-settling',
+        p_speech_act := 'self_commitment'
+    );
+
+    IF v_answer->>'step' <> 'relationship'
+       OR (v_answer->>'settler_count')::int <> 1
+       OR v_answer->'settlers'->0->>'node_id' <> v_bob::text
+       OR (v_answer->'speaker'->>'is_settler')::boolean IS DISTINCT FROM false
+       OR v_answer->'claim'->>'claim_type' <> 'requirement'
+       OR v_answer->'claim'->>'canonical_claim_type' <> 'expectation'
+    THEN
+        RAISE EXCEPTION 'An aliased expectation must settle to the manager, got %', v_answer;
+    END IF;
+
+    -- And with no speech act at all.
+    v_answer := rye_settlers(
+        p_subject_id := v_john,
+        p_claim_type := 'requirement',
+        p_speaker_id := v_john,
+        p_domain_key := 'conformance-settling'
+    );
+
+    IF v_answer->>'step' <> 'relationship'
+       OR (v_answer->>'settler_count')::int <> 1
+       OR v_answer->'settlers'->0->>'node_id' <> v_bob::text
+       OR (v_answer->'speaker'->>'is_settler')::boolean IS DISTINCT FROM false
+    THEN
+        RAISE EXCEPTION 'An aliased expectation with no speech act must settle to the manager, got %', v_answer;
+    END IF;
+
+    -- An alias of a self-set type still reaches the person themselves.
+    v_answer := rye_settlers(
+        p_subject_id := v_john,
+        p_claim_type := 'promise',
+        p_speaker_id := v_john,
+        p_domain_key := 'conformance-settling'
+    );
+
+    IF v_answer->>'step' <> 'relationship'
+       OR v_answer->'settlers'->0->>'node_id' <> v_john::text
+       OR v_answer->'settlers'->0->>'relationship' <> 'self'
+       OR v_answer->'claim'->>'canonical_claim_type' <> 'commitment'
+       OR (v_answer->'speaker'->>'is_settler')::boolean IS DISTINCT FROM true
+    THEN
+        RAISE EXCEPTION 'An aliased commitment must settle to the person, got %', v_answer;
+    END IF;
+
+    -- Documented and pinned: matching is case-sensitive after resolution.
+    -- `Expectation` is a different claim type with no alias of its own, so it
+    -- is unclassified and its speech act decides.
+    v_answer := rye_settlers(
+        p_subject_id := v_john,
+        p_claim_type := 'Expectation',
+        p_speaker_id := v_john,
+        p_domain_key := 'conformance-settling',
+        p_speech_act := 'self_commitment'
+    );
+
+    IF v_answer->>'step' <> 'relationship'
+       OR v_answer->'settlers'->0->>'node_id' <> v_john::text
+       OR v_answer->'settlers'->0->>'relationship' <> 'self'
+       OR v_answer->'claim'->>'canonical_claim_type' <> 'Expectation'
+       OR (v_answer->'speaker'->>'is_settler')::boolean IS DISTINCT FROM true
+    THEN
+        RAISE EXCEPTION 'Claim type matching must stay case-sensitive, got %', v_answer;
+    END IF;
+
+    -- A claim type with no alias reports itself as its own canonical form.
+    v_answer := rye_settlers(
+        p_subject_id := v_john,
+        p_claim_type := 'availability',
+        p_domain_key := 'conformance-settling'
+    );
+
+    IF v_answer->'claim'->>'canonical_claim_type' <> 'availability' THEN
+        RAISE EXCEPTION 'An unaliased claim type must be its own canonical form, got %', v_answer->'claim';
+    END IF;
+
+    -- ------------------------------------------------------------------
     -- A grant for this kind of claim wins over the relationship. Priya is
     -- granted expectations in this area; Bob's reporting line is not
     -- consulted at all.
@@ -488,6 +606,46 @@ BEGIN
         WHERE s.value->>'node_id' = v_bob::text
     ) THEN
         RAISE EXCEPTION 'The relationship step must not run once a grant matched, got %', v_answer;
+    END IF;
+
+    -- A grant naming the canonical type covers a call naming the alias.
+    v_answer := rye_settlers(
+        p_subject_id := v_john,
+        p_claim_type := 'requirement',
+        p_speaker_id := v_priya,
+        p_domain_key := 'conformance-settling'
+    );
+
+    IF v_answer->>'step' <> 'grant'
+       OR (v_answer->>'settler_count')::int <> 1
+       OR v_answer->'settlers'->0->>'node_id' <> v_priya::text
+       OR (v_answer->'speaker'->>'is_settler')::boolean IS DISTINCT FROM true
+    THEN
+        RAISE EXCEPTION 'A grant on expectation must cover a call on requirement, got %', v_answer;
+    END IF;
+
+    -- And a grant naming the alias covers a call naming the canonical type.
+    PERFORM grant_domain_authority(
+        p_domain_key     := 'conformance-settling',
+        p_authority_kind := 'person',
+        p_authority_ref  := 'conformance_org:mara',
+        p_claim_types    := ARRAY['promise'],
+        p_effective_at   := v_then
+    );
+
+    v_answer := rye_settlers(
+        p_subject_id := v_john,
+        p_claim_type := 'commitment',
+        p_speaker_id := v_mara,
+        p_domain_key := 'conformance-settling'
+    );
+
+    IF v_answer->>'step' <> 'grant'
+       OR (v_answer->>'settler_count')::int <> 1
+       OR v_answer->'settlers'->0->>'node_id' <> v_mara::text
+       OR (v_answer->'speaker'->>'is_settler')::boolean IS DISTINCT FROM true
+    THEN
+        RAISE EXCEPTION 'A grant on promise must cover a call on commitment, got %', v_answer;
     END IF;
 
     -- And it wins with no speech act at all, where rule 1 would otherwise

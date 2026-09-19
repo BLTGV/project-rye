@@ -142,8 +142,14 @@ of the area. `step` names the step that produced the answer, and
 `speaker.is_settler` is the field to act on: true means record the statement as
 accepted, false means record a suggestion and ask the people listed.
 
-`--claim` is the assertion type, verbatim, and it is the first selector of the
-relationship step. A claim one person sets on another — `expectation` today — is
+`--claim` is the assertion type, and it is the first selector of the
+relationship step. It is resolved through the organization's type aliases
+before anything is matched against it, so if this organization calls an
+expectation a `requirement`, `--claim requirement` gets the expectation rules
+and a grant on either name covers a call using the other. The answer reports
+what you asked as `claim.claim_type` and what it resolved to as
+`claim.canonical_claim_type`. Resolution is case-sensitive: `Expectation` with
+no alias of its own is a different claim type. A claim one person sets on another — `expectation` today — is
 settled by the manager and never by the person it is set on, whatever
 `--speech-act` says. A claim a person makes about themselves — `commitment`,
 `self_commitment`, `self_report` — is settled by that person, with no setup and
