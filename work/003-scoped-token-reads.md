@@ -68,4 +68,27 @@ is already fully 401: one Worker serves the console or agents, not both.
 a 403. Question: should the four console rollups be deny or
 rye.context.read global? Assumed deny (decision 0006); Lead accepts.
 
+### Builder admin, 2026-09-19
+Result: done. Branch worktree-agent-a81777e8089113486, commit 5b8e608 (base
+f10c201). Changed: admin/src/server/route-policy.ts (new: the contract's
+31-row route table, matchRoutePolicy), admin/src/server/worker.ts
+(deny-by-default middleware, enforceRoutePolicy, contract 403 shape,
+fail-closed guard, row-filter wiring), admin/src/server/queries.ts
+(recordAgentDenial; area filters in fetchDomains and
+fetchCandidateReviewQueue), tests/conformance/21_api_security.sh. Tested:
+admin build passes; route matcher exercised for 18 probes and 4 undeclared
+paths; Hono's registry shows 31 concrete /api routes, 0 undeclared; Worker
+booted against a dummy DSN gives 401s under auth required and unchanged
+behavior with auth off. NOT executed: 21_api_security.sh and every
+database-backed case (401 variants, deny-by-default 403s, rollup denies,
+403 reason shape, row filtering, cross-area 403, granted-token and MCP
+successes, audit-log assertions, auth-off comparison). Environment: Docker
+refuses this user; port was free, so not worktree contention. Learned: see
+docs/areas/admin.md entries dated 2026-09-19. Questions: `self` route never
+403s so writes no audit row (Lead: accepted as correct); audit read is
+global across agents (Lead: accepted per contract; per-agent audit would be
+its own item); the rye.domain.admin gate on domain `properties` does not
+check grant expiry, pre-existing and untouched (Lead: out of scope here,
+to be raised as its own item).
+
 ## Close
