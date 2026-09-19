@@ -235,8 +235,9 @@ BEGIN
     END IF;
 
     -- ------------------------------------------------------------------
-    -- A claim about the relationship itself has no relationship default:
-    -- the area settles that a reporting line exists, not either end of it.
+    -- Rule 0. A claim about the relationship itself has no relationship
+    -- default: the area settles that a reporting line or an ownership
+    -- exists, not either end of it.
     -- ------------------------------------------------------------------
     v_answer := rye_settlers(
         p_subject_id := v_john,
@@ -250,10 +251,164 @@ BEGIN
         RAISE EXCEPTION 'Expected a reports_to claim to be settled by the area owner, got %', v_answer;
     END IF;
 
+    -- Even with a speech act that would otherwise select a relationship.
+    v_answer := rye_settlers(
+        p_subject_id := v_press,
+        p_claim_type := 'owns',
+        p_domain_key := 'conformance-settling',
+        p_speech_act := 'statement_about_thing'
+    );
+
+    IF v_answer->>'step' <> 'area_owner'
+       OR v_answer->'settlers'->0->>'node_id' <> v_dana::text
+    THEN
+        RAISE EXCEPTION 'Expected an owns claim to be settled by the area owner, got %', v_answer;
+    END IF;
+
     -- ------------------------------------------------------------------
-    -- An unrecognized speech act returns the union of whichever defaults
-    -- apply, and says the act was not recognized. It does not raise.
+    -- Rule 1. The claim type carries the safety on its own. An expectation
+    -- is set on a person by someone else, so the person it is set on is
+    -- never its settler — whatever the speech act says, and above all when
+    -- the optional speech act is not said at all. This is the one path that
+    -- must never fail open: it is John's "no" winning because it was said
+    -- last.
     -- ------------------------------------------------------------------
+    v_answer := rye_settlers(
+        p_subject_id := v_john,
+        p_claim_type := 'expectation',
+        p_speaker_id := v_john,
+        p_domain_key := 'conformance-settling'
+    );
+
+    IF v_answer->>'step' <> 'relationship'
+       OR (v_answer->>'settler_count')::int <> 1
+       OR v_answer->'settlers'->0->>'node_id' <> v_bob::text
+       OR v_answer->'settlers'->0->>'relationship' <> 'manager'
+       OR (v_answer->'speaker'->>'is_settler')::boolean IS DISTINCT FROM false
+    THEN
+        RAISE EXCEPTION 'An expectation with no speech act must settle to the manager alone, got %', v_answer;
+    END IF;
+
+    -- A mislabelled speech act cannot open that door either.
+    v_answer := rye_settlers(
+        p_subject_id := v_john,
+        p_claim_type := 'expectation',
+        p_speaker_id := v_john,
+        p_domain_key := 'conformance-settling',
+        p_speech_act := 'self_commitment'
+    );
+
+    IF v_answer->>'step' <> 'relationship'
+       OR (v_answer->>'settler_count')::int <> 1
+       OR v_answer->'settlers'->0->>'node_id' <> v_bob::text
+       OR (v_answer->'speaker'->>'is_settler')::boolean IS DISTINCT FROM false
+       OR (v_answer->'claim'->>'speech_act_recognized')::boolean IS DISTINCT FROM true
+    THEN
+        RAISE EXCEPTION 'A mislabelled expectation must still settle to the manager, got %', v_answer;
+    END IF;
+
+    -- Nor can a speech act nobody recognises.
+    v_answer := rye_settlers(
+        p_subject_id := v_john,
+        p_claim_type := 'expectation',
+        p_speaker_id := v_john,
+        p_domain_key := 'conformance-settling',
+        p_speech_act := 'banana'
+    );
+
+    IF v_answer->>'step' <> 'relationship'
+       OR (v_answer->>'settler_count')::int <> 1
+       OR v_answer->'settlers'->0->>'node_id' <> v_bob::text
+       OR (v_answer->'speaker'->>'is_settler')::boolean IS DISTINCT FROM false
+       OR (v_answer->'claim'->>'speech_act_recognized')::boolean IS DISTINCT FROM false
+    THEN
+        RAISE EXCEPTION 'An unrecognised speech act on an expectation must settle to the manager, got %', v_answer;
+    END IF;
+
+    -- The manager asking about the same expectation is told yes.
+    v_answer := rye_settlers(
+        p_subject_id := v_john,
+        p_claim_type := 'expectation',
+        p_speaker_id := v_bob,
+        p_domain_key := 'conformance-settling'
+    );
+
+    IF (v_answer->>'settler_count')::int <> 1
+       OR v_answer->'settlers'->0->>'node_id' <> v_bob::text
+       OR (v_answer->'speaker'->>'is_settler')::boolean IS DISTINCT FROM true
+    THEN
+        RAISE EXCEPTION 'Bob must settle the expectation he set on John, got %', v_answer;
+    END IF;
+
+    -- ------------------------------------------------------------------
+    -- Rule 3. A person's own commitment settles with no speech act, so the
+    -- zero-setup case survives the removal of the union.
+    -- ------------------------------------------------------------------
+    v_answer := rye_settlers(
+        p_subject_id := v_john,
+        p_claim_type := 'commitment',
+        p_speaker_id := v_john,
+        p_domain_key := 'conformance-settling'
+    );
+
+    IF v_answer->>'step' <> 'relationship'
+       OR (v_answer->>'settler_count')::int <> 1
+       OR v_answer->'settlers'->0->>'node_id' <> v_john::text
+       OR v_answer->'settlers'->0->>'relationship' <> 'self'
+       OR (v_answer->'speaker'->>'is_settler')::boolean IS DISTINCT FROM true
+    THEN
+        RAISE EXCEPTION 'John must settle his own commitment with no speech act, got %', v_answer;
+    END IF;
+
+    -- And with no area at all: a self-set claim type, and a recognized self
+    -- speech act, each reach the person on their own.
+    v_answer := rye_settlers(
+        p_subject_id := v_john,
+        p_claim_type := 'self_report',
+        p_speaker_id := v_john
+    );
+
+    IF v_answer->>'step' <> 'relationship'
+       OR v_answer->'settlers'->0->>'node_id' <> v_john::text
+       OR (v_answer->'speaker'->>'is_settler')::boolean IS DISTINCT FROM true
+    THEN
+        RAISE EXCEPTION 'A self-set claim type must settle with no area at all, got %', v_answer;
+    END IF;
+
+    v_answer := rye_settlers(
+        p_subject_id := v_john,
+        p_claim_type := 'anything_at_all',
+        p_speaker_id := v_john,
+        p_speech_act := 'self_report'
+    );
+
+    IF v_answer->>'step' <> 'relationship'
+       OR v_answer->'settlers'->0->>'node_id' <> v_john::text
+       OR (v_answer->'speaker'->>'is_settler')::boolean IS DISTINCT FROM true
+    THEN
+        RAISE EXCEPTION 'A self speech act must settle with no area at all, got %', v_answer;
+    END IF;
+
+    -- ------------------------------------------------------------------
+    -- Rule 4. There is no union. A claim type in neither set, with no
+    -- speech act or an unrecognized one, selects no relationship at all and
+    -- falls through to the area owner. Saying less buys a smaller answer.
+    -- ------------------------------------------------------------------
+    v_answer := rye_settlers(
+        p_subject_id := v_john,
+        p_claim_type := 'availability',
+        p_speaker_id := v_john,
+        p_domain_key := 'conformance-settling'
+    );
+
+    IF v_answer->>'step' <> 'area_owner'
+       OR (v_answer->>'settler_count')::int <> 1
+       OR v_answer->'settlers'->0->>'node_id' <> v_dana::text
+       OR (v_answer->'speaker'->>'is_settler')::boolean IS DISTINCT FROM false
+    THEN
+        RAISE EXCEPTION 'An unclassified claim with no speech act must reach the area owner, got %', v_answer;
+    END IF;
+
     v_answer := rye_settlers(
         p_subject_id := v_john,
         p_claim_type := 'availability',
@@ -262,12 +417,36 @@ BEGIN
     );
 
     IF (v_answer->'claim'->>'speech_act_recognized')::boolean IS DISTINCT FROM false
-       OR v_answer->>'step' <> 'relationship'
-       OR (v_answer->>'settler_count')::int <> 2
-       OR v_answer->'settlers'->0->>'relationship' <> 'self'
-       OR v_answer->'settlers'->1->>'relationship' <> 'manager'
+       OR v_answer->>'step' <> 'area_owner'
+       OR v_answer->'settlers'->0->>'node_id' <> v_dana::text
     THEN
-        RAISE EXCEPTION 'Expected an unrecognized speech act to return the union, got %', v_answer;
+        RAISE EXCEPTION 'An unrecognized speech act must select nothing, got %', v_answer;
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM jsonb_array_elements(v_answer->'settlers') AS s(value)
+        WHERE s.value->>'node_id' = v_john::text
+    ) THEN
+        RAISE EXCEPTION 'Rule 4 must never return the subject itself, got %', v_answer;
+    END IF;
+
+    -- The same question against an area nobody owns is an answer, not an
+    -- error: the fall-through has nowhere to land and says so.
+    v_answer := rye_settlers(
+        p_subject_id := v_john,
+        p_claim_type := 'availability',
+        p_speaker_id := v_john,
+        p_domain_key := 'conformance-settling-orphan'
+    );
+
+    IF v_answer->>'step' <> 'none'
+       OR (v_answer->>'settler_count')::int <> 0
+       OR v_answer->>'reason' <> 'area_has_no_owner'
+       OR (v_answer->>'setup_gap')::boolean IS DISTINCT FROM true
+       OR (v_answer->'speaker'->>'is_settler')::boolean IS DISTINCT FROM false
+    THEN
+        RAISE EXCEPTION 'Rule 4 with no area owner must answer no settler, got %', v_answer;
     END IF;
 
     -- ------------------------------------------------------------------
@@ -309,6 +488,23 @@ BEGIN
         WHERE s.value->>'node_id' = v_bob::text
     ) THEN
         RAISE EXCEPTION 'The relationship step must not run once a grant matched, got %', v_answer;
+    END IF;
+
+    -- And it wins with no speech act at all, where rule 1 would otherwise
+    -- have chosen the manager.
+    v_answer := rye_settlers(
+        p_subject_id := v_john,
+        p_claim_type := 'expectation',
+        p_speaker_id := v_priya,
+        p_domain_key := 'conformance-settling'
+    );
+
+    IF v_answer->>'step' <> 'grant'
+       OR (v_answer->>'settler_count')::int <> 1
+       OR v_answer->'settlers'->0->>'node_id' <> v_priya::text
+       OR (v_answer->'speaker'->>'is_settler')::boolean IS DISTINCT FROM true
+    THEN
+        RAISE EXCEPTION 'A grant must win over rule 1 with no speech act, got %', v_answer;
     END IF;
 
     -- A grant only covers the claim types it names. Another kind of claim

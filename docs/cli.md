@@ -142,10 +142,25 @@ of the area. `step` names the step that produced the answer, and
 `speaker.is_settler` is the field to act on: true means record the statement as
 accepted, false means record a suggestion and ask the people listed.
 
-`--claim` is the assertion type, verbatim. `--subject` is optional: omit it for a
-topical claim with no subject node. `--speaker-ref` carries a source identity
-such as `chat:U0123` for a speaker with no person node. `--as-of` reconstructs a
-past answer from the relationships and grants in effect then:
+`--claim` is the assertion type, verbatim, and it is the first selector of the
+relationship step. A claim one person sets on another — `expectation` today — is
+settled by the manager and never by the person it is set on, whatever
+`--speech-act` says. A claim a person makes about themselves — `commitment`,
+`self_commitment`, `self_report` — is settled by that person, with no setup and
+no flag. Any other claim type needs a recognized `--speech-act` to select a
+relationship; without one the answer falls through to the area owner. Omitting
+the flag narrows the answer, it never widens it, and `speech_act_recognized`
+false means classify the statement and ask again rather than record it as
+accepted.
+
+The lookup reads no assertion, so it cannot tell a new statement from a
+contradiction of one already accepted. `is_settler` true is not permission to
+replace an accepted claim you did not check for.
+
+`--subject` is optional: omit it for a topical claim with no subject node.
+`--speaker-ref` carries a source identity such as `chat:U0123` for a speaker
+with no person node. `--as-of` reconstructs a past answer from the relationships
+and grants in effect then:
 
 ```bash
 ./scripts/rye settlers --subject 8f2a... --claim expectation \
