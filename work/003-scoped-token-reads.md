@@ -129,4 +129,22 @@ amendment (Lead: agreed); whether the area test command should become
 `npm run build && npm run check:routes` (Lead: yes, route to Architect, who
 owns docs/areas.md).
 
+### Verifier, 2026-09-19, second pass on befe34c: PASS-STATIC
+Both first-pass findings fixed; no regressions. Verified by execution:
+build; check:routes (31 routes); an independent sweep of 53 registry
+entries by 10 methods including lowercase found 0 holes (no method and path
+with a handler decides unmatched); HEAD on all four deny rollups decides
+refuse; replaying the pre-fix code makes check:routes fail, so it is not
+vacuous; HTTP probes under auth required. Verified by reading: the
+sluggable-key SQL handles all-junk, junk plus held key, and junk plus
+unheld key correctly, stays parameterised with withAdminCte in the same
+statement; the test-time probe route cannot reach production (wrangler
+points at src/server/worker.ts). Carried: (1) INFO: contract says 404 for
+an unmatched path, code returns 401 without a token; needs an Architect
+amendment. (2) LOW: the script seeds only the all-junk case; mixed cases
+unpinned. Criterion 2 verified by execution. Criteria 1, 3, 4, 8 verified
+by reading; 5, 6 (beyond missing-token 401), and the script run in 7 remain
+pending the database. Lead: mixed-case tests requested from builder;
+contract amendment queued for Architect.
+
 ## Close
