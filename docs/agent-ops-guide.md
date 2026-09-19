@@ -158,8 +158,19 @@ nothing about the standing claim.
 
 So before accepting on `is_settler` `true`, read `current_valid_assertions`
 for an accepted row on the same subject, assertion type, and assertion key,
-and read its evidence `attrs.authorizer`. The guard fails closed: exactly one
-recorded authorizer lets the write through, and it is the speaker's own.
+and read its evidence `attrs.authorizer`.
+
+Match the type with `canonical_type('assertion_type', ...)` on both sides, not
+by raw string. Rye resolves synonyms through type aliases, so a standing
+`expectation` and a new `requirement` can be the same claim and raw equality
+misses it. Then write the canonical type the lookup reports rather than the
+synonym: Rye reports the drift, it does not rewrite the insert, so a row
+written under an alias keeps that spelling. Type names are case-sensitive —
+`Expectation` is not `expectation` unless an alias says so — so use the type
+exactly as `rye_categories()` lists it.
+
+The guard fails closed: exactly one recorded authorizer lets the write
+through, and it is the speaker's own.
 
 | What stands | What the caller does |
 |---|---|

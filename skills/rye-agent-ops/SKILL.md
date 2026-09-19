@@ -137,14 +137,31 @@ So before you accept anything on `is_settler` `true`, read
 `current_valid_assertions` for an accepted row on the same subject, assertion
 type, and assertion key, and read its evidence `attrs.authorizer`:
 
+Compare canonical types on both sides, never raw strings. Rye resolves
+synonyms through type aliases, so a standing `expectation` and a new
+`requirement` can be the same claim:
+
 ```sql
 SELECT a.id, e.attrs->>'authorizer' AS authorizer
 FROM current_valid_assertions a
 LEFT JOIN assertion_evidence e ON e.assertion_id = a.id
 WHERE a.subject_node_id = '<subject_uuid>'::uuid
-  AND a.assertion_type = '<claim_type>'
-  AND a.assertion_key  = '<key>';
+  AND canonical_type('assertion_type', a.assertion_type)
+    = canonical_type('assertion_type', '<claim_type>')
+  AND a.assertion_key = '<key>';
 ```
+
+Raw equality misses it. `canonical_type('assertion_type', ...)` follows the
+alias chain on both the type you are about to write and the type of every
+standing row.
+
+Write the canonical type the lookup reports, not the synonym you were given.
+Rye reports the drift; it does not rewrite your insert, so a row written under
+an alias keeps that spelling forever and every later reader pays for it.
+
+Type names are case-sensitive. `Expectation` is not `expectation` unless an
+alias says so. Use the type exactly as the category discovery request lists
+it.
 
 The guard fails closed. One recorded authorizer lets a write through, and it
 is the speaker's own:

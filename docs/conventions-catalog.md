@@ -221,6 +221,14 @@ who may unsettle one. Before accepting on `is_settler` `true`, check
 type, and assertion key, and read its evidence `attrs.authorizer`. Otherwise a
 person restating a quota their manager set would overwrite it.
 
+Match the type through `canonical_type('assertion_type', ...)` on both sides.
+Raw equality misses a standing `expectation` when the new claim arrives as its
+alias `requirement`. Write the canonical type the lookup reports, not the
+synonym: Rye reports drift and does not rewrite an insert, so a row written
+under an alias keeps that spelling. Type names are case-sensitive;
+`Expectation` is not `expectation` unless an alias says so. Use the type as
+the category discovery request lists it. See the Type Alias Convention.
+
 The check fails closed. One recorded authorizer lets the write through, the
 speaker's own:
 
