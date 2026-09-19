@@ -120,11 +120,30 @@ Records which nodes were merged into which canonical nodes, and by whom.
 
 #### `assertion_type_access` — Assertion Type Gating
 
-Controls which roles can read or write specific assertion types. Assertion types not in this table are unrestricted.
+Controls which roles can read, write, or settle specific assertion types. An assertion type with no row for an operation is unrestricted for that operation.
 
 **Why it exists:** The original RLS policies hardcoded assertion type restrictions in CASE statements. Adding a new sensitive type required modifying SQL policies. This table makes the security model data-driven — add a row, not a migration.
 
-**Key columns:** `assertion_type`, `operation` (`read`/`write`), `allowed_roles` (text array). Unique on `(assertion_type, operation)`.
+**Key columns:** `assertion_type`, `operation` (`read`/`write`/`settle`), `allowed_roles` (text array). Unique on `(assertion_type, operation)`.
+
+**Operations:**
+
+| `operation` | Meaning | Enforced by |
+|---|---|---|
+| `read` | Who may see assertions of this type | `assertion_read_policy` |
+| `write` | Who may insert them at all | `assertion_insert_policy` |
+| `settle` | Who may make one **accepted** | `record_assertion()` demotes; `trg_assertion_settle_gate` refuses every other route |
+
+**The `settle` operation.** Some assertion types are not knowledge about the world — they are Rye's own configuration, and Rye reads them to decide how it treats every other write. Two rows are seeded, both `ARRAY['admin']`:
+
+- `registry_entry` — type aliases, `self_settled_type:*`, `governed_type:*`, `DEFAULT_SCOPE`, basis priors, half lives, digest facets.
+- `review_policy` — decides whether other writes land accepted at all.
+
+A non-admin's accepted write of a gated type is **demoted, not refused**, by `record_assertion()`: it lands as a candidate carrying `attrs.settle_gate = {"pending": true, "requested_status": "accepted", "allowed_roles": [...]}` and appears in `review_queue` for an admin to accept or reject, so nothing the person said is lost. Every other route to an accepted gated row raises: a direct `INSERT`, any `UPDATE` that moves a row to `accepted` (including `accept_assertion()` and a raw `UPDATE` by a caller who sets `app.write_path` itself), `supersede_assertion()`, and `record_distillation()`. An agent capability grant (`rye.authoritative.promote`) does not open the gate. Gating a further type is an `INSERT`, not a migration.
+
+**Ending an accepted entry is also settling it.** A caller who may not settle a gated type may not change an accepted row of it at all — not `superseded_at`, not `effective_to`, not `status`, not `claim`, not `attrs` — by raw `UPDATE` or through any helper. Leaving supersession open was an escalation, not just a loss: ending a scope's accepted `strict` `review_policy` dropped the scope to `open`, and the next ordinary write landed accepted instead of waiting for review. Candidates of a gated type stay ordinary suggestions, so outcome labels and classification propagation on them are unaffected, and an admin keeps every lifecycle operation. No role deletes an assertion of any type: `assertion_delete_policy` is `USING (false)`.
+
+**Write convention:** A migration or script that seeds configuration must `SET app.current_role = 'admin'` first. An unset role is not an admin.
 
 #### `role_classification_access` — Role Hierarchy
 
@@ -721,6 +740,25 @@ canonical_type(p_kind, p_value) → text
 Follows `type_alias:<kind>:<deprecated_value>` registry chains. Cycles and
 empty targets raise. Existing stored rows are not rewritten.
 
+#### `settle_gate()`
+
+```
+settle_gate(p_assertion_type) → jsonb
+```
+
+Answers `{assertion_type, gated, allowed_roles, current_role, may_settle}` for
+an assertion type. `STABLE`, `SECURITY INVOKER`, writes nothing. Call it before
+offering to record configuration, so a client can tell the person what will
+happen — the schema returns facts, the sentence a person hears is the client's.
+Matches the stored spelling with no alias resolution, the same way
+`registry_value()` and `governing_scope()` do.
+
+`assertion_settle_roles(p_assertion_type)` returns the allowed roles or `NULL`
+when the type is ungated. `may_settle_assertion_type(p_assertion_type)` is the
+boolean the demotion and the trigger both use. Both read
+`app.current_role` only: no `current_user`, no `pg_has_role()`. An unset role is
+never allowed.
+
 #### `record_prediction()` / `score_due_predictions()`
 
 `record_prediction()` writes a validated inferred prediction with a witness
@@ -862,6 +900,21 @@ candidate acceptance, and effective-window narrowing. Basis and content remain
 immutable.
 
 **Why it exists:** Enforces the append-only contract. Without this, application code could accidentally overwrite assertion content, destroying history.
+
+#### `assertion_settle_gate_guard()`
+
+BEFORE INSERT OR UPDATE trigger on `assertions` (`trg_assertion_settle_gate`).
+Raises when `app.current_role` is not one of the allowed roles and the write
+would either make an assertion of a `settle`-gated type accepted, or change a
+row of a gated type that is already accepted. Candidates are untouched, so
+outcome labels and classification propagation on them still work for every
+role. `DELETE` needs no branch: `assertion_delete_policy` is `USING (false)`.
+
+**Why it exists:** `record_assertion()` demotes a non-admin's configuration
+write to a candidate, so every remaining route to an accepted gated row is a
+route that bypasses it. The check lives in one trigger rather than in each
+helper because a trigger fires inside a `SECURITY DEFINER` helper and on a raw
+`INSERT` or `UPDATE` alike, and because the list of helpers grows.
 
 #### `enforce_classification_with_teams()`
 
