@@ -141,6 +141,8 @@ Controls which roles can read, write, or settle specific assertion types. An ass
 
 A non-admin's accepted write of a gated type is **demoted, not refused**, by `record_assertion()`: it lands as a candidate carrying `attrs.settle_gate = {"pending": true, "requested_status": "accepted", "allowed_roles": [...]}` and appears in `review_queue` for an admin to accept or reject, so nothing the person said is lost. Every other route to an accepted gated row raises: a direct `INSERT`, any `UPDATE` that moves a row to `accepted` (including `accept_assertion()` and a raw `UPDATE` by a caller who sets `app.write_path` itself), `supersede_assertion()`, and `record_distillation()`. An agent capability grant (`rye.authoritative.promote`) does not open the gate. Gating a further type is an `INSERT`, not a migration.
 
+**Ending an accepted entry is also settling it.** A caller who may not settle a gated type may not change an accepted row of it at all — not `superseded_at`, not `effective_to`, not `status`, not `claim`, not `attrs` — by raw `UPDATE` or through any helper. Leaving supersession open was an escalation, not just a loss: ending a scope's accepted `strict` `review_policy` dropped the scope to `open`, and the next ordinary write landed accepted instead of waiting for review. Candidates of a gated type stay ordinary suggestions, so outcome labels and classification propagation on them are unaffected, and an admin keeps every lifecycle operation. No role deletes an assertion of any type: `assertion_delete_policy` is `USING (false)`.
+
 **Write convention:** A migration or script that seeds configuration must `SET app.current_role = 'admin'` first. An unset role is not an admin.
 
 #### `role_classification_access` — Role Hierarchy
@@ -902,10 +904,11 @@ immutable.
 #### `assertion_settle_gate_guard()`
 
 BEFORE INSERT OR UPDATE trigger on `assertions` (`trg_assertion_settle_gate`).
-Raises when a write would make an assertion of a `settle`-gated type accepted
-and `app.current_role` is not one of the allowed roles. An `UPDATE` of a row
-that is already accepted is left alone, so supersession, effective-window
-narrowing, outcome labels, and classification propagation are unaffected.
+Raises when `app.current_role` is not one of the allowed roles and the write
+would either make an assertion of a `settle`-gated type accepted, or change a
+row of a gated type that is already accepted. Candidates are untouched, so
+outcome labels and classification propagation on them still work for every
+role. `DELETE` needs no branch: `assertion_delete_policy` is `USING (false)`.
 
 **Why it exists:** `record_assertion()` demotes a non-admin's configuration
 write to a candidate, so every remaining route to an accepted gated row is a

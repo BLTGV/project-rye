@@ -372,28 +372,51 @@ $$ LANGUAGE plpgsql;
 -- no accepted value. A refusal loses nothing, because the same statement
 -- recorded through record_assertion() becomes a suggestion.
 --
+-- Ending an accepted configuration record changes the configuration, so the
+-- same roles gate it. A caller who may not settle a gated type may not change
+-- an accepted row of it at all: not superseded_at, not effective_to, not
+-- status, not claim, not attrs, by raw UPDATE or through any helper. Leaving
+-- supersession open was an escalation and not merely a loss: a non-admin who
+-- ended a scope's accepted `strict` review_policy dropped the scope back to
+-- `open`, and the very next ordinary write that would have landed as a
+-- candidate landed accepted instead.
+--
+-- Only accepted rows are protected this way. A candidate of a gated type is
+-- an ordinary suggestion until an admin accepts it, so outcome labels and
+-- classification propagation on candidates still work for every role, and a
+-- non-admin can still record and amend its own suggestion.
+--
+-- DELETE needs no branch here: assertion_delete_policy is USING (false), so
+-- RLS refuses every delete from every role, admin included. The conformance
+-- suite pins that rather than assuming it.
+--
 -- The check lives in one trigger rather than in each helper. A trigger fires
 -- inside a SECURITY DEFINER helper and on a raw write alike, and it reads
 -- app.current_role, which SECURITY DEFINER does not change. An agent
 -- capability grant (rye.authoritative.promote) does not open it.
---
--- An UPDATE of a row that is already accepted is left alone: supersession,
--- effective-window narrowing, outcome labels, and classification propagation
--- all update accepted rows and none of them makes a new row accepted.
 CREATE OR REPLACE FUNCTION assertion_settle_gate_guard() RETURNS trigger
 SET search_path = rye, pg_catalog
 AS $$
 DECLARE
+    v_becomes_accepted boolean;
+    v_changes_accepted boolean;
     v_roles text[];
+    v_type  text;
 BEGIN
-    IF NEW.status IS DISTINCT FROM 'accepted' THEN
-        RETURN NEW;
-    END IF;
-    IF TG_OP = 'UPDATE' AND OLD.status = 'accepted' THEN
+    v_becomes_accepted := NEW.status = 'accepted'
+        AND (TG_OP = 'INSERT' OR OLD.status IS DISTINCT FROM 'accepted');
+    v_changes_accepted := TG_OP = 'UPDATE' AND OLD.status = 'accepted';
+
+    IF NOT v_becomes_accepted AND NOT v_changes_accepted THEN
         RETURN NEW;
     END IF;
 
-    v_roles := assertion_settle_roles(NEW.assertion_type);
+    -- On an UPDATE the stored spelling is OLD's: an accepted configuration row
+    -- stays configuration even if the update tried to retype it, and the
+    -- immutability guard refuses retyping anyway.
+    v_type := CASE WHEN TG_OP = 'UPDATE' THEN OLD.assertion_type ELSE NEW.assertion_type END;
+
+    v_roles := assertion_settle_roles(v_type);
     IF v_roles IS NULL THEN
         RETURN NEW;
     END IF;
@@ -403,16 +426,24 @@ BEGIN
         RETURN NEW;
     END IF;
 
+    IF v_changes_accepted THEN
+        RAISE EXCEPTION
+            'Assertion type % is Rye configuration: only % may change an accepted entry, including ending one. Record the replacement with record_assertion() and it becomes a candidate waiting for one of those roles.',
+            v_type,
+            array_to_string(v_roles, ', ')
+            USING ERRCODE = 'insufficient_privilege';
+    END IF;
+
     RAISE EXCEPTION
         'Assertion type % is Rye configuration: only % may make it accepted. Record it with record_assertion() and it becomes a candidate waiting for one of those roles.',
-        NEW.assertion_type,
+        v_type,
         array_to_string(v_roles, ', ')
         USING ERRCODE = 'insufficient_privilege';
 END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION assertion_settle_gate_guard() IS
-    'Refuse any write that makes an assertion of a settle-gated type accepted, unless app.current_role is one of the allowed roles. Fires inside SECURITY DEFINER helpers and on raw writes alike.';
+    'Refuse any write that makes an assertion of a settle-gated type accepted, and any change to a row of a gated type that is already accepted, unless app.current_role is one of the allowed roles. Fires inside SECURITY DEFINER helpers and on raw writes alike. DELETE needs no branch: assertion_delete_policy refuses every delete.';
 
 DROP TRIGGER IF EXISTS trg_assertion_settle_gate ON assertions;
 CREATE TRIGGER trg_assertion_settle_gate

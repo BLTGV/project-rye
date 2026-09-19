@@ -68,6 +68,14 @@ Every other route to an accepted gated row raises, through one trigger on
 `record_assertion()` and so demote. An agent capability grant
 (`rye.authoritative.promote`) does not open the gate.
 
+Ending an accepted configuration record changes the configuration, so the same
+roles gate that too. A caller who may not settle a gated type may not change an
+accepted row of it at all: not `superseded_at`, not `effective_to`, not
+`status`, not `claim`, not `attrs`, by raw `UPDATE` or through any helper.
+Candidates of a gated type are unaffected, and an admin keeps every lifecycle
+operation. No role deletes an assertion: `assertion_delete_policy` is
+`USING (false)`.
+
 `settle_gate(assertion_type)` answers
 `{assertion_type, gated, allowed_roles, current_role, may_settle}` so a client
 can ask before it offers. The gate reads `app.current_role` only, and an unset

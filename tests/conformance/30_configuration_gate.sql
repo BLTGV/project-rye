@@ -91,7 +91,11 @@ DECLARE
     v_msg          text;
     v_policy       text;
     v_role         text;
+    v_policy_row   uuid;
     v_row          assertions;
+    v_rows         integer;
+    v_selfbase     jsonb;
+    v_subject      uuid;
     v_scope_cand   uuid;
     v_scope_open   uuid;
     v_scope_strict uuid;
@@ -518,6 +522,280 @@ BEGIN
     IF registry_value('conformance_gate:incumbent', NULL) IS DISTINCT FROM '"kept"'::jsonb THEN
         RAISE EXCEPTION 'The incumbent registry value changed to %',
             registry_value('conformance_gate:incumbent', NULL);
+    END IF;
+
+    -- ==================================================================
+    -- Obligation 5b. Ending an accepted configuration record changes the
+    -- configuration, so the same roles gate it. A caller who may not settle
+    -- a gated type may not change an accepted row of it at all -- not
+    -- superseded_at, not effective_to, not claim, not attrs -- even with the
+    -- helpers' own session variables spoofed. For review_policy this is not
+    -- merely a loss: ending an accepted `strict` policy drops the scope back
+    -- to `open`, and the next ordinary write lands accepted.
+    -- ==================================================================
+    FOREACH v_role IN ARRAY ARRAY['agent:t', 'viewer', 'team_member', ''] LOOP
+        PERFORM set_config('app.current_role', v_role, true);
+
+        -- End it, by spoofing the supersession write path.
+        v_failed := false;
+        BEGIN
+            PERFORM set_config('app.write_path', 'supersede_assertion', true);
+            PERFORM set_config('app.supersede_assertion_id', v_incumbent::text, true);
+            UPDATE assertions SET superseded_at = now() WHERE id = v_incumbent;
+        EXCEPTION WHEN OTHERS THEN
+            v_failed := true;
+            v_msg := SQLERRM;
+        END;
+        PERFORM set_config('app.write_path', '', true);
+        PERFORM set_config('app.supersede_assertion_id', '', true);
+        IF NOT v_failed THEN
+            RAISE EXCEPTION 'Role "%" ended an accepted registry entry with a spoofed supersession', v_role;
+        END IF;
+        IF v_msg NOT LIKE '%is Rye configuration%' THEN
+            RAISE EXCEPTION 'Role "%" spoofed supersession failed for the wrong reason: %', v_role, v_msg;
+        END IF;
+
+        -- Narrow its effective window.
+        v_failed := false;
+        BEGIN
+            PERFORM set_config('app.write_path', 'assertion_effective_window', true);
+            PERFORM set_config('app.effective_window_assertion_id', v_incumbent::text, true);
+            UPDATE assertions SET effective_to = now() + interval '1 hour' WHERE id = v_incumbent;
+        EXCEPTION WHEN OTHERS THEN
+            v_failed := true;
+            v_msg := SQLERRM;
+        END;
+        PERFORM set_config('app.write_path', '', true);
+        PERFORM set_config('app.effective_window_assertion_id', '', true);
+        IF NOT v_failed THEN
+            RAISE EXCEPTION 'Role "%" narrowed the window of an accepted registry entry', v_role;
+        END IF;
+        IF v_msg NOT LIKE '%is Rye configuration%' THEN
+            RAISE EXCEPTION 'Role "%" window narrowing failed for the wrong reason: %', v_role, v_msg;
+        END IF;
+
+        -- Rewrite its claim.
+        v_failed := false;
+        BEGIN
+            PERFORM set_config('app.write_path', 'supersede_assertion', true);
+            PERFORM set_config('app.supersede_assertion_id', v_incumbent::text, true);
+            UPDATE assertions SET claim = '{"value":"rewritten"}' WHERE id = v_incumbent;
+        EXCEPTION WHEN OTHERS THEN
+            v_failed := true;
+            v_msg := SQLERRM;
+        END;
+        PERFORM set_config('app.write_path', '', true);
+        PERFORM set_config('app.supersede_assertion_id', '', true);
+        IF NOT v_failed THEN
+            RAISE EXCEPTION 'Role "%" rewrote the claim of an accepted registry entry', v_role;
+        END IF;
+        IF v_msg NOT LIKE '%is Rye configuration%' THEN
+            RAISE EXCEPTION 'Role "%" claim rewrite failed for the wrong reason: %', v_role, v_msg;
+        END IF;
+
+        -- Rewrite its attrs, on the one write path that the immutability
+        -- guard lets attrs through.
+        v_failed := false;
+        BEGIN
+            PERFORM set_config('app.write_path', 'assertion_outcome', true);
+            PERFORM set_config('app.outcome_assertion_id', v_incumbent::text, true);
+            UPDATE assertions SET attrs = attrs || '{"hijacked":true}'::jsonb WHERE id = v_incumbent;
+        EXCEPTION WHEN OTHERS THEN
+            v_failed := true;
+            v_msg := SQLERRM;
+        END;
+        PERFORM set_config('app.write_path', '', true);
+        PERFORM set_config('app.outcome_assertion_id', '', true);
+        IF NOT v_failed THEN
+            RAISE EXCEPTION 'Role "%" rewrote the attrs of an accepted registry entry', v_role;
+        END IF;
+        IF v_msg NOT LIKE '%is Rye configuration%' THEN
+            RAISE EXCEPTION 'Role "%" attrs rewrite failed for the wrong reason: %', v_role, v_msg;
+        END IF;
+
+        -- Delete it. assertion_delete_policy is USING (false), so RLS
+        -- refuses silently: no exception, no rows.
+        DELETE FROM assertions WHERE id = v_incumbent;
+        GET DIAGNOSTICS v_rows = ROW_COUNT;
+        IF v_rows <> 0 THEN
+            RAISE EXCEPTION 'Role "%" deleted % accepted registry entries', v_role, v_rows;
+        END IF;
+
+        SELECT * INTO v_row FROM assertions WHERE id = v_incumbent;
+        IF v_row.id IS NULL
+           OR v_row.status <> 'accepted'
+           OR v_row.superseded_at IS NOT NULL
+           OR v_row.effective_to IS NOT NULL
+           OR v_row.claim IS DISTINCT FROM '{"value":"kept"}'::jsonb
+           OR v_row.attrs ? 'hijacked'
+        THEN
+            RAISE EXCEPTION 'Role "%" changed the accepted registry entry: %', v_role, to_jsonb(v_row);
+        END IF;
+    END LOOP;
+
+    -- Nothing may delete an assertion, not even an admin: the delete policy
+    -- is USING (false) and history is never removed.
+    PERFORM set_config('app.current_role', 'admin', true);
+    DELETE FROM assertions WHERE id = v_incumbent;
+    GET DIAGNOSTICS v_rows = ROW_COUNT;
+    IF v_rows <> 0 THEN
+        RAISE EXCEPTION 'An admin deleted % assertion rows; assertions are never deleted', v_rows;
+    END IF;
+    IF registry_value('conformance_gate:incumbent', NULL) IS DISTINCT FROM '"kept"'::jsonb THEN
+        RAISE EXCEPTION 'The incumbent registry value changed to %',
+            registry_value('conformance_gate:incumbent', NULL);
+    END IF;
+
+    -- The escalation this closes: ending a scope's accepted strict policy.
+    INSERT INTO nodes (node_type, label) VALUES ('thing', 'Config gate governed subject')
+    RETURNING id INTO v_subject;
+    INSERT INTO edges (edge_type, source_id, target_id)
+    VALUES ('scope_governs_subject', v_scope_strict, v_subject);
+    IF governing_scope(v_subject, NULL, 'conformance_gate_ordinary', NULL) IS DISTINCT FROM v_scope_strict THEN
+        RAISE EXCEPTION 'Premise broken: the fixture subject is not governed by the strict scope';
+    END IF;
+
+    SELECT id INTO v_policy_row
+    FROM assertions
+    WHERE subject_node_id = v_scope_strict
+      AND assertion_type = 'review_policy'
+      AND status = 'accepted'
+      AND superseded_at IS NULL
+    ORDER BY asserted_at DESC, id
+    LIMIT 1;
+    IF v_policy_row IS NULL THEN
+        RAISE EXCEPTION 'Premise broken: the strict scope has no accepted review_policy to end';
+    END IF;
+
+    FOREACH v_role IN ARRAY ARRAY['agent:t', 'viewer', 'team_member', ''] LOOP
+        PERFORM set_config('app.current_role', v_role, true);
+        v_failed := false;
+        BEGIN
+            PERFORM set_config('app.write_path', 'supersede_assertion', true);
+            PERFORM set_config('app.supersede_assertion_id', v_policy_row::text, true);
+            UPDATE assertions SET superseded_at = now() WHERE id = v_policy_row;
+        EXCEPTION WHEN OTHERS THEN
+            v_failed := true;
+            v_msg := SQLERRM;
+        END;
+        PERFORM set_config('app.write_path', '', true);
+        PERFORM set_config('app.supersede_assertion_id', '', true);
+        IF NOT v_failed THEN
+            RAISE EXCEPTION 'Role "%" ended a scope''s accepted review_policy', v_role;
+        END IF;
+        IF v_msg NOT LIKE '%is Rye configuration%' THEN
+            RAISE EXCEPTION 'Role "%" review_policy erase failed for the wrong reason: %', v_role, v_msg;
+        END IF;
+
+        IF scope_review_policy(v_scope_strict) <> 'strict' THEN
+            RAISE EXCEPTION 'Role "%" dropped the scope review policy to %',
+                v_role, scope_review_policy(v_scope_strict);
+        END IF;
+
+        -- And the consequence that made it an escalation: an ordinary write
+        -- governed by that scope still has to wait for review.
+        v_id := record_assertion(
+            'conformance_gate_ordinary', '{"value":1}', v_subject,
+            p_assertion_key := 'after_erase_attempt_' || coalesce(nullif(v_role, ''), 'unset'),
+            p_status := 'accepted', p_basis := 'assumed'
+        );
+        IF (SELECT status FROM assertions WHERE id = v_id) <> 'candidate' THEN
+            RAISE EXCEPTION
+                'Role "%" landed an ordinary accepted write under a scope it tried to unlock', v_role;
+        END IF;
+    END LOOP;
+
+    -- A declared self-settled type is configuration too: ending it would move
+    -- who may settle that claim, restrictively but still without an admin.
+    PERFORM set_config('app.current_role', 'admin', true);
+    v_id := record_assertion(
+        'registry_entry', '{"value":true}', v_core,
+        p_assertion_key := 'self_settled_type:availability',
+        p_status := 'accepted', p_basis := 'assumed'
+    );
+    IF (SELECT status FROM assertions WHERE id = v_id) <> 'accepted' THEN
+        RAISE EXCEPTION 'An admin could not declare a self-settled type';
+    END IF;
+
+    v_selfbase := rye_settlers(
+        p_subject_id := v_john,
+        p_claim_type := 'availability',
+        p_speaker_id := v_john,
+        p_domain_key := 'conformance-config-gate',
+        p_speech_act := 'self_commitment'
+    );
+    IF v_selfbase->'settlers'->0->>'node_id' IS DISTINCT FROM v_john::text
+       OR v_selfbase->'settlers'->0->>'relationship' <> 'self'
+       OR (v_selfbase->'speaker'->>'is_settler')::boolean IS DISTINCT FROM true
+    THEN
+        RAISE EXCEPTION 'Premise broken: a declared self type does not settle to the subject: %', v_selfbase;
+    END IF;
+
+    FOREACH v_role IN ARRAY ARRAY['agent:t', 'viewer', 'team_member', ''] LOOP
+        PERFORM set_config('app.current_role', v_role, true);
+        v_failed := false;
+        BEGIN
+            PERFORM set_config('app.write_path', 'supersede_assertion', true);
+            PERFORM set_config('app.supersede_assertion_id', v_id::text, true);
+            UPDATE assertions SET superseded_at = now() WHERE id = v_id;
+        EXCEPTION WHEN OTHERS THEN
+            v_failed := true;
+            v_msg := SQLERRM;
+        END;
+        PERFORM set_config('app.write_path', '', true);
+        PERFORM set_config('app.supersede_assertion_id', '', true);
+        IF NOT v_failed THEN
+            RAISE EXCEPTION 'Role "%" ended a declared self-settled type', v_role;
+        END IF;
+        IF v_msg NOT LIKE '%is Rye configuration%' THEN
+            RAISE EXCEPTION 'Role "%" self type erase failed for the wrong reason: %', v_role, v_msg;
+        END IF;
+    END LOOP;
+
+    FOREACH v_role IN ARRAY ARRAY['admin', 'agent:t', 'viewer'] LOOP
+        PERFORM set_config('app.current_role', v_role, true);
+        v_answer := rye_settlers(
+            p_subject_id := v_john,
+            p_claim_type := 'availability',
+            p_speaker_id := v_john,
+            p_domain_key := 'conformance-config-gate',
+            p_speech_act := 'self_commitment'
+        );
+        IF v_answer->'settlers'->0->>'node_id' IS DISTINCT FROM v_selfbase->'settlers'->0->>'node_id'
+           OR v_answer->'settlers'->0->>'relationship' IS DISTINCT FROM v_selfbase->'settlers'->0->>'relationship'
+           OR v_answer->'speaker'->>'is_settler' IS DISTINCT FROM v_selfbase->'speaker'->>'is_settler'
+        THEN
+            RAISE EXCEPTION
+                'Role "%" sees a different answer for a declared self type after the erase attempts: % vs %',
+                v_role, v_answer, v_selfbase;
+        END IF;
+    END LOOP;
+
+    -- An admin keeps every lifecycle operation on the same rows: supersede
+    -- the incumbent, and narrow an accepted window through the helper.
+    PERFORM set_config('app.current_role', 'admin', true);
+    v_id := supersede_assertion(
+        v_incumbent, 'registry_entry', v_core, NULL,
+        '{"value":"replaced"}',
+        p_new_assertion_key := 'conformance_gate:incumbent',
+        p_new_basis := 'assumed'
+    );
+    IF (SELECT superseded_at FROM assertions WHERE id = v_incumbent) IS NULL THEN
+        RAISE EXCEPTION 'An admin could not supersede an accepted registry entry';
+    END IF;
+    IF registry_value('conformance_gate:incumbent', NULL) IS DISTINCT FROM '"replaced"'::jsonb THEN
+        RAISE EXCEPTION 'An admin''s supersession did not take: %',
+            registry_value('conformance_gate:incumbent', NULL);
+    END IF;
+
+    PERFORM record_assertion(
+        'registry_entry', '{"value":"scheduled_replacement"}', v_core,
+        p_assertion_key := 'conformance_gate:incumbent',
+        p_effective_at := now() + interval '1 day',
+        p_status := 'accepted', p_basis := 'assumed'
+    );
+    IF (SELECT effective_to FROM assertions WHERE id = v_id) IS NULL THEN
+        RAISE EXCEPTION 'An admin could not narrow the window of an accepted registry entry';
     END IF;
 
     -- ==================================================================
