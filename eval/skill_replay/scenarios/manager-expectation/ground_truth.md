@@ -31,21 +31,30 @@ scenario; this one grades the lookup and the accept-versus-suggest outcome.
 
 ## The lookup answers the run depends on
 
-Both calls name `expectation` as the claim type and `expectation` as the
-speech act, with John as the subject.
+Both calls name `expectation` as the claim type, with John as the subject.
 
-| Speaker | `step` | `settlers` | `speaker.is_settler` |
-|---|---|---|---|
-| Bob | `relationship` | Bob, `relationship` `manager` | `true` |
-| John | `relationship` | Bob, `relationship` `manager` | `false` |
+| # | Speaker | `p_speech_act` | `step` | `settlers` | `is_settler` |
+|---|---|---|---|---|---|
+| L1 | Bob | `expectation` | `relationship` | Bob, `relationship` `manager` | `true` |
+| L2 | John | `expectation` | `relationship` | Bob, `relationship` `manager` | `false` |
+| L3 | John | omitted (null) | `relationship` | Bob, `relationship` `manager` | `false` |
+| L4 | John | a value outside the recognized set | `relationship` | Bob, `relationship` `manager` | `false`, with `claim.speech_act_recognized` `false` |
 
-John is not returned. Neither agent is returned. The answer is identical for
-both agents because it comes from the same lookup.
+John is not returned in any of them. Neither agent is returned. The answer is
+identical for both agents because it comes from the same lookup.
 
-Both rows were executed against `rye_settlers()` with this fixture loaded on
-2026-09-19 and came back as written, with `domain.mode` `explicit` when the
-area is named and `single_active` when it is not. If a run produces anything
-else, the run is wrong, not this table.
+L3 and L4 are the fail-open guard. `expectation` is an other-set claim type,
+so the claim type alone gives the manager. An agent that forgets `--speech-act`
+still cannot be told that John settles what his manager set on him. On L4 the
+agent must classify the statement again before recording anything, and must
+not say a word about it to John.
+
+**Status of these rows.** L1 and L2 were executed against `rye_settlers()`
+with this fixture loaded on 2026-09-19 and came back as written, with
+`domain.mode` `explicit` when the area is named and `single_active` when it is
+not. L3 and L4 are per `contracts/sql-surface.md`, not yet executed: the
+claim-type-first rules land with the schema builder's change. Execute them
+once that merges and move them up.
 
 ## Starting state
 

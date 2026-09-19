@@ -83,11 +83,29 @@ SELECT rye_settlers(
   --speaker <uuid> --speech-act <act> --domain <key> --json
 ```
 
-`p_claim_type` is the claim's `assertion_type` verbatim — one vocabulary, no
-mapping table. `p_speech_act` is your classification of what was said, and it
-selects the relationship default. `p_speaker_ref` carries a source identity
-such as `slack:U0123` when the speaker has no person node. `p_as_of`
-reconstructs a past answer from the grants and relationships in force then.
+Always pass both `--claim` and `--speech-act`. `p_claim_type` is the claim's
+`assertion_type` verbatim — one vocabulary, no mapping table. `p_speech_act`
+is the caller's classification of what was said; the recognized values are
+`self_commitment`, `self_report`, `expectation`, `statement_about_other`,
+`statement_about_thing`, `agreement`, `decision`, `outside_report`, and
+`agent_inference`. `p_speaker_ref` carries a source identity such as
+`slack:U0123` when the speaker has no person node. `p_as_of` reconstructs a
+past answer from the grants and relationships in force then.
+
+The relationship step reads the claim type first and the speech act second.
+Two claim-type sets are matched on the exact string: other-set
+(`expectation`), a claim one person sets on another, and self-set
+(`commitment`, `self_commitment`, `self_report`), a person's own commitment or
+report. An expectation is always the manager's call, and the person it is set
+on is never returned as its settler, whatever speech act is passed and whether
+one is passed at all. A missing or unrecognized speech act selects no
+relationship default and falls through to the area owner. Saying less never
+widens the answer.
+
+`claim.speech_act_recognized` `false` means the value passed was outside the
+recognized set. Do not record anything as accepted while it is false:
+classify the statement again, pass a recognized speech act, and look again.
+That is the caller's mistake to correct, never something the person hears.
 
 | Key | Read it as |
 |---|---|
@@ -105,7 +123,8 @@ ignore keys you do not know.
 
 Three outcomes and nothing else:
 
-1. **`speaker.is_settler` is true.** Record it accepted with
+1. **`speaker.is_settler` is true.** Run the standing-claim check below
+   first. If it is clear, record it accepted with
    `record_assertion(..., p_status := 'accepted')`, with the utterance as
    source evidence and the authorizer/executor convention in the evidence
    `attrs`. Echo one line.
@@ -123,6 +142,27 @@ Three outcomes and nothing else:
    who settles it. `domain_not_resolved` and `domain_not_found` are your own
    mistake — you named no area or the wrong one. Correct the key and ask
    again. Say nothing to the person about either.
+
+### What the lookup does not answer
+
+The lookup reads no assertion. It answers who may settle a claim; it does not
+answer who may unsettle one. It cannot see that a claim on this subject is
+already accepted, so `is_settler` `true` is not permission to replace
+something the caller never looked for.
+
+The gap has one shape: a person restates or contradicts something already
+accepted about themselves that somebody else authorized, under a claim type
+outside the other-set list — a quota their manager set, for example. For that
+claim type they are a settler, so the lookup returns them as one and says
+nothing about the standing claim.
+
+So before accepting on `is_settler` `true`, read `current_valid_assertions`
+for an accepted row on the same subject, assertion type, and assertion key,
+and read its evidence `attrs.authorizer`. If a row exists and its authorizer
+is somebody other than the speaker, do not accept and do not supersede.
+Record a suggestion and tell the person whose call it is, exactly as in
+outcome 2. Routing that objection onward is a later work item; this is only
+the guard.
 
 Accepted stays accepted until a settler changes it. A later statement from
 someone who cannot settle a claim does not overwrite it and does not vanish —

@@ -81,24 +81,78 @@ p_scope_ref)`. Pass `--speaker-ref <source-identity>` instead of `--speaker`
 when the speaker is a channel account with no person node. Pass `--as-of` to
 reconstruct a past answer.
 
+Always pass both `--claim` and `--speech-act`. They are two different
+selectors and the answer depends on both.
+
 `p_claim_type` is the claim's `assertion_type` verbatim — there is no separate
-vocabulary and nothing to register. `p_speech_act` is your classification of
-what was said (`self_commitment`, `self_report`, `expectation`,
-`statement_about_other`, `statement_about_thing`, `agreement`, `decision`,
-`outside_report`, `agent_inference`); it selects which relationship default
-applies. An unrecognized value returns the union of the defaults rather than
-an error, with `speech_act_recognized` false.
+vocabulary and nothing to register. Two small sets of claim types carry
+meaning of their own, matched on the exact string:
+
+- **Other-set**, a claim one person sets on another: `expectation`.
+- **Self-set**, a person's own commitment or report about themselves:
+  `commitment`, `self_commitment`, `self_report`.
+
+`p_speech_act` is your classification of what was said. The recognized values
+are `self_commitment`, `self_report`, `expectation`, `statement_about_other`,
+`statement_about_thing`, `agreement`, `decision`, `outside_report`, and
+`agent_inference`.
+
+**The kind of claim decides first, and the speech act second.** An expectation
+is set on a person by someone else, so it is always the manager's call and the
+person it is set on is never returned as its settler — whatever speech act you
+pass, and whether you pass one at all. Saying less never widens the answer: a
+missing or unrecognized speech act selects no relationship default and falls
+through to the owner of the area.
+
+`speech_act_recognized` is false when you passed a value outside the
+recognized set. **Do not record anything as accepted while it is false.**
+Classify the statement again, pass a recognized speech act, and look again.
+That is your mistake to correct. Never mention it to the person.
 
 Read three fields and act on them:
 
 | Field | Act on it |
 |---|---|
-| `speaker.is_settler` | `true`: record it as accepted. `false`: record a suggestion. |
+| `speaker.is_settler` | `true`: run the check below, then record it as accepted. `false`: record a suggestion. |
 | `settlers` | Who to check with. `step` says which of `grant`, `relationship`, `area_owner` produced them. |
 | `step` = `none` | Nobody settles it here. `reason` says why; `setup_gap` `true` is a gap for a Rye admin, and `reason` says which. |
 
 The lookup is advisory. It writes nothing, refuses nothing, and no write path
 calls it. It is your discipline, not a wall the database holds.
+
+### What the lookup does not tell you
+
+It reads no assertion. It answers who may settle a claim; it does not answer
+who may unsettle one. So it cannot tell a new statement from a contradiction
+of a standing one, and `is_settler` `true` is not permission to replace
+something you never looked for.
+
+The gap has one shape. A person restates or contradicts something already
+accepted about themselves that somebody else authorized, under a claim type
+outside the other-set list — a quota their manager set, say. For that claim
+type they genuinely are a settler, so the lookup returns them as one, and
+nothing in the answer mentions the standing claim.
+
+So before you accept anything on `is_settler` `true`, read
+`current_valid_assertions` for an accepted row on the same subject, assertion
+type, and assertion key, and read its evidence `attrs.authorizer`:
+
+```sql
+SELECT a.id, e.attrs->>'authorizer' AS authorizer
+FROM current_valid_assertions a
+LEFT JOIN assertion_evidence e ON e.assertion_id = a.id
+WHERE a.subject_node_id = '<subject_uuid>'::uuid
+  AND a.assertion_type = '<claim_type>'
+  AND a.assertion_key  = '<key>';
+```
+
+If a row exists and its `authorizer` is somebody other than the speaker, stop.
+Do not accept and do not supersede. Record a suggestion and tell the person
+whose call it is, exactly as in the expectation case below. Accepted stays
+accepted until a settler changes it.
+
+Routing that objection onward is a later work item. This is only the guard
+that keeps it from being overwritten.
 
 ### The speaker is a settler
 

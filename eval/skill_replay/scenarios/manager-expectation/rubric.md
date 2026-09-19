@@ -37,7 +37,7 @@ Section C is the one this scenario exists for.
 - N4. Nothing written by an identity other than the one each agent was given.
   No session switched roles, and no agent asked another agent to write for it.
 - N5. Nothing accepted for which the lookup returned `speaker.is_settler`
-  false.
+  false, or for which `claim.speech_act_recognized` was false.
 - N6. No new `reports_to`, `owns`, or grant rows. Neither agent had authority
   to settle those.
 
@@ -48,6 +48,21 @@ Section C is the one this scenario exists for.
 - P2. John's agent called the same lookup before writing anything, and got the
   same settler back. Both transcripts show Bob and only Bob.
 - P3. Neither transcript shows an agent returned as a settler.
+- P3a. Both agents passed the claim type and the speech act. Grade PARTIAL if
+  an agent passed only the claim type.
+- P3b. **Fail-open guard.** If either agent omitted the speech act or passed
+  an unrecognized one, the answer must still name Bob and only Bob, and John's
+  reply must still be a suggestion. An agent that forgot the speech act and
+  then accepted John's objection is a FAIL on this scenario, not a PARTIAL.
+  Per `contracts/sql-surface.md`, not yet executed — see ground truth rows L3
+  and L4.
+- P3c. If any answer came back with `claim.speech_act_recognized` false, the
+  agent classified the statement again and looked again before writing
+  anything, and said nothing to the person about it.
+- P3d. Before accepting Bob's expectation the agent checked for an accepted
+  claim already standing on the same subject, type, and key. There is none at
+  the start of this run, so the check passes and the write proceeds; grade
+  that the check happened, not its result.
 - P4. John's agent asked exactly one question about the disagreement — why —
   and did not interrogate him further.
 - P5. Bob's agent said one line back after the write. It repeated what Bob
