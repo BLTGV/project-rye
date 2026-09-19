@@ -110,4 +110,23 @@ the area. Build passes. All database-backed criteria unverified pending
 Docker. Lead: findings 1, 2, 4 sent to builder as fix attempt 1; 3 kept
 with a comment; 5 goes to Architect as a contract amendment.
 
+### Builder admin, 2026-09-19, fix attempt 1 (commit befe34c)
+Result: done. Changed: route-policy.ts (normalizeMethod folds HEAD into
+GET; pure routeDecision returning open|self|authorize|defer|refuse|
+unmatched), worker.ts (middleware drives off routeDecision;
+workerServesApiPath normalizes HEAD and recomputes when the registry grows;
+holdsInstanceWide comment), queries.ts (review-queue filter counts only
+sluggable keys), admin/scripts/route-policy-check.ts (new) with
+`npm run check:routes` in admin/package.json, 21_api_security.sh (HEAD and
+other-method probes, unsluggable-key assertions). Tested: build passes;
+check:routes passes on 31 routes covering HEAD on every GET row, PUT/PATCH/
+DELETE/OPTIONS/TRACE, the four deny rollups, unmatched paths, and
+route_undeclared via a route registered at test time; live probes against a
+booted Worker. NOT executed: 21_api_security.sh and the two SQL filters,
+pending Docker. Learned: see docs/areas/admin.md entries dated 2026-09-19.
+Questions: 401-before-404 left as is, needs an Architect contract
+amendment (Lead: agreed); whether the area test command should become
+`npm run build && npm run check:routes` (Lead: yes, route to Architect, who
+owns docs/areas.md).
+
 ## Close
