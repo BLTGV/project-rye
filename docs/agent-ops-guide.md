@@ -6,13 +6,22 @@ All objects live in `rye`.
 
 ```sql
 SET search_path = rye, public, pg_catalog;
-SET LOCAL "app.current_user_id" = 'user:alice';
-SET LOCAL "app.current_teams" = 'engineering,sales';
-SET LOCAL "app.current_role" = 'team_member';
+SET "app.current_user_id" = 'user:alice';
+SET "app.current_teams" = 'engineering,sales';
+SET "app.current_role" = 'team_member';
 ```
 
-Supabase calls use a fresh connection. Put equivalent `set_config()` calls in
-the same request as the query.
+Plain `SET` because this block is pasted into a session, not a transaction.
+`SET LOCAL` lasts only for the current transaction, and outside a `BEGIN` it
+warns "SET LOCAL can only be used in transaction blocks" and sets nothing — a
+reader who pastes it runs with no role at all. Use `SET LOCAL` only between a
+`BEGIN` and a `COMMIT`.
+
+A pooled connection or a per-call tool gives every statement a fresh session,
+so neither form survives to the next call: pass `set_config('app.current_role',
+'team_member', false)` in the same call as the query. See the Supabase notes in
+`AGENTS.md`, where `SET app.current_role = ...` does not work through the MCP at
+all.
 
 Call `rye_catalog()` first. Use `agent_node_summary(node_id, max_items)` for
 bounded context. Read current knowledge from `current_valid_assertions` or

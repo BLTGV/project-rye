@@ -620,10 +620,22 @@ Codes follow the format `{PREFIX}-{YYMM}-{SEQ}` (e.g., `OPP-2403-0042`, `TSK-240
 Authorization uses session variables, not database roles:
 
 ```sql
+BEGIN;
 SET LOCAL "app.current_user_id" = 'user:alice';
 SET LOCAL "app.current_teams"   = 'engineering,sales';
 SET LOCAL "app.current_role"    = 'team_member';
+-- ... the work ...
+COMMIT;
 ```
+
+The `BEGIN` and `COMMIT` are part of the convention, not decoration. `SET
+LOCAL` lasts only for the current transaction, and outside a transaction block
+it warns "SET LOCAL can only be used in transaction blocks" and sets nothing,
+so a pasted block leaves the role unset and every RLS-protected read comes back
+empty. For a whole session use plain `SET` instead; for a pooled connection or
+a per-call tool, where each statement is its own session, pass
+`set_config('app.current_role', 'team_member', false)` in the same call as the
+query — see the Supabase notes in `AGENTS.md`.
 
 Role hierarchy: `admin > manager > team_member > viewer > agent`.
 
