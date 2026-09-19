@@ -1,0 +1,74 @@
+# 0007 — The governance tables are read by role, written by admin
+
+Date: 2026-09-19. Status: accepted. Decided by: Architect, for work item 004.
+
+**The role list is the role list, so a session is admin, a named role, an
+agent, or unknown.** Every rule in the new contract section keys off
+`app.current_role`, with "named role" defined as a value that matches a
+`role_classification_access.role_name` row rather than a list spelled into each
+policy. That table is already the instance's role vocabulary and is already
+readable by every session for `redact_properties()`, so adding a role stays an
+insert rather than a migration, which is the project's convention-over-schema
+rule applied to authorization. It also gives the human's acceptance criterion a
+crisp meaning: a session with no role set matches nothing and reads nothing,
+and so does a session that invents a role name. The rejected alternative was
+`current_setting('app.current_role', true) IS NOT NULL` — anything with a role
+set may read the area tables. It was declined because an unset variable and a
+typo would then differ, and because the instance would have no list of who its
+roles are while its policies depended on there being one.
+
+**An agent reads the whole agent roster, and that is what keeps "agents settle
+nothing" fail-closed.** `agent_identities` is readable by admin, by every named
+role, and by every agent session, which makes its read set a strict superset of
+the read set of `knowledge_domains` and `domain_authorities`. That superset is
+the whole argument: the ref half of `rye_settler_is_agent()` only ever matters
+for a settler whose ref came from a governance table, and any caller that can
+see such a row can also see the roster that filters it out. The rejected
+alternatives were a narrow `SECURITY DEFINER` helper for the agent check and
+making `rye_settlers()` itself `DEFINER`. Both were declined for the same
+reason, which is the central fact of this item: under `FORCE ROW LEVEL
+SECURITY` with an owner that is not a superuser, a definer function is still
+subject to every policy, evaluated with the caller's session variables, so
+`DEFINER` buys no visibility at all and would only have moved the failure
+somewhere harder to see. Restricting agents to their own identity row was
+declined too — it hides other agents from the deny-list, which is precisely the
+fail-open case. The honest cost is that the roster is not secret; it holds a
+key, a label, and a runtime, while the tokens and the capabilities stay
+admin-only.
+
+**The five write helpers stay `SECURITY INVOKER` and admin-only write policies
+do the enforcing.** `ensure_knowledge_domain`, `subscribe_channel_to_domain`,
+`grant_domain_authority`, `create_agent_identity`, and `grant_agent_capability`
+keep their bodies and their signatures; what stops a non-admin calling them is
+the same policy that stops a non-admin writing the table directly. The rejected
+alternative was to replace all five as `SECURITY DEFINER` with an explicit
+`app.current_role = 'admin'` check in the body, which reads more helpfully
+because it can raise a sentence instead of an RLS violation. It was declined
+because the policies are needed anyway for the direct-SQL path, so the check in
+the body would be a second copy of the same rule in a second place, free to
+drift; because a definer function under FORCE is policy-checked regardless, so
+the marking would suggest a bypass that does not exist; and because a definer
+helper that writes on a non-admin's behalf is exactly the escalation the item
+exists to close. The cost is an unfriendly refusal, so the contract states the
+refusal shapes instead: insert raises `42501`, update and delete affect zero
+rows and raise nothing.
+
+**The two writes a non-admin legitimately causes use the existing named gate,
+and the action log is append-only for admin too.** `record_agent_action()` and
+the idempotency insert inside `agent_create_candidate()` open
+`app.write_path` around their own statement, the same mechanism
+`supersede_assertion` and `update_node_properties` already use, rather than a
+new session variable or a new role. The log insert is admitted from any session
+so that a denial is recorded even when the caller was impersonating another
+agent: an audit trail that the audited action can suppress is not one. No
+session updates or deletes `agent_action_log`, admin included, matching `events`
+and `assertion_evidence`; an admin able to edit it could erase the record of its
+own grants, and the one thing the table exists for is to be unforgeable after
+the fact. `api_idempotency_keys` is treated the other way, as a cache with an
+expiry that admin may delete from, and agents read their own rows there because
+`agent_create_candidate()` that cannot see its own prior response quietly
+creates a second candidate instead of returning the first. The rejected
+alternative for both was admin-and-definer-functions-only, as the work item
+assumed. It was declined because under FORCE there is no such thing as
+"definer-only", so the rule has to be written as something a policy can
+actually express.

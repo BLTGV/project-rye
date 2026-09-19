@@ -22,7 +22,8 @@ client of it. This contract says what a client may depend on.
   status, or basis.
 - **Reads are views and `SELECT`-returning functions**: `rye_catalog()`,
   `rye_agent_context()`, `rye_categories()`, `rye_settlers()`,
-  `agent_node_summary()`, and the views above. `rye_categories()` has its own
+  `agent_node_summary()`, `rye_current_agent_key()`, `rye_current_agent_id()`,
+  and the views above. `rye_categories()` has its own
   contract, `contracts/category-vocabulary.md`, which governs its jsonb shape;
   `rye_settlers()` is governed by the "Settlement lookup" section below.
   Base-table reads carry no promise beyond the data dictionary's columns.
@@ -30,7 +31,9 @@ client of it. This contract says what a client may depend on.
   `assertion_type`, and property keys need no migration.
 - **Authorization is session variables**: `app.current_role`,
   `app.current_user_id`, `app.current_teams`, set in the same statement as
-  the query when the connection is pooled. Nothing else authorizes.
+  the query when the connection is pooled. Nothing else authorizes. What each
+  role may read and write in the governance tables is the section "Governance
+  tables: who reads, who writes" below.
 
 ## Versioning
 
@@ -60,6 +63,185 @@ exist for tables passed to `track_table()`.
   absent. `INSERT ... RETURNING` on RLS-protected tables fails; use the helper.
 - No path in this contract deletes an event or mutates an accepted assertion
   in place.
+
+## Governance tables: who reads, who writes
+
+Nine tables say which areas exist, who holds authority in them, which channels
+feed them, which agents exist, what each agent may do, and what each agent did:
+`knowledge_domains`, `domain_authorities`, `channel_domain_subscriptions`,
+`domain_claim_policies`, `agent_identities`, `agent_capability_grants`,
+`agent_action_log`, `api_idempotency_keys`, `agent_api_tokens`. Row-level
+security is enabled and forced on all nine. They are the only base tables whose
+visibility this contract promises; for every other table "Shape" still stands
+and a client reads what the data dictionary lists, filtered by node visibility.
+
+This section narrows what some sessions could read before. It bumps no version:
+no object is removed or renamed, no signature narrows, no view column changes
+meaning, and `rye_settlers()` stays at `contract_version` 1 because its answer
+shape is untouched. It is recorded in `docs/decisions/0007-agent-governance-visibility.md`
+because clients that read these tables without setting a role will start reading
+zero rows.
+
+### Four session shapes
+
+`app.current_role` decides. Nothing else decides — not `current_user`, not
+`pg_has_role()`, not the bearer token, which only chooses what the API puts in
+`app.current_role`.
+
+| shape | matched when `app.current_role` is |
+|---|---|
+| **admin** | `admin` |
+| **named role** | any value equal to a `role_classification_access.role_name`: at install `admin`, `manager`, `deal_manager`, `team_lead`, `hr_admin`, `finance`, `team_member`, `viewer`. `admin` matches here too and always takes the wider branch. |
+| **agent** | `agent:<agent_key>`, where `<agent_key>` is the stored key of an `agent_identities` row with `active` true |
+| **unknown** | anything else, including unset, and `agent:<key>` naming no active identity |
+
+A new role is a row in `role_classification_access`, not an edit to a policy.
+That table is already the instance's role list and already readable by every
+session, which is why it and not a hardcoded list is the definition here.
+
+Two published read-only helpers are the only definition of the agent match, so
+a verifier can assert it directly: `rye_current_agent_key() RETURNS text` gives
+the part after `agent:` when `app.current_role` has that form and null
+otherwise, and `rye_current_agent_id() RETURNS uuid` gives the `agent_identities.id`
+of the active row with that key and null otherwise. Both are `STABLE` and read
+`app.current_role` alone. **Own rows** below always means
+`agent_id = rye_current_agent_id()`, which is null for every non-agent shape, so
+no non-agent session owns anything. `app.current_user_id` carries the same
+`agent:<key>` string by convention and is not authoritative for any rule here.
+
+The key must be the stored slug. `agent:my-agent` names no identity whose stored
+key is `my_agent`, so that session is **unknown**, not an agent — the same trap
+as "Area keys and agent keys are slugs" below, and the same fix: write the ref
+against the stored slug.
+
+### Holding an area
+
+An agent **holds** an area when it has a row in `agent_capability_grants` with
+`active` true, `expires_at` null or in the future, and `domain_id` either equal
+to that area or null. A null `domain_id` is an instance-wide grant and holds
+every area, which is what `has_agent_capability()` already means by it. The
+capability name is not part of the rule: any grant holds the area for reading
+that area's governance rows. This is deliberately wider than the capability
+filter the agent functions apply to their own answers, so RLS never subtracts
+from what `agent_get_context_pack()` would have returned.
+
+### The rules
+
+| table | admin | named role | agent session | unknown |
+|---|---|---|---|---|
+| `knowledge_domains` | read all; insert, update, delete | read all | read areas it holds | nothing |
+| `domain_authorities` | read all; insert, update, delete | read all | read rows of areas it holds | nothing |
+| `channel_domain_subscriptions` | read all; insert, update, delete | read all | read rows of areas it holds | nothing |
+| `domain_claim_policies` | read all; insert, update, delete | read all | read rows of areas it holds | nothing |
+| `agent_identities` | read all; insert, update, delete | read all | read all | nothing |
+| `agent_capability_grants` | read all; insert, update, delete | nothing | read own rows | nothing |
+| `agent_action_log` | read all; insert only | nothing | read own rows | nothing |
+| `api_idempotency_keys` | read all; insert, delete | nothing | read own rows | nothing |
+| `agent_api_tokens` | read all; insert, update, delete | nothing | nothing | nothing |
+
+Four rules sit behind that table and are worth stating in words.
+
+**The whole agent roster is readable by every session that can see anything
+else.** `agent_identities` carries no secret — tokens live in
+`agent_api_tokens`, permissions in `agent_capability_grants` — and it is the
+deny-list for the one rule the settlement model rests on, that an agent is never
+a settler. A deny-list some callers cannot read is a deny-list that fails open.
+Its read set is therefore a superset of the read set of `knowledge_domains` and
+`domain_authorities`, and that superset is the promise: any session that can see
+a grant or an area can see the roster that filters agents out of it.
+
+**Capability grants, tokens, and the action log are admin-only for reads other
+than an agent's own.** They are the instance's security configuration and its
+audit trail; a `team_lead` has no more business reading which capabilities an
+agent holds than reading `access_grants` it is not party to. An agent reads its
+own grants and its own log rows so it can see what it may do and what it did,
+and reads no other agent's.
+
+**`agent_action_log` is append-only for everyone, admin included.** No session
+updates or deletes a row, exactly as `events` and `assertion_evidence` are
+treated. An admin who could edit the log could erase the record of its own
+grants. There is no pruning path today; adding one is a new migration and an
+edit here first.
+
+**`api_idempotency_keys` is a cache, not a record**, so admin may delete expired
+rows. An agent reads its own rows because `agent_create_candidate()` must find
+its own prior response; if it could not, a retried call would silently create a
+second candidate instead of returning the first.
+
+### Writes go through the helpers, and the policies are what enforce it
+
+`ensure_knowledge_domain`, `subscribe_channel_to_domain`, `grant_domain_authority`,
+`create_agent_identity`, and `grant_agent_capability` keep their signatures and
+stay `SECURITY INVOKER` with no role check in the body. What makes them
+admin-only is the admin-only write policy on the table each one writes, which is
+the same rule that governs a direct `INSERT`, so there is one rule in one place
+and no second authorization model to drift. An admin may equally write these
+tables directly, and should not: the helpers slugify keys, and a row inserted
+with a hyphenated key is unreachable by every lookup.
+
+Two writes are made on behalf of a caller who is not an admin, and both use the
+established named-gate mechanism — `app.write_path` set transaction-locally by
+the function, immediately around its own statement, and cleared after, because a
+nested helper clears it:
+
+| write | gate the policy admits |
+|---|---|
+| `record_agent_action()` inserting into `agent_action_log` | `app.write_path = 'record_agent_action'` |
+| `agent_create_candidate()` inserting into `api_idempotency_keys` | `app.write_path = 'agent_create_candidate'` |
+
+As everywhere else the gate is used, it is a guard rail and a seam for trusted
+layers, not a boundary: a session with direct SQL can set it itself. It grants
+nothing if it does — nothing reads the action log to authorize anything, and an
+idempotency row only ever returns a response to the agent that owns it.
+
+### SECURITY DEFINER does not bypass these policies
+
+Under `FORCE ROW LEVEL SECURITY` with an owner that is not a superuser, which is
+the Supabase case and the one that must hold, a `SECURITY DEFINER` function is
+still subject to every policy, evaluated with the caller's session variables,
+because `app.current_role` is session state and the function does not change it.
+So marking a function `DEFINER` buys nothing here and no function is made
+`DEFINER` to solve visibility. The agent functions keep working by exactly the
+two mechanisms the schema already uses: the rows they must read are readable to
+the session that calls them (as `field_classifications`, `assertion_type_access`,
+and `role_classification_access` are readable to every session for the sake of
+`redact_properties()`), and the rows they must write are admitted by a named
+gate. Concretely:
+
+- `has_agent_capability`, `authorize_agent_action`, `agent_get_context_pack`,
+  `agent_submit_observation`, and `agent_create_candidate` read the roster and
+  the caller's own grants, both of which an agent session can see, and the area
+  tables for areas it holds, which is wider than their own capability filter.
+  For a valid agent asking about itself the answers are unchanged.
+- The same four asked about **another** agent's id answer as if that agent held
+  nothing: `has_agent_capability` and `authorize_agent_action` return false
+  rather than raising, and the three that check a capability first raise
+  `42501` and log the denial. An admin session still gets the true answer for
+  any agent id, which is the path the Worker uses.
+- `record_agent_action` works from any session through its gate, so a denial is
+  logged even when the caller was impersonating. The audit trail is never
+  suppressed by the thing it audits.
+- `authenticate_agent_token`, `issue_agent_token_record`, `issue_agent_token`,
+  and `revoke_agent_token` require an **admin** session, because
+  `agent_api_tokens` is admin-only. A non-admin gets null from
+  `authenticate_agent_token` and false from `revoke_agent_token`, not an error.
+  Exchanging a token is the trusted layer's job; the Worker already sets
+  `app.current_role` to `admin` in the same statement.
+
+### What a refusal looks like
+
+Refusals here are not uniform, and a test that asserts the wrong one passes for
+the wrong reason:
+
+- A refused `INSERT` **raises** `42501`, `new row violates row-level security policy`.
+- A refused `UPDATE` or `DELETE` **raises nothing** and affects zero rows. Assert
+  the row count, not an exception.
+- A refused `SELECT` returns zero rows. RLS silence applies as everywhere else:
+  zero rows never means the row is absent.
+- A helper that looks a row up before writing it may refuse first with its own
+  message — `subscribe_channel_to_domain` raises `Knowledge domain % not found`
+  for an area the session cannot see. Either refusal is a refusal; the message
+  is not part of this contract.
 
 ## Settlement lookup
 
@@ -100,6 +282,35 @@ its own `SET search_path`. It writes nothing, not even an audit row.
   against a grant that names it.
 - `p_as_of` reconstructs a past answer. It filters effective windows only.
 
+### Who may call it, and what each caller sees
+
+It stays `SECURITY INVOKER`, so the session shapes in "Governance tables" decide
+what it can find. The signature and the answer shape are the same for all of
+them; the content is not.
+
+| caller | what it gets |
+|---|---|
+| admin | every answer this document describes |
+| named role | the same answers: it reads every area and every grant, and node-derived settlers are filtered by node visibility as they always were |
+| agent | narrowed to the areas it holds. An area it holds no grant on is invisible, so the answer is `step` `none`, `settlers` `[]`, `domain_found` false, `reason` `domain_not_found` — the same answer as for an area key that names nothing, and deliberately indistinguishable from it. An area is not a thing an agent gets told exists. |
+| unknown | no area resolves and no grant is visible, so only the relationship step can produce anything, from nodes it can see |
+
+**The agent exclusion cannot fail open where it can matter.** The ref half of
+the check reads `agent_identities`, and the roster is readable by every shape
+that can read `knowledge_domains` or `domain_authorities`. So any caller that
+can produce a grant settler or an area-owner settler — the two kinds whose ref
+comes from a governance table — can also evaluate the ref against the roster. A
+session that cannot read the roster is a session for which no area resolves and
+no grant is visible, so it reaches neither step. The node half of the check
+(`node_type` `agent`, `attrs->>'actor_kind'` `agent`) needs no governance read at
+all and applies to every caller, which is what covers relationship settlers. An
+agent that exists as a node is expected to carry one of those two markings; an
+agent node carrying neither and holding no matching `agent_key` is not excluded,
+for any caller including admin, exactly as before.
+
+`excluded_agents` counts what this caller dropped, so two callers can see
+different counts for the same claim. That is visibility, not disagreement.
+
 ### Answer shape
 
 Top level: `contract_version` (integer, `1`), `step`, `settlers`,
@@ -117,7 +328,7 @@ one as "no settler, no further detail".
 
 | `reason` | Returned when |
 |---|---|
-| `domain_not_found` | `p_domain_key` was supplied and no active area has that key. |
+| `domain_not_found` | `p_domain_key` was supplied and no active area has that key, or this caller cannot see the one that does. The two are not distinguishable, on purpose. |
 | `domain_not_resolved` | No `p_domain_key` was supplied and none could be inferred, so `mode` is `ambiguous` or `none`. |
 | `area_has_no_owner` | The area resolved and its `owner_node_id` is null. |
 | `area_owner_not_visible` | The area names an owner and that node is archived or hidden by RLS from this caller. |
@@ -166,9 +377,9 @@ has_owner}`, where `mode` is `explicit`, `single_active`, `ambiguous`, or
 
 ### An unknown area key stops the lookup
 
-When `p_domain_key` is supplied and names no active area, the answer is `step`
-`none`, `settlers` `[]`, `domain_found` false, and `reason` `domain_not_found`.
-No step runs. The grant step is skipped because there is no area to read grants
+When `p_domain_key` is supplied and names no active area this caller can see,
+the answer is `step` `none`, `settlers` `[]`, `domain_found` false, and `reason`
+`domain_not_found`. No step runs. The grant step is skipped because there is no area to read grants
 from, and the relationship step is skipped too, so even the zero-setup self
 default is suppressed.
 
