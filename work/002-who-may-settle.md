@@ -224,4 +224,27 @@ Lead reproduced it on the stand-in: agent stored as `my_agent`, grant ref
 `agent:my-agent`, result step grant, excluded_agents 0, one settler.
 Sent to the schema builder as fix attempt 1.
 
+### Lead, 2026-09-19, first full suite run under Docker (tree 1749342)
+`./scripts/docker-test.sh test --reset --profiles crm,pm`: the whole
+conformance suite passed in a real install, including
+29_settlement_lookup.sql, migration ordering through 0021, RLS-enabled
+tables, security, concurrency, and scenarios. The run then failed in the
+host-run 21_api_security.sh, which belongs to work/003. This tree predates
+the agent-exclusion fix.
+
+### Builder schema, 2026-09-19, fix attempt 1 (commit 54dcde4)
+Result: done. Changed: 0021 (rye_settler_is_agent() fails closed on an
+`agent:` prefix, case-insensitive and trimmed, and otherwise compares
+rye_slugify_key(ref) to the stored agent_key; the check now also receives
+the ref of node-derived settlers; authority_kind 'agent' guarded),
+29_settlement_lookup.sql (six new cases), docs/data-dictionary.md. Tested
+on the stand-in: before the fix all five agent refs returned step grant,
+excluded_agents 0, one agent settler; after, step relationship,
+excluded_agents 1, settler Bob; area-owner-is-agent answers step none,
+area_owner_is_agent, setup_gap true; test 29 fails on the pre-fix migration
+and passes on the fixed one. Questions: the amended contract paragraph
+documented the bug as behavior (Lead: sent back to Architect to correct);
+authority_kind has a CHECK that already forbids 'agent', guard kept without
+a test (Lead: accepted). Lead: sent to Verifier for an adversarial recheck.
+
 ## Close

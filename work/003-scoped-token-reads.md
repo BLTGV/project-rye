@@ -178,4 +178,15 @@ checks), docs/decisions/0006 ("Amendments after implementation"),
 docs/areas.md (admin test is now `cd admin && npm run build && npm run
 check:routes`). Lead reran scripts/gen-agents after the areas edit.
 
+### Lead, 2026-09-19, first execution of 21_api_security.sh: FAIL
+Docker access restored by Casey. From tree 1749342 the conformance suite
+passed; the host-run 21_api_security.sh then failed at line 452:
+"reviewer sees its own area's candidate": GET /api/review-queue?
+include_closed=1&q=Brightline with the reviewer token returned zero
+candidates, stats total 1 filtered 0, only facet proposed count 1, right
+after the reviewer promoted that candidate with a 200. Cause unknown:
+product filter or test expectation. Sent to the builder with sole use of
+the Docker port, to find the cause by execution and run the script to the
+end. This is a newly observed problem, not a repeat of an earlier finding.
+
 ## Close
