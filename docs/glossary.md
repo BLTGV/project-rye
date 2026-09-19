@@ -55,6 +55,23 @@ identifiers stay canonical everywhere durable.
 - **Which source is authoritative** — the recorded decision about which source settles a given kind of fact.
 - **Local term** — a word this organization uses its own way, recorded so fresh agents reuse it.
 
+## Authority and settling
+
+These extend the words above rather than replace them. A statement its speaker
+cannot settle becomes a **suggestion**, and settling it is **accepting a
+suggestion** or **declining a suggestion**.
+
+- **Settling a claim** — deciding that something counts as accepted knowledge, or declining it, by someone who may do so for that claim.
+- **Who may settle it** — the answer to one lookup, in order: a recorded grant for that kind of claim, then the relationship (yourself, your manager, the owner of the thing), then the owner of the area. Agents settle nothing.
+- **A grant** — a recorded statement that a named person, team, system, or source account decides a kind of claim. Made in plain words, ended the same way. Called a domain authority internally.
+- **Reporting line** — who a person reports to. The manager settles what is expected of that person. Recorded as a relationship and settled by the owner of the area.
+- **Owner of a thing** — the person who answers for a particular account, component, or record, and who settles facts about it.
+- **Owner of an area** — the person who settles anything in an area of the business that nobody else is recorded for, including reporting lines and ownership.
+- **Objection** — a recorded disagreement with something already accepted, raised by someone who cannot settle it. The accepted fact stands until a settler changes it; the objection is routed by its reason.
+- **Expectation** — something one person is expected to do, set on them by someone else. Settled by that person's manager, not by the person.
+- **The questions a person owes** — the questions that person can settle, most important first, read by any of their agents so the asking happens in whatever conversation comes next.
+- **Echo** — the one line an agent says back after recording something, in the person's own words, so they can correct it on the spot.
+
 ## Sources and material
 
 - **Source** — where material originated: an account, a workspace, a mailbox, a system.

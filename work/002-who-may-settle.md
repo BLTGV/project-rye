@@ -56,11 +56,25 @@ agent checks with someone who can."
 - A grant can narrow a default as well as add to it; how narrowing is expressed in the existing table is the Architect's call. Overturn: Architect.
 - "Kind of claim" maps to `claim_types` on the grant and to assertion type on the claim. Overturn: Architect.
 - Objections, the questions-owed request, and the write echo are separate work items that follow this one. Overturn: Casey.
+- When the owner of an area is the person a reporting line is about, the Rye admin is asked instead, since nobody settles a claim about their own authority. Raised by Product. Overturn: Casey.
+- A person's asking preferences bind only their own agents. Raised by Product. Overturn: Casey.
+- An unsettled objection never expires; it stays visible as unsettled. Raised by Product. Overturn: Casey.
+- The v0.3 non-goal "tokens" means the forecasting-era stake concept, not the credential an agent presents to the API. Raised by Product. Overturn: Casey.
 
 ## Verified
 - filled in at close
 
 ## Reports
 Paste each role's report here as it arrives.
+
+### Product, 2026-09-19 (v0.4 product definition, serves 002 and 003)
+Result: done. Changed: docs/product.md (added "Part two: v0.4" with users,
+goals, non-goals, stories S10 to S17; v0.3 text unaltered), docs/glossary.md
+(new "Authority and settling" section, ten terms). Tested: none, docs only.
+Learned: the brief's v0.4 done list maps onto eight stories with the five
+replay cases under S10 to S13; stage 3 and 4 material appears only as
+non-goals; work items and glossary now agree on "settle", "grant", "area
+owner", "kind of claim". Questions: four, all answered under "Assumed by
+default" above.
 
 ## Close
