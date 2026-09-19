@@ -528,4 +528,32 @@ visible in the migrations; the Verifier will test whether an agent role
 can write an accepted alias or self_settled_type entry, since an alias
 expectation -> commitment would hand a person their own expectation.
 
+### Builder schema, 2026-09-19, root fix (commit cb49986)
+Result: done. New rye_settler_self_settled(), SECURITY INVOKER; rules 2 and
+3 gate on it; the literal c_self_set removed as a second source of truth.
+Test 29 runs under SET ROLE rye_conformance as conformance.sh does, fails
+on 9b587b8 at the first changed case, passes after, and raises if a
+confidential alias is visible to viewer so the visibility cases cannot pass
+vacuously. Full Docker flow passed on the builder's branch. Executed (John
+reports_to Bob, Dana reports_to Priya, area owner Dana, alias
+requirement->expectation confidential, self_settled_type:private_note
+confidential, self_settled_type:preference public): admin
+john/requirement/self_commitment: relationship, Bob, false; viewer,
+team_member, agent:some-agent same call: area_owner, Dana, false; admin
+john/Expectation/self_commitment: area_owner, Dana, false; admin and viewer
+john/preference/self_report: relationship, John, true; admin
+john/private_note/self_report: John, true; viewer same: area_owner, Dana,
+false; admin john/commitment/no act: John, true; Marcus about Dana,
+commitment, statement_about_other: Dana and Priya, false; Marcus about
+John, requirement: Bob, false; viewer john/commitment with no area
+argument: John, true.
+
+### Lead, 2026-09-19, integration and combined suite on e90bbbe: PASSED
+Base revision f649d00. Merged worktree-agent-ae27942de1b4935c1 (cb49986)
+and worktree-agent-a7f18ff71cb202bfc (593b635), no conflicts.
+`./scripts/test-all.sh` on e90bbbe: Docker flow OK, admin build plus
+check:routes OK, site build OK. Verifier given the live database for a
+final pass, including an attempt to change who may settle an expectation
+by writing registry configuration as an agent role.
+
 ## Close
