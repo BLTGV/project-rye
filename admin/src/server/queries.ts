@@ -1,5 +1,5 @@
 import type postgres from "postgres";
-import { withAdminCte } from "./db";
+import { ryeQuery } from "./db";
 
 type Sql = ReturnType<typeof postgres>;
 
@@ -40,8 +40,8 @@ export interface CandidateAccessEnvelope {
 }
 
 export async function authenticateAgentToken(sql: Sql, token: string): Promise<AgentAuthContext | null> {
-  const rows = await sql.unsafe(
-    withAdminCte() +
+  const rows = await ryeQuery(
+    sql,
       `SELECT rye.authenticate_agent_token($1::text) AS auth
        FROM cfg`,
     [token]
@@ -62,8 +62,8 @@ export async function authorizeAgentAction(
     result?: Record<string, unknown>;
   }
 ): Promise<AgentAuthorizationResult> {
-  const rows = await sql.unsafe(
-    withAdminCte() +
+  const rows = await ryeQuery(
+    sql,
       `, auth AS (
          SELECT rye.authorize_agent_action(
            p_agent_id     := $1::uuid,
@@ -125,8 +125,8 @@ export async function recordAgentDenial(
     request?: Record<string, unknown>;
   }
 ): Promise<void> {
-  await sql.unsafe(
-    withAdminCte() +
+  await ryeQuery(
+    sql,
       `SELECT rye.record_agent_action(
          p_agent_id    := $1::uuid,
          p_action      := $2::text,
@@ -157,8 +157,8 @@ export async function fetchCandidateAccessEnvelope(
   sql: Sql,
   candidateId: string
 ): Promise<CandidateAccessEnvelope> {
-  const rows = await sql.unsafe(
-    withAdminCte() +
+  const rows = await ryeQuery(
+    sql,
       `SELECT json_build_object(
          'domain_keys',
            COALESCE((
@@ -201,8 +201,8 @@ export async function fetchDomains(
   sql: Sql,
   opts: { includeProperties?: boolean; agentId?: string | null } = {}
 ) {
-  const rows = await sql.unsafe(
-    withAdminCte() +
+  const rows = await ryeQuery(
+    sql,
       `SELECT COALESCE(json_agg(row_to_json(d) ORDER BY d.domain_key), '[]'::json) AS domains
        FROM (
          SELECT
@@ -259,8 +259,8 @@ export async function fetchAgentContextPack(
   agentId: string,
   opts: { scopeRef?: string | null; channelRef?: string | null; domainKeys?: string[] }
 ) {
-  const rows = await sql.unsafe(
-    withAdminCte() +
+  const rows = await ryeQuery(
+    sql,
       `SELECT rye.agent_get_context_pack(
          p_agent_id    := $1::uuid,
          p_scope_ref   := $2::text,
@@ -274,8 +274,8 @@ export async function fetchAgentContextPack(
 }
 
 export async function fetchAgentAuditActions(sql: Sql, limit = 100) {
-  const rows = await sql.unsafe(
-    withAdminCte() +
+  const rows = await ryeQuery(
+    sql,
       `SELECT COALESCE(json_agg(row_to_json(a) ORDER BY a.created_at DESC), '[]'::json) AS actions
        FROM (
          SELECT
@@ -317,8 +317,8 @@ export async function submitAgentObservation(
     properties?: Record<string, unknown>;
   }
 ): Promise<{ id: string }> {
-  const rows = await sql.unsafe(
-    withAdminCte() +
+  const rows = await ryeQuery(
+    sql,
       `SELECT rye.agent_submit_observation(
          p_agent_id      := $1::uuid,
          p_statement     := $2::text,
@@ -354,8 +354,8 @@ export interface CatalogResult {
 }
 
 export async function fetchCatalog(sql: Sql): Promise<CatalogResult> {
-  const rows = await sql.unsafe(
-    withAdminCte() +
+  const rows = await ryeQuery(
+    sql,
       `SELECT rye.rye_catalog() AS c FROM cfg`
   );
   return rows[0]?.c as CatalogResult;
@@ -374,8 +374,8 @@ export interface DashboardKpis {
 }
 
 export async function fetchDashboardKpis(sql: Sql): Promise<DashboardKpis> {
-  const rows = await sql.unsafe(
-    withAdminCte() +
+  const rows = await ryeQuery(
+    sql,
       `SELECT
          (SELECT COUNT(*) FROM rye.nodes)::int AS nodes_total,
          (SELECT COUNT(*) FROM rye.edges)::int AS edges_total,
@@ -401,8 +401,8 @@ export interface QuoteBucket {
 }
 
 export async function fetchQuoteTimeline(sql: Sql, days = 90): Promise<QuoteBucket[]> {
-  const rows = await sql.unsafe(
-    withAdminCte() +
+  const rows = await ryeQuery(
+    sql,
       `SELECT to_char(date_trunc('day', occurred_at), 'YYYY-MM-DD') AS bucket,
               COUNT(*)::int AS count,
               COALESCE(SUM((properties->>'total_price')::numeric),0)::float AS value
@@ -423,8 +423,8 @@ export interface TopClient {
 }
 
 export async function fetchTopClients(sql: Sql, limit = 12): Promise<TopClient[]> {
-  const rows = await sql.unsafe(
-    withAdminCte() +
+  const rows = await ryeQuery(
+    sql,
       `SELECT properties->>'client' AS client,
               COUNT(*)::int AS quote_count,
               COALESCE(SUM((properties->>'total_price')::numeric),0)::float AS total_value,
@@ -458,8 +458,8 @@ export async function searchNodes(
   const q = (opts.q ?? "").trim();
   const type = opts.type ?? null;
 
-  const rows = await sql.unsafe(
-    withAdminCte() +
+  const rows = await ryeQuery(
+    sql,
       `SELECT n.*, COUNT(*) OVER() AS _total
        FROM rye.nodes n, cfg
        WHERE n.archived_at IS NULL
@@ -499,13 +499,11 @@ export async function fetchNeighborhood(
   hops: number = 1
 ): Promise<{ nodes: GraphNode[]; edges: GraphEdge[] }> {
   const maxHops = Math.max(1, Math.min(hops, 3));
-  // Single WITH RECURSIVE so the rye admin CTE and the walk CTE share one
-  // header. Two separate WITH clauses are a syntax error in Postgres.
-  const rows = await sql.unsafe(
-    `WITH RECURSIVE cfg AS (
-       SELECT set_config('app.current_role','admin',false)
-     ),
-       focus AS (
+  // `recursive` because ryeQuery's `cfg` and the walk CTE share one header,
+  // and two separate WITH clauses are a syntax error in Postgres.
+  const rows = await ryeQuery(
+    sql,
+      `, focus AS (
          SELECT id::text AS node_id, node_type FROM rye.nodes, cfg WHERE id = $1::uuid
        ),
        walk AS (
@@ -553,14 +551,15 @@ export async function fetchNeighborhood(
        'nodes', COALESCE((SELECT json_agg(n) FROM node_set n), '[]'::json),
        'edges', COALESCE((SELECT json_agg(e) FROM edge_set e), '[]'::json)
      ) AS payload`,
-    [nodeId, maxHops]
+    [nodeId, maxHops],
+    { recursive: true }
   );
   return rows[0]?.payload as { nodes: GraphNode[]; edges: GraphEdge[] };
 }
 
 export async function fetchNodeDetail(sql: Sql, nodeId: string) {
-  const rows = await sql.unsafe(
-    withAdminCte() +
+  const rows = await ryeQuery(
+    sql,
       `SELECT json_build_object(
          'node', (SELECT row_to_json(n) FROM (
             SELECT id, node_type, label, properties, attrs, external_id, external_source,
@@ -632,8 +631,8 @@ export async function fetchNodeDetail(sql: Sql, nodeId: string) {
 }
 
 async function fetchNodeProvenanceSummary(sql: Sql, nodeId: string) {
-  const rows = await sql.unsafe(
-    withAdminCte() +
+  const rows = await ryeQuery(
+    sql,
       `, assertion_events AS (
          SELECT DISTINCT evidence.event_id AS source_event_id
          FROM rye.assertions a
@@ -713,8 +712,8 @@ async function fetchNodeProvenanceSummary(sql: Sql, nodeId: string) {
 }
 
 export async function fetchReviewContextScope(sql: Sql, nodeId: string) {
-  const rows = await sql.unsafe(
-    withAdminCte() +
+  const rows = await ryeQuery(
+    sql,
       `, context_items AS (
          SELECT si.id AS source_item_id
          FROM rye.edges reviewed
@@ -791,8 +790,8 @@ export interface SourceSummary {
 }
 
 async function fetchSourceSummary(sql: Sql, nodeId: string): Promise<SourceSummary> {
-  const rows = await sql.unsafe(
-    withAdminCte() +
+  const rows = await ryeQuery(
+    sql,
       `, focus AS (
          SELECT id, node_type FROM rye.nodes WHERE id = $1::uuid
        ),
@@ -867,8 +866,8 @@ async function fetchSourceSummary(sql: Sql, nodeId: string): Promise<SourceSumma
 export async function fetchActiveDisputes(sql: Sql, limit = 50) {
   // Keep the existing admin payload shape while reading the v2 candidate
   // dispute surface.
-  const rows = await sql.unsafe(
-    withAdminCte() +
+  const rows = await ryeQuery(
+    sql,
       `SELECT d.subject_node_id::text AS subject_node_id,
               n.label, n.node_type, d.assertion_type,
               d.candidate_count::int AS competing_claims,
@@ -938,8 +937,8 @@ export async function fetchAssertionReviewQueue(
   sql: Sql,
   opts: AssertionReviewQueueOptions = {}
 ) {
-  const rows = await sql.unsafe(
-    withAdminCte() +
+  const rows = await ryeQuery(
+    sql,
       `, queue AS (
          SELECT rq.*,
                 subject.label AS subject_label,
@@ -1063,8 +1062,8 @@ export async function acceptAssertion(
   assertionId: string,
   input: { reason?: string | null; actor?: string | null } = {}
 ): Promise<{ assertion_id: string }> {
-  const rows = await sql.unsafe(
-    withAdminCte() +
+  const rows = await ryeQuery(
+    sql,
       `SELECT rye.accept_assertion(
          p_assertion_id := $1::uuid,
          p_evidence     := NULL,
@@ -1082,8 +1081,8 @@ export async function rejectCandidateAssertion(
   assertionId: string,
   input: { reason: string; actor?: string | null }
 ): Promise<{ assertion_id: string }> {
-  await sql.unsafe(
-    withAdminCte() +
+  await ryeQuery(
+    sql,
       `SELECT rye.reject_candidate(
          p_assertion_id := $1::uuid,
          p_reason       := $2::text,
@@ -1096,8 +1095,8 @@ export async function rejectCandidateAssertion(
 }
 
 export async function fetchOpenGaps(sql: Sql, limit = 100) {
-  const rows = await sql.unsafe(
-    withAdminCte() +
+  const rows = await ryeQuery(
+    sql,
       `SELECT a.id::text AS id,
               a.subject_ref,
               a.subject_node_id::text AS subject_node_id,
@@ -1125,8 +1124,8 @@ export async function fetchOpenGaps(sql: Sql, limit = 100) {
 }
 
 export async function fetchStaleDigests(sql: Sql, limit = 100) {
-  const rows = await sql.unsafe(
-    withAdminCte() +
+  const rows = await ryeQuery(
+    sql,
       `SELECT s.digest_assertion_id::text AS id,
               s.subject_ref,
               s.subject_node_id::text AS subject_node_id,
@@ -1150,8 +1149,8 @@ export async function fetchStaleDigests(sql: Sql, limit = 100) {
 }
 
 export async function fetchRecentEvents(sql: Sql, limit = 50) {
-  const rows = await sql.unsafe(
-    withAdminCte() +
+  const rows = await ryeQuery(
+    sql,
       `SELECT e.id,
               e.event_type,
               e.summary,
@@ -1185,8 +1184,8 @@ export async function fetchRecentEvents(sql: Sql, limit = 50) {
 // ---------------------------------------------------------------------------
 
 export async function fetchKnowledgeKpis(sql: Sql) {
-  const rows = await sql.unsafe(
-    withAdminCte() +
+  const rows = await ryeQuery(
+    sql,
       `SELECT
          (SELECT COUNT(*) FROM rye.nodes)::int AS nodes_total,
          (SELECT COUNT(*) FROM rye.edges)::int AS edges_total,
@@ -1208,8 +1207,8 @@ export async function fetchKnowledgeKpis(sql: Sql) {
 
 // Who/what is connected to the most activity (people↔events).
 export async function fetchTopParticipants(sql: Sql, limit = 10) {
-  return sql.unsafe(
-    withAdminCte() +
+  return ryeQuery(
+    sql,
       `SELECT n.id::text AS id, n.label, n.node_type, COUNT(*)::int AS events
        FROM rye.event_participants ep JOIN rye.nodes n ON n.id = ep.node_id, cfg
        GROUP BY 1,2,3 ORDER BY events DESC, n.label LIMIT $1`,
@@ -1219,8 +1218,8 @@ export async function fetchTopParticipants(sql: Sql, limit = 10) {
 
 // Activity over time — events per month (knowledge accumulating).
 export async function fetchActivityTimeline(sql: Sql) {
-  return sql.unsafe(
-    withAdminCte() +
+  return ryeQuery(
+    sql,
       `SELECT to_char(date_trunc('month', occurred_at),'YYYY-MM') AS bucket,
               COUNT(*)::int AS count
        FROM rye.events, cfg
@@ -1231,8 +1230,8 @@ export async function fetchActivityTimeline(sql: Sql) {
 
 // Assertion composition by type, split active vs superseded.
 export async function fetchAssertionComposition(sql: Sql) {
-  return sql.unsafe(
-    withAdminCte() +
+  return ryeQuery(
+    sql,
       `SELECT assertion_type,
               COUNT(*) FILTER (
                 WHERE status = 'accepted'
@@ -1249,8 +1248,8 @@ export async function fetchAssertionComposition(sql: Sql) {
 
 // Subjects with the most accumulated knowledge.
 export async function fetchTopSubjects(sql: Sql, limit = 10) {
-  return sql.unsafe(
-    withAdminCte() +
+  return ryeQuery(
+    sql,
       `SELECT n.id::text AS id, n.label, n.node_type,
               COUNT(*)::int AS facts,
               COUNT(*) FILTER (
@@ -1267,8 +1266,8 @@ export async function fetchTopSubjects(sql: Sql, limit = 10) {
 
 // Recent supersessions: a fact's previous claim → the claim that replaced it.
 export async function fetchSupersessions(sql: Sql, limit = 8) {
-  return sql.unsafe(
-    withAdminCte() +
+  return ryeQuery(
+    sql,
       `SELECT old.subject_node_id::text AS subject_node_id, n.label, n.node_type,
               old.assertion_type,
               old.claim AS old_claim, nw.claim AS new_claim,
@@ -1297,8 +1296,8 @@ export interface KnowledgeMapResult {
 }
 
 export async function fetchKnowledgeMap(sql: Sql): Promise<KnowledgeMapResult> {
-  const rows = await sql.unsafe(
-    withAdminCte() +
+  const rows = await ryeQuery(
+    sql,
       `, policy_assertions AS (
          SELECT
            a.id,
@@ -1825,8 +1824,8 @@ export async function fetchCandidateReviewQueue(
   sql: Sql,
   opts: CandidateReviewQueueOptions = {}
 ) {
-  const rows = await sql.unsafe(
-    withAdminCte() +
+  const rows = await ryeQuery(
+    sql,
       `, candidate_base AS (
          SELECT
            n.id,
@@ -2011,8 +2010,8 @@ export async function fetchCandidateReviewQueue(
 }
 
 export async function fetchCrmWorkspace(sql: Sql) {
-  const rows = await sql.unsafe(
-    withAdminCte() +
+  const rows = await ryeQuery(
+    sql,
       `, opportunities AS (
          SELECT
            oa.node_id::text AS id,
@@ -2197,8 +2196,8 @@ export async function fetchCrmWorkspace(sql: Sql) {
 }
 
 export async function fetchPmWorkspace(sql: Sql) {
-  const rows = await sql.unsafe(
-    withAdminCte() +
+  const rows = await ryeQuery(
+    sql,
       `, tasks AS (
          SELECT
            tb.node_id::text AS id,
@@ -2492,8 +2491,8 @@ export async function fetchNodeKnowledge(
   nodeId: string,
   opts: NodeKnowledgeOptions = {}
 ) {
-  const rows = await sql.unsafe(
-    withAdminCte() +
+  const rows = await ryeQuery(
+    sql,
       `, focus AS (
          SELECT id, node_type, label
          FROM rye.nodes
@@ -2912,8 +2911,8 @@ export async function createKnowledgeCandidate(
   sql: Sql,
   input: CreateKnowledgeCandidateInput
 ): Promise<{ id: string }> {
-  const rows = await sql.unsafe(
-    withAdminCte() +
+  const rows = await ryeQuery(
+    sql,
       `SELECT rye.create_knowledge_candidate(
          p_candidate_kind        := $1::text,
          p_statement             := $2::text,
@@ -2951,8 +2950,8 @@ export async function createAgentKnowledgeCandidate(
   const domainKeys = input.domain_keys ?? (
     Array.isArray(targetPayload.domain_keys) ? (targetPayload.domain_keys as string[]) : []
   );
-  const rows = await sql.unsafe(
-    withAdminCte() +
+  const rows = await ryeQuery(
+    sql,
       `SELECT rye.agent_create_candidate(
          p_agent_id               := $1::uuid,
          p_candidate_kind         := $2::text,
@@ -3002,8 +3001,8 @@ export async function setKnowledgeCandidateStatus(
   candidateId: string,
   input: { status: string; reason?: string | null; actor?: string | null }
 ): Promise<{ assertion_id: string }> {
-  const rows = await sql.unsafe(
-    withAdminCte() +
+  const rows = await ryeQuery(
+    sql,
       `SELECT rye.set_candidate_status(
          p_candidate_id := $1::uuid,
          p_status       := $2::text,
@@ -3051,8 +3050,8 @@ export async function promoteKnowledgeCandidate(
   input: PromoteKnowledgeCandidateInput
 ): Promise<{ target_type: string; id: string }> {
   if (input.target_type === "assertion") {
-    const rows = await sql.unsafe(
-      withAdminCte() +
+    const rows = await ryeQuery(
+      sql,
         `SELECT rye.promote_candidate_node_to_assertion(
            p_candidate_id    := $1::uuid,
            p_subject_node_id := $2::uuid,
@@ -3081,8 +3080,8 @@ export async function promoteKnowledgeCandidate(
   }
 
   if (input.target_type === "task") {
-    const rows = await sql.unsafe(
-      withAdminCte() +
+    const rows = await ryeQuery(
+      sql,
         `SELECT rye.promote_candidate_to_task(
            p_candidate_id := $1::uuid,
            p_label        := $2::text,
@@ -3095,8 +3094,8 @@ export async function promoteKnowledgeCandidate(
     return { target_type: "task", id: rows[0]?.id as string };
   }
 
-  const rows = await sql.unsafe(
-    withAdminCte() +
+  const rows = await ryeQuery(
+    sql,
       `SELECT rye.promote_candidate_to_edge(
          p_candidate_id   := $1::uuid,
          p_source_id      := $2::uuid,
@@ -3144,8 +3143,8 @@ export async function acceptSourcePolicyCandidate(
   );
   if (domains.length === 0) throw new Error("At least one status domain is required");
 
-  const rows = await sql.unsafe(
-    withAdminCte() +
+  const rows = await ryeQuery(
+    sql,
       `, domains AS MATERIALIZED (
          SELECT DISTINCT nullif(trim(value), '') AS domain
          FROM unnest($3::text[]) AS value
@@ -3247,8 +3246,8 @@ export async function acceptCrmStagePlanCandidate(
   candidateId: string,
   input: AcceptCrmStagePlanCandidateInput
 ): Promise<{ target_type: "crm_stage_plan"; id: string; subject_node_id: string }> {
-  const rows = await sql.unsafe(
-    withAdminCte() +
+  const rows = await ryeQuery(
+    sql,
       `, scheduled AS (
          SELECT rye.schedule_assertion_change(
            p_subject_node_id := $2::uuid,
@@ -3328,8 +3327,8 @@ export async function acceptPmTaskPlanCandidate(
   candidateId: string,
   input: AcceptPmTaskPlanCandidateInput
 ): Promise<{ target_type: "pm_task_plan"; id: string; subject_node_id: string }> {
-  const rows = await sql.unsafe(
-    withAdminCte() +
+  const rows = await ryeQuery(
+    sql,
       `, scheduled AS (
          SELECT rye.schedule_assertion_change(
            p_subject_node_id := $2::uuid,
@@ -3409,8 +3408,8 @@ export async function acceptPmMilestonePlanCandidate(
   candidateId: string,
   input: AcceptPmMilestonePlanCandidateInput
 ): Promise<{ target_type: "pm_milestone_plan"; id: string; subject_node_id: string }> {
-  const rows = await sql.unsafe(
-    withAdminCte() +
+  const rows = await ryeQuery(
+    sql,
       `, scheduled AS (
          SELECT rye.schedule_assertion_change(
            p_subject_node_id := $2::uuid,
@@ -3494,8 +3493,8 @@ export interface ReconKpis {
 }
 
 export async function fetchReconKpis(sql: Sql): Promise<ReconKpis> {
-  const rows = await sql.unsafe(
-    withAdminCte() +
+  const rows = await ryeQuery(
+    sql,
       `SELECT
          (SELECT COUNT(*) FROM rye.nodes WHERE node_type='parcel')::int AS parcels_total,
          (SELECT COUNT(*) FROM rye.nodes WHERE node_type='document')::int AS documents_total,
@@ -3519,8 +3518,8 @@ export async function fetchReconKpis(sql: Sql): Promise<ReconKpis> {
 }
 
 export async function fetchTopOwners(sql: Sql, limit = 10) {
-  return sql.unsafe(
-    withAdminCte() +
+  return ryeQuery(
+    sql,
       `SELECT claim->>'owner' AS owner,
               COUNT(*)::int AS claims,
               SUM(CASE WHEN (claim->>'net_mineral_acres') ~ '^[0-9.]+$'
@@ -3533,8 +3532,8 @@ export async function fetchTopOwners(sql: Sql, limit = 10) {
 }
 
 export async function fetchTopLessees(sql: Sql, limit = 10) {
-  return sql.unsafe(
-    withAdminCte() +
+  return ryeQuery(
+    sql,
       `SELECT claim->>'lessee' AS lessee,
               COUNT(*)::int AS leases,
               AVG(CASE WHEN (claim->>'royalty') ~ '^[0-9.]+$'
@@ -3547,8 +3546,8 @@ export async function fetchTopLessees(sql: Sql, limit = 10) {
 }
 
 export async function fetchCountyRollup(sql: Sql, limit = 12) {
-  return sql.unsafe(
-    withAdminCte() +
+  return ryeQuery(
+    sql,
       `SELECT COALESCE(properties->>'county','(unknown)') AS county,
               COUNT(*)::int AS parcels
        FROM rye.nodes, cfg
@@ -3559,8 +3558,8 @@ export async function fetchCountyRollup(sql: Sql, limit = 12) {
 }
 
 export async function fetchExtractionTimeline(sql: Sql) {
-  return sql.unsafe(
-    withAdminCte() +
+  return ryeQuery(
+    sql,
       `SELECT date_trunc('day', occurred_at)::date AS bucket,
               COUNT(*)::int AS runs,
               COALESCE(SUM((properties->>'rows_extracted')::int),0)::int AS rows_extracted,
