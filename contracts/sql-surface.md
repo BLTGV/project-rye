@@ -85,9 +85,18 @@ rye_settlers(
 `SECURITY INVOKER`, never `DEFINER`, so RLS applies to the caller. It declares
 its own `SET search_path`. It writes nothing, not even an audit row.
 
-- `p_claim_type` is the kind of claim, and it is the claim's `assertion_type`
-  verbatim. The same string is matched against `domain_authorities.claim_types`.
-  One vocabulary, no mapping table, no new values to register.
+- `p_claim_type` is the kind of claim, and it is the claim's `assertion_type`.
+  The same value is matched against `domain_authorities.claim_types`. One
+  vocabulary, no mapping table, no new values to register.
+- **Claim types resolve through aliases first.** When `p_claim_type` is given
+  it is resolved with `canonical_type('assertion_type', ...)` before anything
+  is tested, and every value in a grant's `claim_types` is resolved the same
+  way before it is compared. Rules and grants are therefore written against
+  either spelling: where `requirement` is registered as an alias of
+  `expectation`, a grant naming `requirement` matches a call passing
+  `expectation`, and a call passing `requirement` selects the `expectation`
+  rule. This is the alias mechanism the rest of the schema already uses, not a
+  second one. A null `p_claim_type` stays null and is not resolved.
 - `p_subject_id` may be null for a topical claim with no subject node (pricing,
   brand). The relationship step is then skipped.
 - `p_speech_act` is the speaker's classification of the statement. It selects
@@ -159,7 +168,11 @@ Order: grant settlers by `kind` then `ref`; relationship settlers `self`,
 `node_id` or `p_speaker_ref` by `ref`. It is the field the agent acts on: true
 means record it as accepted, false means record a suggestion and ask the
 settlers listed. `subject` is `{subject_id, subject_found, node_type, label}`.
-`claim` is `{claim_type, assertion_type, speech_act, speech_act_recognized}`.
+`claim` is `{claim_type, assertion_type, canonical_claim_type, speech_act,
+speech_act_recognized}`. `claim_type` and `assertion_type` are the value as
+given. `canonical_claim_type` is what it resolved to, and it equals the given
+value when no alias applies. It is additive: a caller that ignores it sees no
+change.
 `domain` is `{requested_domain_key, domain_id, domain_key, domain_found, mode,
 has_owner}`, where `mode` is `explicit`, `single_active`, `ambiguous`, or
 `none`.
@@ -184,7 +197,11 @@ meant. A caller that wants the relationship defaults passes no area key at all.
 resolves, no grant can match and the lookup falls to the relationship step.
 Rows in `domain_authorities` for the resolved domain where
 `active`, `effective_at <= p_as_of`, `effective_to` is null or later, and
-`claim_types` is empty (meaning every claim type) or contains `p_claim_type`.
+`claim_types` is empty (meaning every claim type) or contains the claim type.
+That containment is tested on canonical values: every entry in `claim_types` is
+resolved through `canonical_type('assertion_type', ...)` and compared with the
+resolved `p_claim_type`, so a grant written against an alias and a call passing
+the canonical type match each other, in either direction.
 Scope matches when the row's `scope_ref` is null, or `p_scope_ref` is null, or
 the two are equal. Subject narrowing is expressed in `properties`, never in a
 new column: `properties.subjects` (array of node uuids or refs) and
@@ -211,9 +228,22 @@ act second. The rules are tried in this order, and the first that applies wins:
 *Other-set* claim types are claims one person sets on another. The set is
 `expectation`. *Self-set* claim types are a person's own commitment or report
 about themselves. The set is `commitment`, `self_commitment`, `self_report`.
-Both sets are matched on the exact string, both may grow additively, and a
-claim type in neither set selects nothing. Membership is stated here and
-nowhere else. There is no table to configure and no migration to run.
+Membership is tested on the canonical claim type, after alias resolution. Both
+sets may grow additively, and a claim type in neither set selects nothing.
+Membership is stated here and nowhere else. There is no table to configure and
+no migration to run.
+
+Matching is case-sensitive, and resolution does not fold case. `Expectation`
+with no alias registered for it is a different type, it is in neither set, and
+with a self speech act it returns the subject as its own settler. That is the
+limit already named in "What the lookup does not answer", and the fix for it is
+an alias, the same fix the rest of the schema uses for a spelling. Register
+`type_alias:assertion_type:Expectation` and it resolves like any other.
+
+An alias cycle raises, exactly as `canonical_type()` raises. The lookup does
+not swallow it and does not fall back to the raw string. A cycle is a broken
+registry, not a missing answer, and it is the one input to this read that
+produces an error rather than an answer.
 
 Rule 1 is the point of the ordering. An expectation is set on a person by
 someone else, so the person it is set on is never its settler, whatever the
@@ -258,6 +288,13 @@ accepted until a settler changes it, and an objection is a record of its own,
 not an overwrite. Until that work exists, a caller must not read `is_settler`
 true as permission to replace an accepted claim it did not check for. This
 lookup answers who may settle a claim. It does not answer who may unsettle one.
+
+A caller that does check for a standing accepted claim before replacing one
+compares canonical types, not raw strings. Resolve both sides with
+`canonical_type('assertion_type', ...)` and compare those. An assertion stored
+under `requirement` and a claim passed as `expectation` are the same claim when
+one is an alias of the other, and a caller comparing the spellings would miss
+it and overwrite silently.
 
 **3. Area owner.** `knowledge_domains.owner_node_id` for the resolved domain,
 returned as a single settler with `via` `area_owner`. When `owner_node_id` is

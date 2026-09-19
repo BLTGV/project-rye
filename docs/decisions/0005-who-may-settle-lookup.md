@@ -197,3 +197,29 @@ is not permission to replace an accepted claim. The rejected alternative was to
 widen the other-set list until it covered every claim a manager might set. It
 was declined because the list would never be complete, and because the real fix
 is the objection record, not a longer list.
+
+**Claim types resolve through the alias registry before anything is tested.**
+The lookup compared raw strings, so the two sets and the grant match were blind
+to the vocabulary mechanism the rest of the schema uses. Where `requirement` is
+registered as an alias of `expectation`, a call passing `requirement` with a
+self speech act skipped rule 1 and returned the subject as the settler of an
+expectation set on him. That is the same fail-open the ordering was written to
+close, reached by a different spelling. `p_claim_type` is now resolved with
+`canonical_type('assertion_type', ...)` before any rule or grant is tested, and
+every entry in a grant's `claim_types` is resolved the same way, so a rule or a
+grant written against either spelling applies to a call using either. An alias
+cycle raises, as `canonical_type()` raises. The `claim` object additively
+reports `canonical_claim_type` beside the value as given, so a caller can see
+what it was read as.
+
+The rejected alternative was to fold case in the lookup, or to normalise claim
+types some other way local to this function. It was declined because Rye's
+vocabulary is case-sensitive everywhere else: `node_type`, `edge_type`, and
+`assertion_type` all are, and a lookup that quietly disagreed would make
+`Expectation` behave one way here and another way in every view and helper
+beside it. Aliases are the mechanism the project already has for a spelling,
+they are data rather than code, and they work for `requirement` as well as for
+`Expectation`. The cost is that `Expectation` with no alias registered stays an
+unclassified type and, with a self speech act, returns the subject. That cost
+is named in the contract under "What the lookup does not answer", and the
+remedy is one registry row.
