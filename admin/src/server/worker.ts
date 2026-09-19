@@ -45,16 +45,27 @@ import {
   fetchTopLessees,
   fetchTopOwners,
   promoteKnowledgeCandidate,
+  recordAgentDenial,
   rejectCandidateAssertion,
   searchNodes,
   setKnowledgeCandidateStatus,
   submitAgentObservation,
   type AgentAuthContext,
 } from "./queries";
+import {
+  DEFERRED_CHECKS,
+  matchRoutePolicy,
+  matchesPattern,
+  type RoutePolicy,
+} from "./route-policy";
 
 type AppVariables = {
   instance: ReturnType<typeof pickInstance>;
   auth: AgentAuthContext | null;
+  /** The contract row that governs this request, or null when undeclared. */
+  policy: RoutePolicy | null;
+  /** Set once the authorization call for this request has been made. */
+  policyChecked: boolean;
 };
 type RyeContext = Context<{ Bindings: Env; Variables: AppVariables }>;
 
@@ -252,34 +263,151 @@ function sourceScopeFromCandidateInput(input: z.infer<typeof createCandidateSche
     : null;
 }
 
-async function enforceCapability(
+/** The closed set of `reason` strings a 403 may carry. */
+const REASON_MISSING_GRANT = "missing capability grant";
+const REASON_ROUTE_CLOSED = "route not available to agent tokens";
+
+function forbidden(
+  c: RyeContext,
+  reason: typeof REASON_MISSING_GRANT | typeof REASON_ROUTE_CLOSED,
+  policy: {
+    action: string;
+    capability: string | null;
+    check: string;
+    domainKeys?: string[];
+    scopeRef?: string | null;
+  }
+) {
+  return c.json(
+    {
+      error: "forbidden",
+      reason,
+      policy: {
+        action: policy.action,
+        capability: policy.capability,
+        check: policy.check,
+        domain_keys: policy.domainKeys ?? [],
+        scope_ref: policy.scopeRef ?? null,
+      },
+    },
+    403
+  );
+}
+
+/**
+ * Refuses a route the contract does not open to agent tokens: a `deny` row, or
+ * no row at all. The refusal is logged before the response is sent.
+ */
+async function refuseRoute(
+  c: RyeContext,
+  auth: AgentAuthContext,
+  action: string,
+  logReason: string
+): Promise<Response> {
+  c.set("policyChecked", true);
+  await recordAgentDenial(sqlFor(c.get("instance")), {
+    agentId: auth.agent_id,
+    action,
+    reason: logReason,
+    request: { path: c.req.path, method: c.req.method },
+  });
+  return forbidden(c, REASON_ROUTE_CLOSED, { action, capability: null, check: "deny" });
+}
+
+/**
+ * Runs the authorization call the request's declared policy asks for. The
+ * middleware calls this for `global` checks; handlers call it for the checks
+ * that need area keys or a scope from the body or the target row.
+ */
+async function enforceRoutePolicy(
   c: RyeContext,
   opts: {
-    action: string;
-    capability: string;
     domainKeys?: string[];
     scopeRef?: string | null;
     targetRef?: string | null;
     request?: Record<string, unknown>;
-  }
+  } = {}
 ): Promise<Response | null> {
   if (!apiAuthRequired(c.env)) return null;
+  c.set("policyChecked", true);
+
   const auth = c.get("auth");
   if (!auth) return c.json({ error: "missing bearer token" }, 401);
-  const sql = sqlFor(c.get("instance"));
-  const result = await authorizeAgentAction(sql, {
+
+  const policy = c.get("policy");
+  if (!policy || !policy.capability) {
+    return await refuseRoute(c, auth, policy?.action ?? "route_undeclared", REASON_ROUTE_CLOSED);
+  }
+
+  const domainKeys = opts.domainKeys ?? [];
+  const scopeRef = opts.scopeRef ?? null;
+  const result = await authorizeAgentAction(sqlFor(c.get("instance")), {
     agentId: auth.agent_id,
-    action: opts.action,
-    capability: opts.capability,
-    domainKeys: opts.domainKeys ?? [],
-    scopeRef: opts.scopeRef ?? null,
+    action: policy.action,
+    capability: policy.capability,
+    domainKeys,
+    scopeRef,
     targetRef: opts.targetRef ?? null,
-    request: opts.request ?? {},
+    request: opts.request ?? { path: c.req.path },
   });
   if (!result.allowed) {
-    return c.json({ error: "forbidden", reason: result.reason }, 403);
+    return forbidden(c, REASON_MISSING_GRANT, {
+      action: policy.action,
+      capability: policy.capability,
+      check: policy.check,
+      domainKeys,
+      scopeRef,
+    });
   }
   return null;
+}
+
+/**
+ * True when the Worker has a handler for this path. Used to tell an undeclared
+ * route (`403`, the contract has no row for it) from a path that matches
+ * nothing at all (`404`). Derived from Hono's own registry so it cannot drift.
+ */
+let workerApiRoutes: { method: string; path: string }[] | null = null;
+function workerServesApiPath(method: string, path: string): boolean {
+  if (!workerApiRoutes) {
+    workerApiRoutes = app.routes
+      .filter((route) => route.path.startsWith("/api/") && !route.path.includes("*"))
+      .map((route) => ({ method: route.method.toUpperCase(), path: route.path }));
+  }
+  const wanted = method.toUpperCase();
+  return workerApiRoutes.some(
+    (route) =>
+      (route.method === "ALL" || route.method === wanted) && matchesPattern(route.path, path)
+  );
+}
+
+/** Returns the agent id to filter rows by, or null when auth mode is off. */
+function rowFilterAgentId(c: RyeContext): string | null {
+  if (!apiAuthRequired(c.env)) return null;
+  return c.get("auth")?.agent_id ?? null;
+}
+
+/**
+ * True when the token holds an active, unexpired grant for `capability` that
+ * names no area. Such a grant is instance-wide and holds every area.
+ */
+function holdsInstanceWide(auth: AgentAuthContext | null, capability: string): boolean {
+  if (!auth) return false;
+  const now = Date.now();
+  return auth.capabilities.some(
+    (grant) =>
+      grant.capability === capability &&
+      grant.domain_key === null &&
+      (!grant.expires_at || Date.parse(grant.expires_at) > now)
+  );
+}
+
+function reviewQueueAgentFilter(
+  c: RyeContext
+): { agentId: string; instanceWide: boolean } | null {
+  const agentId = rowFilterAgentId(c);
+  if (!agentId) return null;
+  return { agentId, instanceWide: holdsInstanceWide(c.get("auth"), "rye.review.read") };
 }
 
 function authActor(c: RyeContext): string | null {
@@ -298,14 +426,24 @@ app.use("/api/*", async (c, next) => {
   await next();
 });
 
+// Authenticate, then authorize. A route is closed to agent tokens until
+// route-policy.ts lists it with a capability; the middleware, not the handler,
+// decides. See contracts/admin-api.md "Authorization".
 app.use("/api/*", async (c, next) => {
+  c.set("policyChecked", false);
+
   if (!apiAuthRequired(c.env)) {
     c.set("auth", null);
+    c.set("policy", null);
     await next();
     return;
   }
 
-  if (c.req.path === "/api/health" || c.req.path === "/api/instances") {
+  const policy = matchRoutePolicy(c.req.method, c.req.path);
+  c.set("policy", policy);
+
+  // The only two routes that take no token at all.
+  if (policy?.check === "none") {
     c.set("auth", null);
     await next();
     return;
@@ -319,11 +457,56 @@ app.use("/api/*", async (c, next) => {
   const sql = sqlFor(c.get("instance"));
   const auth = await authenticateAgentToken(sql, token);
   if (!auth) {
+    // Unknown, revoked, expired, and deactivated are one indistinguishable 401.
     return c.json({ error: "invalid bearer token" }, 401);
   }
-
   c.set("auth", auth);
+
+  // Any valid token, caller's own record only.
+  if (policy?.check === "self") {
+    await next();
+    return;
+  }
+
+  if (!policy) {
+    // No row in the contract's table. A path the Worker does not serve at all
+    // is a 404; a route someone added without declaring it is refused.
+    if (!workerServesApiPath(c.req.method, c.req.path)) {
+      await next();
+      return;
+    }
+    return await refuseRoute(c, auth, "route_undeclared", "route declares no capability");
+  }
+
+  if (policy.check === "deny") {
+    return await refuseRoute(c, auth, policy.action, "route not available to agent tokens");
+  }
+
+  if (policy.check === "global" || policy.check === "global + row filter") {
+    const blocked = await enforceRoutePolicy(c);
+    if (blocked) return blocked;
+    await next();
+    return;
+  }
+
+  // domain, domain + scope, and target checks need the area keys or the target
+  // that only the handler can resolve. Let it run, then fail closed if it did
+  // not perform the check.
   await next();
+  if (DEFERRED_CHECKS.has(policy.check) && !c.get("policyChecked") && c.res.status < 400) {
+    await recordAgentDenial(sql, {
+      agentId: auth.agent_id,
+      action: policy.action,
+      capability: policy.capability,
+      reason: "route policy not enforced by handler",
+      request: { path: c.req.path, method: c.req.method },
+    });
+    c.res = forbidden(c, REASON_MISSING_GRANT, {
+      action: policy.action,
+      capability: policy.capability,
+      check: policy.check,
+    });
+  }
 });
 
 app.get("/api/instances", (c) => {
@@ -342,19 +525,14 @@ app.get("/api/agent/me", (c) => {
 });
 
 app.get("/api/domains", async (c) => {
-  const blocked = await enforceCapability(c, {
-    action: "domains_list",
-    capability: "rye.context.read",
-    request: { path: c.req.path },
-  });
-  if (blocked) return blocked;
-
   const auth = c.get("auth");
   const includeProperties =
     !apiAuthRequired(c.env) ||
     !!auth?.capabilities.some((grant) => grant.capability === "rye.domain.admin");
   const sql = sqlFor(c.get("instance"));
-  return c.json(await fetchDomains(sql, { includeProperties }));
+  return c.json(
+    await fetchDomains(sql, { includeProperties, agentId: rowFilterAgentId(c) })
+  );
 });
 
 app.get("/api/context-pack", async (c) => {
@@ -367,9 +545,7 @@ app.get("/api/context-pack", async (c) => {
   }
 
   const sql = sqlFor(c.get("instance"));
-  const blocked = await enforceCapability(c, {
-    action: "context_pack_read",
-    capability: "rye.context.read",
+  const blocked = await enforceRoutePolicy(c, {
     domainKeys: domainKeysFromQuery(c.req.query("domain_keys")),
     scopeRef: c.req.query("scope_ref") ?? auth.default_scope_ref ?? null,
     targetRef: c.req.query("channel_ref") ?? null,
@@ -397,9 +573,7 @@ app.post("/api/observations", zValidator("json", observationSchema), async (c) =
 
   const sql = sqlFor(c.get("instance"));
   const input = c.req.valid("json");
-  const blocked = await enforceCapability(c, {
-    action: "observation_create",
-    capability: "rye.observation.create",
+  const blocked = await enforceRoutePolicy(c, {
     domainKeys: input.domain_keys ?? [],
     scopeRef: input.source_scope ?? null,
     targetRef: input.impact_scope ?? null,
@@ -426,13 +600,6 @@ app.get(
     })
   ),
   async (c) => {
-    const blocked = await enforceCapability(c, {
-      action: "review_queue_read",
-      capability: "rye.review.read",
-      request: { path: c.req.path },
-    });
-    if (blocked) return blocked;
-
     const sql = sqlFor(c.get("instance"));
     const q = c.req.valid("query");
     return c.json(
@@ -443,19 +610,13 @@ app.get(
         includeClosed: boolQuery(q.include_closed),
         limit: q.limit,
         offset: q.offset,
+        agent: reviewQueueAgentFilter(c),
       })
     );
   }
 );
 
 app.get("/api/audit/actions", async (c) => {
-  const blocked = await enforceCapability(c, {
-    action: "audit_actions_read",
-    capability: "rye.audit.read",
-    request: { path: c.req.path },
-  });
-  if (blocked) return blocked;
-
   const sql = sqlFor(c.get("instance"));
   const limit = Math.min(Number(c.req.query("limit") ?? "100"), 500);
   return c.json(await fetchAgentAuditActions(sql, limit));
@@ -558,13 +719,6 @@ app.get(
     })
   ),
   async (c) => {
-    const blocked = await enforceCapability(c, {
-      action: "candidate_review_read",
-      capability: "rye.review.read",
-      request: { path: c.req.path },
-    });
-    if (blocked) return blocked;
-
     const sql = sqlFor(c.get("instance"));
     const q = c.req.valid("query");
     return c.json(
@@ -575,6 +729,7 @@ app.get(
         includeClosed: boolQuery(q.include_closed),
         limit: q.limit,
         offset: q.offset,
+        agent: reviewQueueAgentFilter(c),
       })
     );
   }
@@ -614,13 +769,6 @@ app.get(
     })
   ),
   async (c) => {
-    const blocked = await enforceCapability(c, {
-      action: "assertion_review_read",
-      capability: "rye.review.read",
-      request: { path: c.req.path },
-    });
-    if (blocked) return blocked;
-
     const sql = sqlFor(c.get("instance"));
     const q = c.req.valid("query");
     return c.json(
@@ -643,9 +791,7 @@ app.post(
     const sql = sqlFor(c.get("instance"));
     const assertionId = c.req.valid("param").id;
     const input = c.req.valid("json");
-    const blocked = await enforceCapability(c, {
-      action: "assertion_accept",
-      capability: "rye.authoritative.promote",
+    const blocked = await enforceRoutePolicy(c, {
       targetRef: assertionId,
       request: { reason: input.reason ?? null },
     });
@@ -668,9 +814,7 @@ app.post(
     const sql = sqlFor(c.get("instance"));
     const assertionId = c.req.valid("param").id;
     const input = c.req.valid("json");
-    const blocked = await enforceCapability(c, {
-      action: "assertion_reject",
-      capability: "rye.candidate.adjudicate",
+    const blocked = await enforceRoutePolicy(c, {
       targetRef: assertionId,
       request: { reason: input.reason },
     });
@@ -686,26 +830,12 @@ app.post(
 );
 
 app.get("/api/gaps", async (c) => {
-  const blocked = await enforceCapability(c, {
-    action: "open_gaps_read",
-    capability: "rye.review.read",
-    request: { path: c.req.path },
-  });
-  if (blocked) return blocked;
-
   const sql = sqlFor(c.get("instance"));
   const limit = Math.min(Number(c.req.query("limit") ?? "100"), 500);
   return c.json(await fetchOpenGaps(sql, limit));
 });
 
 app.get("/api/stale-digests", async (c) => {
-  const blocked = await enforceCapability(c, {
-    action: "stale_digests_read",
-    capability: "rye.review.read",
-    request: { path: c.req.path },
-  });
-  if (blocked) return blocked;
-
   const sql = sqlFor(c.get("instance"));
   const limit = Math.min(Number(c.req.query("limit") ?? "100"), 500);
   return c.json(await fetchStaleDigests(sql, limit));
@@ -740,9 +870,7 @@ app.post("/api/candidates", zValidator("json", createCandidateSchema), async (c)
   const input = c.req.valid("json");
   const auth = c.get("auth");
   if (apiAuthRequired(c.env) && auth) {
-    const blocked = await enforceCapability(c, {
-      action: "candidate_create",
-      capability: "rye.candidate.create",
+    const blocked = await enforceRoutePolicy(c, {
       domainKeys: domainKeysFromCandidateInput(input),
       scopeRef: sourceScopeFromCandidateInput(input),
       request: { candidate_kind: input.candidate_kind, statement: input.statement },
@@ -765,9 +893,7 @@ app.post(
     const candidateId = c.req.valid("param").id;
     const envelope = await fetchCandidateAccessEnvelope(sql, candidateId);
     const input = c.req.valid("json");
-    const blocked = await enforceCapability(c, {
-      action: "candidate_status_set",
-      capability: "rye.candidate.adjudicate",
+    const blocked = await enforceRoutePolicy(c, {
       domainKeys: envelope.domain_keys,
       scopeRef: envelope.source_scope,
       targetRef: candidateId,
@@ -793,9 +919,7 @@ app.post(
     const candidateId = c.req.valid("param").id;
     const envelope = await fetchCandidateAccessEnvelope(sql, candidateId);
     const input = c.req.valid("json");
-    const blocked = await enforceCapability(c, {
-      action: "candidate_promote",
-      capability: "rye.authoritative.promote",
+    const blocked = await enforceRoutePolicy(c, {
       domainKeys: envelope.domain_keys,
       scopeRef: envelope.source_scope,
       targetRef: candidateId,
@@ -821,9 +945,7 @@ app.post(
     const candidateId = c.req.valid("param").id;
     const envelope = await fetchCandidateAccessEnvelope(sql, candidateId);
     const input = c.req.valid("json");
-    const blocked = await enforceCapability(c, {
-      action: "source_policy_accept",
-      capability: "rye.authoritative.promote",
+    const blocked = await enforceRoutePolicy(c, {
       domainKeys: envelope.domain_keys,
       scopeRef: envelope.source_scope,
       targetRef: candidateId,
@@ -849,9 +971,7 @@ app.post(
     const candidateId = c.req.valid("param").id;
     const envelope = await fetchCandidateAccessEnvelope(sql, candidateId);
     const input = c.req.valid("json");
-    const blocked = await enforceCapability(c, {
-      action: "crm_stage_plan_accept",
-      capability: "rye.authoritative.promote",
+    const blocked = await enforceRoutePolicy(c, {
       domainKeys: envelope.domain_keys,
       scopeRef: envelope.source_scope,
       targetRef: candidateId,
@@ -877,9 +997,7 @@ app.post(
     const candidateId = c.req.valid("param").id;
     const envelope = await fetchCandidateAccessEnvelope(sql, candidateId);
     const input = c.req.valid("json");
-    const blocked = await enforceCapability(c, {
-      action: "pm_task_plan_accept",
-      capability: "rye.authoritative.promote",
+    const blocked = await enforceRoutePolicy(c, {
       domainKeys: envelope.domain_keys,
       scopeRef: envelope.source_scope,
       targetRef: candidateId,
@@ -905,9 +1023,7 @@ app.post(
     const candidateId = c.req.valid("param").id;
     const envelope = await fetchCandidateAccessEnvelope(sql, candidateId);
     const input = c.req.valid("json");
-    const blocked = await enforceCapability(c, {
-      action: "pm_milestone_plan_accept",
-      capability: "rye.authoritative.promote",
+    const blocked = await enforceRoutePolicy(c, {
       domainKeys: envelope.domain_keys,
       scopeRef: envelope.source_scope,
       targetRef: candidateId,

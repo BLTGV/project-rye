@@ -15,31 +15,79 @@ pick_port() {
 }
 
 PORT="${RYE_API_SECURITY_TEST_PORT:-$(pick_port)}"
+OPEN_PORT="$(pick_port)"
 # Unique per run: idempotency keys persist in the database, so a reused key
 # from a prior run would return that run's (already promoted) candidate.
 IDEM_KEY="api-security-idem-$(date +%s)-$$"
 BASE_URL="http://127.0.0.1:${PORT}"
+OPEN_URL="http://127.0.0.1:${OPEN_PORT}"
 LOG_FILE="${TMPDIR:-/tmp}/rye-api-security-${PORT}.log"
+OPEN_LOG_FILE="${TMPDIR:-/tmp}/rye-api-security-open-${OPEN_PORT}.log"
 
 cleanup() {
-  if [[ -n "${SERVER_PID:-}" ]]; then
-    kill "$SERVER_PID" >/dev/null 2>&1 || true
-    wait "$SERVER_PID" >/dev/null 2>&1 || true
-  fi
+  for pid in "${SERVER_PID:-}" "${OPEN_SERVER_PID:-}"; do
+    if [[ -n "$pid" ]]; then
+      kill "$pid" >/dev/null 2>&1 || true
+      wait "$pid" >/dev/null 2>&1 || true
+    fi
+  done
 }
 trap cleanup EXIT
 
 json_get() {
-  node -e "const obj = JSON.parse(process.argv[1]); const path = process.argv[2].split('.'); let cur = obj; for (const key of path) cur = cur?.[key]; if (cur === undefined || cur === null) process.exit(2); if (typeof cur === 'object') console.log(JSON.stringify(cur)); else console.log(cur);" "$1" "$2"
+  node -e "const obj = JSON.parse(process.argv[1]); const path = process.argv[2].split('.'); let cur = obj; for (const key of path) cur = cur?.[key]; if (cur === undefined) process.exit(2); if (cur === null) { console.log('null'); } else if (typeof cur === 'object') { console.log(JSON.stringify(cur)); } else { console.log(cur); }" "$1" "$2"
 }
 
 status_code() {
   curl -s -o /dev/null -w "%{http_code}" "$@"
 }
 
+fail() {
+  echo "FAIL: $*" >&2
+  exit 1
+}
+
+# expect_status <description> <expected> <curl args...>
+expect_status() {
+  local desc="$1" expected="$2"
+  shift 2
+  local got
+  got="$(status_code "$@")"
+  [[ "$got" == "$expected" ]] || fail "$desc — expected $expected, got $got"
+}
+
+# expect_field <description> <json> <path> <expected>
+expect_field() {
+  local desc="$1" body="$2" path="$3" expected="$4"
+  local got
+  got="$(json_get "$body" "$path" || true)"
+  [[ "$got" == "$expected" ]] || fail "$desc — expected $path = '$expected', got '$got'"
+}
+
+# expect_absent <description> <haystack> <needle>
+expect_absent() {
+  local desc="$1" body="$2" needle="$3"
+  if [[ "$body" == *"$needle"* ]]; then
+    echo "$body" >&2
+    fail "$desc — response contained '$needle'"
+  fi
+}
+
+# expect_present <description> <haystack> <needle>
+expect_present() {
+  local desc="$1" body="$2" needle="$3"
+  if [[ "$body" != *"$needle"* ]]; then
+    echo "$body" >&2
+    fail "$desc — response did not contain '$needle'"
+  fi
+}
+
 seed_sql="$(cat <<'SQL'
 SET search_path = rye, public, pg_catalog;
 SELECT set_config('app.current_role', 'admin', false);
+
+-- Two areas. Every agent below holds a grant on at most one of them, so any
+-- row from the other area appearing in a response is a cross-area leak.
 SELECT rye.ensure_knowledge_domain(
   'api-account-updates',
   'API Test Account Updates',
@@ -47,15 +95,52 @@ SELECT rye.ensure_knowledge_domain(
   NULL,
   '{"secret_internal_note":"should be redacted from low privilege API clients"}'::jsonb
 );
+SELECT rye.ensure_knowledge_domain(
+  'api-title-diligence',
+  'API Test Title Diligence',
+  'Separate area for API security cross-area tests.',
+  NULL,
+  '{}'::jsonb
+);
+
+-- Distinctive authority and channel markers. A token that does not hold an
+-- area must never see that area's marker in any response.
+SELECT rye.grant_domain_authority(
+  'api-account-updates', 'role', 'api-account-authority-marker', ARRAY['account_health']
+);
+SELECT rye.grant_domain_authority(
+  'api-title-diligence', 'role', 'api-title-authority-marker', ARRAY['title_status']
+);
+SELECT rye.subscribe_channel_to_domain('slack:#api-account-marker', 'api-account-updates', 'review');
+SELECT rye.subscribe_channel_to_domain('slack:#api-title-marker', 'api-title-diligence', 'review');
+
 SELECT rye.create_agent_identity('api-candidate-agent', 'API Candidate Agent', 'conformance');
 SELECT rye.create_agent_identity('api-reviewer-agent', 'API Reviewer Agent', 'conformance');
+SELECT rye.create_agent_identity('api-title-agent', 'API Title Agent', 'conformance');
+SELECT rye.create_agent_identity('api-nograntee-agent', 'API No Grant Agent', 'conformance');
+
 SELECT rye.grant_agent_capability('api-candidate-agent', 'rye.context.read', 'api-account-updates');
 SELECT rye.grant_agent_capability('api-candidate-agent', 'rye.candidate.create', 'api-account-updates');
+SELECT rye.grant_agent_capability('api-candidate-agent', 'rye.observation.create', 'api-account-updates');
 SELECT rye.grant_agent_capability('api-reviewer-agent', 'rye.context.read', 'api-account-updates');
 SELECT rye.grant_agent_capability('api-reviewer-agent', 'rye.review.read', 'api-account-updates');
 SELECT rye.grant_agent_capability('api-reviewer-agent', 'rye.candidate.adjudicate', 'api-account-updates');
 SELECT rye.grant_agent_capability('api-reviewer-agent', 'rye.authoritative.promote', 'api-account-updates');
 SELECT rye.grant_agent_capability('api-reviewer-agent', 'rye.audit.read', NULL);
+
+-- Holds the same read capabilities, but only in the other area.
+SELECT rye.grant_agent_capability('api-title-agent', 'rye.context.read', 'api-title-diligence');
+SELECT rye.grant_agent_capability('api-title-agent', 'rye.review.read', 'api-title-diligence');
+
+-- api-nograntee-agent gets no grants at all: it proves deny by default.
+
+-- A candidate that carries no area keys. Only a grant naming no area sees it.
+SELECT rye.create_knowledge_candidate(
+  'decision',
+  'API security keyless candidate marker.',
+  '{}'::jsonb
+);
+
 INSERT INTO rye.nodes (node_type, label, properties)
 VALUES ('account', 'API Security Test Account', '{"suite":"api_security"}')
 RETURNING id;
@@ -63,16 +148,19 @@ SQL
 )"
 
 subject_id="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atq <<<"$seed_sql" | tail -n 1)"
-candidate_token="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atq <<'SQL'
+
+issue_token() {
+  psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atq <<SQL
 SET search_path = rye, public, pg_catalog;
-SELECT rye.issue_agent_token('api-candidate-agent', 'api security candidate token');
+SELECT rye.issue_agent_token('$1', '$2'${3:+, $3});
 SQL
-)"
-reviewer_token="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atq <<'SQL'
-SET search_path = rye, public, pg_catalog;
-SELECT rye.issue_agent_token('api-reviewer-agent', 'api security reviewer token');
-SQL
-)"
+}
+
+candidate_token="$(issue_token api-candidate-agent 'api security candidate token')"
+reviewer_token="$(issue_token api-reviewer-agent 'api security reviewer token')"
+title_token="$(issue_token api-title-agent 'api security title token')"
+nogrant_token="$(issue_token api-nograntee-agent 'api security no-grant token')"
+expired_token="$(issue_token api-reviewer-agent 'api security expired token' "now() - interval '1 hour'")"
 
 RYE_INSTANCES="[{\"id\":\"api-security\",\"label\":\"API Security\",\"databaseUrl\":\"${DATABASE_URL}\"}]" \
 DEFAULT_INSTANCE="api-security" \
@@ -81,31 +169,153 @@ RYE_ADMIN_API_PORT="$PORT" \
 npm --prefix admin run dev:api >"$LOG_FILE" 2>&1 &
 SERVER_PID=$!
 
-for _ in {1..80}; do
-  if [[ "$(status_code "${BASE_URL}/api/health")" == "200" ]]; then
-    break
-  fi
-  sleep 0.25
+# A second server with auth mode off, standing in for the reviewer's screen.
+RYE_INSTANCES="[{\"id\":\"api-security\",\"label\":\"API Security\",\"databaseUrl\":\"${DATABASE_URL}\"}]" \
+DEFAULT_INSTANCE="api-security" \
+RYE_API_AUTH_MODE="off" \
+RYE_ADMIN_API_PORT="$OPEN_PORT" \
+npm --prefix admin run dev:api >"$OPEN_LOG_FILE" 2>&1 &
+OPEN_SERVER_PID=$!
+
+wait_for_server() {
+  local url="$1" log="$2"
+  for _ in {1..80}; do
+    if [[ "$(status_code "${url}/api/health")" == "200" ]]; then
+      return 0
+    fi
+    sleep 0.25
+  done
+  echo "API server at $url did not start. Log follows:" >&2
+  cat "$log" >&2
+  exit 1
+}
+
+wait_for_server "$BASE_URL" "$LOG_FILE"
+wait_for_server "$OPEN_URL" "$OPEN_LOG_FILE"
+
+auth() { printf 'Authorization: Bearer %s' "$1"; }
+
+# ---------------------------------------------------------------------------
+# 401: the API does not know who is calling.
+# ---------------------------------------------------------------------------
+
+expect_status "missing token" 401 "${BASE_URL}/api/domains"
+expect_status "unknown token" 401 -H "Authorization: Bearer not-a-real-token" "${BASE_URL}/api/domains"
+expect_status "expired token" 401 -H "$(auth "$expired_token")" "${BASE_URL}/api/domains"
+
+missing_body="$(curl -sS "${BASE_URL}/api/domains")"
+expect_field "missing token error" "$missing_body" "error" "missing bearer token"
+invalid_body="$(curl -sS -H "Authorization: Bearer not-a-real-token" "${BASE_URL}/api/domains")"
+expect_field "unknown token error" "$invalid_body" "error" "invalid bearer token"
+expired_body="$(curl -sS -H "$(auth "$expired_token")" "${BASE_URL}/api/domains")"
+expect_field "expired token error" "$expired_body" "error" "invalid bearer token"
+
+# The two open routes take no token at all.
+expect_status "health without token" 200 "${BASE_URL}/api/health"
+expect_status "instances without token" 200 "${BASE_URL}/api/instances"
+
+# /api/agent/me takes any valid token and reports only the caller.
+me_body="$(curl -sS -H "$(auth "$nogrant_token")" "${BASE_URL}/api/agent/me")"
+expect_field "agent/me auth_required" "$me_body" "auth_required" "true"
+expect_field "agent/me identity" "$me_body" "agent.agent_key" "api-nograntee-agent"
+expect_status "agent/me without token" 401 "${BASE_URL}/api/agent/me"
+
+# ---------------------------------------------------------------------------
+# Deny by default: a token with no rye.context.read reaches nothing.
+# Every route named in GitHub issue 16, plus the rest of the read surface.
+# ---------------------------------------------------------------------------
+
+ungated_routes=(
+  "/api/catalog"
+  "/api/dashboard"
+  "/api/nodes"
+  "/api/nodes/${subject_id}"
+  "/api/nodes/${subject_id}/graph"
+  "/api/nodes/${subject_id}/knowledge"
+  "/api/events"
+  "/api/knowledge-map"
+  "/api/workspace/crm"
+  "/api/workspace/pm"
+  "/api/gaps"
+  "/api/stale-digests"
+  "/api/domains"
+  "/api/review-queue"
+  "/api/candidates/review"
+  "/api/review/assertions"
+  "/api/audit/actions"
+  "/api/context-pack"
+)
+for route in "${ungated_routes[@]}"; do
+  expect_status "no-grant token on ${route}" 403 -H "$(auth "$nogrant_token")" "${BASE_URL}${route}"
 done
 
-if [[ "$(status_code "${BASE_URL}/api/health")" != "200" ]]; then
-  echo "API server did not start. Log follows:" >&2
-  cat "$LOG_FILE" >&2
-  exit 1
-fi
+# A route that declares no capability is refused by default: POST to a path the
+# Worker serves only for GET is a 404, but a declared deny route is a 403.
+expect_status "unmatched path" 404 -H "$(auth "$reviewer_token")" "${BASE_URL}/api/not-a-route"
 
-missing_status="$(status_code "${BASE_URL}/api/domains")"
-[[ "$missing_status" == "401" ]] || { echo "Expected missing token 401, got $missing_status" >&2; exit 1; }
+# The four console rollups are closed to every agent token, including one that
+# holds every capability the instance defines for its area.
+for route in "/api/dashboard" "/api/knowledge-map" "/api/workspace/crm" "/api/workspace/pm"; do
+  expect_status "granted token on deny route ${route}" 403 -H "$(auth "$reviewer_token")" "${BASE_URL}${route}"
+  deny_body="$(curl -sS -H "$(auth "$reviewer_token")" "${BASE_URL}${route}")"
+  expect_field "deny reason on ${route}" "$deny_body" "reason" "route not available to agent tokens"
+  expect_field "deny check on ${route}" "$deny_body" "policy.check" "deny"
+  expect_field "deny capability on ${route}" "$deny_body" "policy.capability" "null"
+done
 
-invalid_status="$(status_code -H "Authorization: Bearer not-a-real-token" "${BASE_URL}/api/domains")"
-[[ "$invalid_status" == "401" ]] || { echo "Expected invalid token 401, got $invalid_status" >&2; exit 1; }
+# The 403 body names the policy that refused.
+catalog_denied="$(curl -sS -H "$(auth "$nogrant_token")" "${BASE_URL}/api/catalog")"
+expect_field "catalog 403 error" "$catalog_denied" "error" "forbidden"
+expect_field "catalog 403 reason" "$catalog_denied" "reason" "missing capability grant"
+expect_field "catalog 403 action" "$catalog_denied" "policy.action" "catalog_read"
+expect_field "catalog 403 capability" "$catalog_denied" "policy.capability" "rye.context.read"
+expect_field "catalog 403 check" "$catalog_denied" "policy.check" "global"
+expect_field "catalog 403 domain_keys" "$catalog_denied" "policy.domain_keys" "[]"
+expect_field "catalog 403 scope_ref" "$catalog_denied" "policy.scope_ref" "null"
 
-domains_json="$(curl -sS -H "Authorization: Bearer ${candidate_token}" "${BASE_URL}/api/domains")"
-if [[ "$domains_json" == *"secret_internal_note"* ]]; then
-  echo "Low-privilege domain response exposed restricted properties" >&2
-  echo "$domains_json" >&2
-  exit 1
-fi
+# ---------------------------------------------------------------------------
+# A properly granted token still reaches the routes it is meant to use.
+# ---------------------------------------------------------------------------
+
+granted_routes=(
+  "/api/catalog"
+  "/api/events"
+  "/api/nodes"
+  "/api/nodes/${subject_id}"
+  "/api/nodes/${subject_id}/graph"
+  "/api/nodes/${subject_id}/knowledge"
+  "/api/domains"
+  "/api/review-queue"
+  "/api/candidates/review"
+  "/api/review/assertions"
+  "/api/gaps"
+  "/api/stale-digests"
+  "/api/audit/actions"
+)
+for route in "${granted_routes[@]}"; do
+  expect_status "reviewer token on ${route}" 200 -H "$(auth "$reviewer_token")" "${BASE_URL}${route}"
+done
+
+# ---------------------------------------------------------------------------
+# Row filtering: the domains listing.
+# ---------------------------------------------------------------------------
+
+domains_json="$(curl -sS -H "$(auth "$candidate_token")" "${BASE_URL}/api/domains")"
+expect_absent "low-privilege domain properties" "$domains_json" "secret_internal_note"
+expect_present "held area present" "$domains_json" '"domain_key":"api-account-updates"'
+expect_absent "unheld area absent" "$domains_json" '"domain_key":"api-title-diligence"'
+expect_absent "unheld area authority absent" "$domains_json" "api-title-authority-marker"
+expect_absent "unheld area channel absent" "$domains_json" "slack:#api-title-marker"
+
+title_domains_json="$(curl -sS -H "$(auth "$title_token")" "${BASE_URL}/api/domains")"
+expect_present "title agent sees its own area" "$title_domains_json" '"domain_key":"api-title-diligence"'
+expect_absent "title agent cannot see account area" "$title_domains_json" '"domain_key":"api-account-updates"'
+expect_absent "title agent cannot see account authority" "$title_domains_json" "api-account-authority-marker"
+expect_absent "title agent cannot see account channel" "$title_domains_json" "slack:#api-account-marker"
+
+# ---------------------------------------------------------------------------
+# Writes: the existing candidate lifecycle, unchanged.
+# ---------------------------------------------------------------------------
 
 candidate_body='{
   "candidate_kind":"decision",
@@ -121,7 +331,7 @@ candidate_body='{
 }'
 
 candidate_json_1="$(curl -sS \
-  -H "Authorization: Bearer ${candidate_token}" \
+  -H "$(auth "$candidate_token")" \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: ${IDEM_KEY}" \
   -d "$candidate_body" \
@@ -129,7 +339,7 @@ candidate_json_1="$(curl -sS \
 candidate_id_1="$(json_get "$candidate_json_1" "id")"
 
 candidate_json_2="$(curl -sS \
-  -H "Authorization: Bearer ${candidate_token}" \
+  -H "$(auth "$candidate_token")" \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: ${IDEM_KEY}" \
   -d "$candidate_body" \
@@ -137,19 +347,25 @@ candidate_json_2="$(curl -sS \
 candidate_id_2="$(json_get "$candidate_json_2" "id")"
 
 [[ "$candidate_id_1" == "$candidate_id_2" ]] || {
-  echo "Expected idempotent candidate id, got $candidate_id_1 and $candidate_id_2" >&2
-  exit 1
+  fail "Expected idempotent candidate id, got $candidate_id_1 and $candidate_id_2"
 }
 
-denied_candidate_status="$(status_code \
-  -H "Authorization: Bearer ${candidate_token}" \
+# A valid token used against another area is refused.
+cross_area_body="$(curl -sS \
+  -H "$(auth "$candidate_token")" \
   -H "Content-Type: application/json" \
   -d '{"candidate_kind":"decision","statement":"Title work is complete.","domain_keys":["api-title-diligence"]}' \
   "${BASE_URL}/api/candidates")"
-[[ "$denied_candidate_status" == "403" ]] || {
-  echo "Expected ungranted candidate domain 403, got $denied_candidate_status" >&2
-  exit 1
-}
+expect_field "cross-area candidate error" "$cross_area_body" "error" "forbidden"
+expect_field "cross-area candidate reason" "$cross_area_body" "reason" "missing capability grant"
+expect_field "cross-area candidate capability" "$cross_area_body" "policy.capability" "rye.candidate.create"
+expect_field "cross-area candidate check" "$cross_area_body" "policy.check" "domain + scope"
+expect_field "cross-area candidate domain_keys" "$cross_area_body" "policy.domain_keys" '["api-title-diligence"]'
+
+# The same refusal on a read route that carries area keys.
+expect_status "cross-area context pack" 403 \
+  -H "$(auth "$title_token")" \
+  "${BASE_URL}/api/context-pack?domain_keys=api-account-updates"
 
 promote_body="$(cat <<JSON
 {
@@ -163,39 +379,118 @@ promote_body="$(cat <<JSON
 JSON
 )"
 
-candidate_promote_status="$(status_code \
-  -H "Authorization: Bearer ${candidate_token}" \
+expect_status "candidate token cannot promote" 403 \
+  -H "$(auth "$candidate_token")" \
   -H "Content-Type: application/json" \
   -d "$promote_body" \
-  "${BASE_URL}/api/candidates/${candidate_id_1}/promote")"
-[[ "$candidate_promote_status" == "403" ]] || {
-  echo "Expected candidate token promotion 403, got $candidate_promote_status" >&2
-  exit 1
-}
+  "${BASE_URL}/api/candidates/${candidate_id_1}/promote"
 
 reviewer_promote_status="$(status_code \
-  -H "Authorization: Bearer ${reviewer_token}" \
+  -H "$(auth "$reviewer_token")" \
   -H "Content-Type: application/json" \
   -d "$promote_body" \
   "${BASE_URL}/api/candidates/${candidate_id_1}/promote")"
 [[ "$reviewer_promote_status" == "200" ]] || {
   echo "Expected reviewer promotion 200, got $reviewer_promote_status" >&2
-  curl -sS -H "Authorization: Bearer ${reviewer_token}" "${BASE_URL}/api/audit/actions?limit=10" >&2 || true
+  curl -sS -H "$(auth "$reviewer_token")" "${BASE_URL}/api/audit/actions?limit=10" >&2 || true
   exit 1
 }
 
-audit_denied_status="$(status_code -H "Authorization: Bearer ${candidate_token}" "${BASE_URL}/api/audit/actions")"
-[[ "$audit_denied_status" == "403" ]] || {
-  echo "Expected low-privilege audit read 403, got $audit_denied_status" >&2
-  exit 1
+# ---------------------------------------------------------------------------
+# Row filtering: the review queue.
+# ---------------------------------------------------------------------------
+
+# Searched by a distinctive word so the assertions do not depend on how many
+# candidates other suites left in the database.
+reviewer_queue="$(curl -sS -H "$(auth "$reviewer_token")" "${BASE_URL}/api/review-queue?include_closed=1&q=Brightline")"
+expect_present "reviewer sees its own area's candidate" "$reviewer_queue" "$candidate_id_1"
+
+reviewer_keyless="$(curl -sS -H "$(auth "$reviewer_token")" "${BASE_URL}/api/review-queue?include_closed=1&q=keyless")"
+expect_absent "reviewer does not see keyless candidate" "$reviewer_keyless" "keyless candidate marker"
+
+title_queue="$(curl -sS -H "$(auth "$title_token")" "${BASE_URL}/api/review-queue?include_closed=1&q=Brightline")"
+expect_absent "title agent does not see account candidate" "$title_queue" "$candidate_id_1"
+
+title_keyless="$(curl -sS -H "$(auth "$title_token")" "${BASE_URL}/api/review-queue?include_closed=1&q=keyless")"
+expect_absent "title agent does not see keyless candidate" "$title_keyless" "keyless candidate marker"
+
+# Counts report what was returned, not what was withheld. No candidate anywhere
+# in this instance carries the title agent's area, so its totals are zero.
+title_all="$(curl -sS -H "$(auth "$title_token")" "${BASE_URL}/api/review-queue?include_closed=1")"
+title_total="$(json_get "$title_all" "stats.total")"
+title_candidates="$(json_get "$title_all" "candidates")"
+[[ "$title_total" == "0" && "$title_candidates" == "[]" ]] || {
+  fail "Expected the title agent's queue total to count only returned rows, got total=$title_total"
 }
 
-audit_json="$(curl -sS -H "Authorization: Bearer ${reviewer_token}" "${BASE_URL}/api/audit/actions?limit=20")"
-if [[ "$audit_json" != *"candidate_promote"* || "$audit_json" != *"false"* || "$audit_json" != *"true"* ]]; then
-  echo "Expected audit log to include allowed and denied promotion actions" >&2
-  echo "$audit_json" >&2
-  exit 1
-fi
+# /api/candidates/review is the same listing and is filtered the same way.
+title_review="$(curl -sS -H "$(auth "$title_token")" "${BASE_URL}/api/candidates/review?include_closed=1&q=Brightline")"
+expect_absent "title agent candidates/review is filtered" "$title_review" "$candidate_id_1"
+
+# ---------------------------------------------------------------------------
+# The MCP adapter's tools keep working.
+# skills/rye-source-context-intake/scripts/rye_api_mcp_server.mts calls exactly
+# these seven routes and nothing else.
+# ---------------------------------------------------------------------------
+
+expect_status "mcp agent/me" 200 -H "$(auth "$candidate_token")" "${BASE_URL}/api/agent/me"
+expect_status "mcp context-pack" 200 \
+  -H "$(auth "$candidate_token")" \
+  "${BASE_URL}/api/context-pack?domain_keys=api-account-updates"
+expect_status "mcp domains" 200 -H "$(auth "$candidate_token")" "${BASE_URL}/api/domains"
+expect_status "mcp observations" 201 \
+  -H "$(auth "$candidate_token")" \
+  -H "Content-Type: application/json" \
+  -d '{"statement":"Account owner confirmed the renewal date.","domain_keys":["api-account-updates"],"source_scope":"slack:#api-sales"}' \
+  "${BASE_URL}/api/observations"
+expect_status "mcp candidates" 201 \
+  -H "$(auth "$candidate_token")" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: ${IDEM_KEY}-mcp" \
+  -d "$candidate_body" \
+  "${BASE_URL}/api/candidates"
+expect_status "mcp review-queue" 200 -H "$(auth "$reviewer_token")" "${BASE_URL}/api/review-queue"
+expect_status "mcp audit/actions" 200 -H "$(auth "$reviewer_token")" "${BASE_URL}/api/audit/actions"
+
+# ---------------------------------------------------------------------------
+# Every refusal is on the action log.
+# ---------------------------------------------------------------------------
+
+expect_status "low-privilege audit read" 403 -H "$(auth "$candidate_token")" "${BASE_URL}/api/audit/actions"
+
+audit_json="$(curl -sS -H "$(auth "$reviewer_token")" "${BASE_URL}/api/audit/actions?limit=200")"
+expect_present "audit has the allowed promotion" "$audit_json" "candidate_promote"
+expect_present "audit has the deny-route refusal" "$audit_json" "dashboard_read"
+expect_present "audit records the deny reason" "$audit_json" "route not available to agent tokens"
+expect_present "audit has a capability refusal" "$audit_json" "missing capability grant"
+
+# ---------------------------------------------------------------------------
+# Auth mode off: the reviewer's screen is unaffected.
+# ---------------------------------------------------------------------------
+
+for route in "/api/dashboard" "/api/knowledge-map" "/api/workspace/crm" "/api/workspace/pm" \
+             "/api/catalog" "/api/domains" "/api/review-queue" "/api/gaps" "/api/stale-digests"; do
+  expect_status "auth off ${route}" 200 "${OPEN_URL}${route}"
+done
+
+open_me="$(curl -sS "${OPEN_URL}/api/agent/me")"
+expect_field "auth off agent/me auth_required" "$open_me" "auth_required" "false"
+expect_field "auth off agent/me agent" "$open_me" "agent" "null"
+
+open_domains="$(curl -sS "${OPEN_URL}/api/domains")"
+expect_present "auth off sees account area" "$open_domains" '"domain_key":"api-account-updates"'
+expect_present "auth off sees title area" "$open_domains" '"domain_key":"api-title-diligence"'
+expect_present "auth off sees account authority" "$open_domains" "api-account-authority-marker"
+expect_present "auth off sees title authority" "$open_domains" "api-title-authority-marker"
+
+open_keyless="$(curl -sS "${OPEN_URL}/api/review-queue?include_closed=1&q=keyless")"
+expect_present "auth off sees the keyless candidate" "$open_keyless" "keyless candidate marker"
+open_queue="$(curl -sS "${OPEN_URL}/api/review-queue?include_closed=1&q=Brightline")"
+expect_present "auth off sees the account candidate" "$open_queue" "$candidate_id_1"
+
+# ---------------------------------------------------------------------------
+# A revoked token is a 401, indistinguishable from unknown and expired.
+# ---------------------------------------------------------------------------
 
 candidate_token_id="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atq <<SQL
 SET search_path = rye, public, pg_catalog;
@@ -211,10 +506,8 @@ SET search_path = rye, public, pg_catalog;
 SELECT rye.revoke_agent_token('${candidate_token_id}'::uuid, 'api-security-test');
 SQL
 
-revoked_status="$(status_code -H "Authorization: Bearer ${candidate_token}" "${BASE_URL}/api/domains")"
-[[ "$revoked_status" == "401" ]] || {
-  echo "Expected revoked token API request 401, got $revoked_status" >&2
-  exit 1
-}
+expect_status "revoked token" 401 -H "$(auth "$candidate_token")" "${BASE_URL}/api/domains"
+revoked_body="$(curl -sS -H "$(auth "$candidate_token")" "${BASE_URL}/api/domains")"
+expect_field "revoked token error" "$revoked_body" "error" "invalid bearer token"
 
 echo "API security test passed"

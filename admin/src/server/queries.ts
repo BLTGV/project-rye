@@ -105,6 +105,54 @@ export async function authorizeAgentAction(
   return rows[0]?.payload as AgentAuthorizationResult;
 }
 
+/**
+ * Writes a refusal to the agent action log for a decision the API made on its
+ * own: a `deny` route, a route the contract does not declare, or a handler
+ * that failed to run its own check. `authorize_agent_action` logs the
+ * capability failures; this covers the cases where there is no capability to
+ * test.
+ */
+export async function recordAgentDenial(
+  sql: Sql,
+  input: {
+    agentId: string;
+    action: string;
+    capability?: string | null;
+    domainKeys?: string[];
+    scopeRef?: string | null;
+    targetRef?: string | null;
+    reason: string;
+    request?: Record<string, unknown>;
+  }
+): Promise<void> {
+  await sql.unsafe(
+    withAdminCte() +
+      `SELECT rye.record_agent_action(
+         p_agent_id    := $1::uuid,
+         p_action      := $2::text,
+         p_capability  := $3::text,
+         p_allowed     := false,
+         p_domain_keys := $4::text[],
+         p_scope_ref   := $5::text,
+         p_target_ref  := $6::text,
+         p_reason      := $7::text,
+         p_request     := $8::jsonb,
+         p_result      := '{}'::jsonb
+       ) AS action_id
+       FROM cfg`,
+    [
+      input.agentId,
+      input.action,
+      input.capability ?? null,
+      input.domainKeys ?? [],
+      input.scopeRef ?? null,
+      input.targetRef ?? null,
+      input.reason,
+      jsonParam(input.request ?? {}),
+    ]
+  );
+}
+
 export async function fetchCandidateAccessEnvelope(
   sql: Sql,
   candidateId: string
@@ -143,9 +191,15 @@ export async function fetchCandidateAccessEnvelope(
   ) as CandidateAccessEnvelope;
 }
 
+/**
+ * `agentId` narrows the listing to the areas that agent holds for
+ * `rye.context.read`. Areas it does not hold are absent from the array
+ * entirely, so their authorities and channel subscriptions never leave the
+ * database. Pass null for the console (auth mode off), which sees everything.
+ */
 export async function fetchDomains(
   sql: Sql,
-  opts: { includeProperties?: boolean } = {}
+  opts: { includeProperties?: boolean; agentId?: string | null } = {}
 ) {
   const rows = await sql.unsafe(
     withAdminCte() +
@@ -185,8 +239,17 @@ export async function fetchDomains(
            ), '[]'::json) AS channel_subscriptions
          FROM rye.knowledge_domains kd, cfg
          WHERE kd.archived_at IS NULL
+           AND (
+             $2::uuid IS NULL
+             OR rye.has_agent_capability(
+                  $2::uuid,
+                  'rye.context.read',
+                  ARRAY[kd.domain_key]::text[],
+                  NULL
+                )
+           )
        ) d`,
-    [opts.includeProperties ?? false]
+    [opts.includeProperties ?? false, opts.agentId ?? null]
   );
   return rows[0]?.domains ?? [];
 }
@@ -1749,6 +1812,13 @@ export interface CandidateReviewQueueOptions {
   includeClosed?: boolean;
   limit?: number;
   offset?: number;
+  /**
+   * Narrows the queue to the areas this agent holds for `rye.review.read`.
+   * `instanceWide` is true when the agent has a grant that names no area; only
+   * such a token sees candidates that carry no area keys. Null for the console
+   * (auth mode off), which sees everything.
+   */
+  agent?: { agentId: string; instanceWide: boolean } | null;
 }
 
 export async function fetchCandidateReviewQueue(
@@ -1779,6 +1849,28 @@ export async function fetchCandidateReviewQueue(
           AND status.assertion_key = 'default'
          WHERE n.node_type = 'knowledge_candidate'
            AND n.archived_at IS NULL
+           -- Area filter for agent callers. Applied here, before every count
+           -- and facet below, so a total never reports rows that were withheld.
+           AND (
+             $7::uuid IS NULL
+             OR CASE
+                  WHEN jsonb_typeof(n.properties->'target_payload'->'domain_keys') = 'array'
+                   AND jsonb_array_length(n.properties->'target_payload'->'domain_keys') > 0
+                  THEN EXISTS (
+                    SELECT 1
+                    FROM jsonb_array_elements_text(
+                           n.properties->'target_payload'->'domain_keys'
+                         ) AS dk(domain_key)
+                    WHERE rye.has_agent_capability(
+                            $7::uuid,
+                            'rye.review.read',
+                            ARRAY[dk.domain_key]::text[],
+                            NULL
+                          )
+                  )
+                  ELSE $8::boolean
+                END
+           )
        ),
        filtered AS (
          SELECT *
@@ -1895,6 +1987,8 @@ export async function fetchCandidateReviewQueue(
       opts.limit ?? 80,
       opts.includeClosed ?? false,
       opts.offset ?? 0,
+      opts.agent?.agentId ?? null,
+      opts.agent?.instanceWide ?? false,
     ]
   );
   return rows[0]?.payload ?? {
