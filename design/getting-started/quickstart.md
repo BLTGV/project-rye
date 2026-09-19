@@ -168,9 +168,9 @@ Domain tables remain the system of record.
 
 ```sql
 SET search_path = rye, public, pg_catalog;
-SET LOCAL "app.current_user_id" = 'quickstart-user';
-SET LOCAL "app.current_teams" = 'default';
-SET LOCAL "app.current_role" = 'operator';
+SET "app.current_user_id" = 'quickstart-user';
+SET "app.current_teams" = 'default';
+SET "app.current_role" = 'operator';
 
 SELECT link_record(
     p_source_schema := 'public',
@@ -181,6 +181,12 @@ SELECT link_record(
     p_properties    := '{"plan": "growth", "mrr": 299}'
 );
 ```
+
+Plain `SET`, not `SET LOCAL`. `SET LOCAL` lasts only for the current
+transaction, so pasted outside a `BEGIN` it warns and sets nothing, and every
+statement after it runs with no role. Use `SET LOCAL` inside an explicit
+`BEGIN` block. With a pooled or per-call SQL tool, neither form carries over:
+set the context with `set_config()` in the same call as the query.
 
 `link_record()` creates a graph node and maps it back to the source table through
 `node_source_map`. Calling it again with the same source row updates the linked
