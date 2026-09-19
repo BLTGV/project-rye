@@ -122,6 +122,45 @@ Pass `p_scope_id := NULL` for the organization-wide fallback. If the scope
 reviews new knowledge, the words wait as a candidate until someone accepts them,
 and `categories` keeps showing the previous description until then.
 
+## Settlers
+
+Before recording a statement as accepted, ask who may settle it:
+
+```bash
+./scripts/rye settlers \
+  --subject 8f2a... \
+  --claim expectation \
+  --speaker 1c9d... \
+  --speech-act expectation \
+  --domain operations
+```
+
+This calls `rye_settlers()`. The answer comes from one lookup in three steps: a
+recorded grant for that kind of claim, then the relationship between the speaker
+and the subject (yourself, your manager, the owner of the thing), then the owner
+of the area. `step` names the step that produced the answer, and
+`speaker.is_settler` is the field to act on: true means record the statement as
+accepted, false means record a suggestion and ask the people listed.
+
+`--claim` is the assertion type, verbatim. `--subject` is optional: omit it for a
+topical claim with no subject node. `--speaker-ref` carries a source identity
+such as `chat:U0123` for a speaker with no person node. `--as-of` reconstructs a
+past answer from the relationships and grants in effect then:
+
+```bash
+./scripts/rye settlers --subject 8f2a... --claim expectation \
+  --speech-act expectation --as-of '2026-03-01' --json
+```
+
+The lookup is advisory. It reports, it never refuses, and it writes nothing. An
+agent identity is never returned as a settler: an agent carries the authority of
+the person it acts for and none of its own. Finding no settler is an answer, not
+a failure, so the command exits zero with `step` `none` and a `reason` such as
+`area_has_no_owner` — that is a setup gap for an admin to close. An empty list
+never means nobody is authorized; it means nobody is authorized and visible to
+this caller. `--json` emits the function's output verbatim (see the "Settlement
+lookup" section of `contracts/sql-surface.md`).
+
 ## Onboarding Scope
 
 Create and activate the first onboarding scope:
