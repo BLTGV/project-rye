@@ -50,4 +50,22 @@ what RLS would allow."
 ## Reports
 Paste each role's report here as it arrives.
 
+### Architect, 2026-09-19
+Result: done. Changed: contracts/admin-api.md (new normative "Authorization"
+section: deny-by-default rule, 31-row route table, row filtering, 401/403
+table, 403 shape, auth-mode-off), docs/decisions/0006-agent-tokens-deny-by-default.md.
+No migration needed; every capability used already exists. Tested: none.
+Learned: the gap is structural: the /api/* middleware authenticates and
+calls next(), and 14 handlers never call enforceCapability. withAdminCte()
+in admin/src/server/db.ts sets app.current_role = 'admin' on every
+statement, so RLS narrows nothing for an agent and row filtering must be
+explicit in the SQL. has_agent_capability with empty domain keys means
+"holds it somewhere", not an area check. authenticate_agent_token already
+returns NULL for unknown, revoked, expired, deactivated. The console SPA
+sends no Authorization header, so with auth required the reviewer's screen
+is already fully 401: one Worker serves the console or agents, not both.
+21_api_security.sh needs a third agent holding no rye.context.read to prove
+a 403. Question: should the four console rollups be deny or
+rye.context.read global? Assumed deny (decision 0006); Lead accepts.
+
 ## Close
