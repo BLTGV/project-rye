@@ -4,7 +4,9 @@
 -- docs/decisions/0005-who-may-settle-lookup.md. rye_settlers() answers who may
 -- settle a claim and which of three steps said so: a recorded grant for that
 -- kind of claim, then the relationship between speaker and subject, then the
--- owner of the area. It is read-only and advisory. It writes nothing, refuses
+-- owner of the area. The relationship step is selected by the claim type
+-- first and the speech act second, so omitting the optional speech act
+-- narrows the answer and never widens it. It is read-only and advisory. It writes nothing, refuses
 -- nothing, and raises nothing for a missing answer. No new table and no new
 -- core-table column: grants stay in domain_authorities, relationships stay in
 -- edges, the area owner stays on knowledge_domains.
@@ -118,12 +120,12 @@ AS $$
 DECLARE
     -- Everything trim() misses, spelled out: space, tab, CR, LF, form feed,
     -- vertical tab, non-breaking space.
-    c_space constant text := E' \t\r\n\f ';
+    c_space constant text := E' \t\r\n\f\u000B\u00A0';
     v_ref text := nullif(btrim(coalesce(p_ref, ''), c_space), '');
     v_key text;
 BEGIN
     IF v_ref IS NOT NULL THEN
-        IF v_ref ~* E'^[[:space:] ]*agent[[:space:] ]*:' THEN
+        IF v_ref ~* E'^[[:space:]\u00A0]*agent[[:space:]\u00A0]*:' THEN
             RETURN true;
         END IF;
 
@@ -189,6 +191,13 @@ CREATE OR REPLACE FUNCTION rye_settlers(
 SET search_path = rye, pg_catalog
 AS $$
 DECLARE
+    -- Which claim types are claims one person sets on another, and which are
+    -- a person's own commitment or report about themselves. Literal, exact
+    -- string match, additive. Stated in contracts/sql-surface.md and here and
+    -- nowhere else: there is no table to configure and no migration to run.
+    c_other_set constant text[] := ARRAY['expectation'];
+    c_self_set  constant text[] := ARRAY['commitment', 'self_commitment', 'self_report'];
+
     v_as_of        timestamptz := coalesce(p_as_of, now());
     v_claim_type   text := nullif(trim(p_claim_type), '');
     v_speech_act   text := nullif(trim(p_speech_act), '');
@@ -382,9 +391,19 @@ BEGIN
     -- ----------------------------------------------------------------------
     -- Step 2: the relationship between the speaker and the subject.
     --
-    -- Which default applies is selected by the speech act, not by the claim
-    -- type. A claim about a relationship edge type has no default and falls
-    -- through: the reporting line is settled by the area, not by either end.
+    -- Two selectors, the claim type first and the speech act second. Five
+    -- ordered rules, first match wins. The claim type carries the safety on
+    -- its own, so omitting the optional speech act and mistyping it both land
+    -- in the same place as classifying it correctly would.
+    --
+    --   0. relationship edge type        -> fall through
+    --   1. other-set, or act expectation -> manager only, never self
+    --   2. recognized speech act         -> its documented default
+    --   3. self-set claim type           -> self only
+    --   4. anything else                 -> fall through to the area owner
+    --
+    -- There is no union. A null or unrecognized speech act never widens who
+    -- may settle: saying less buys a smaller answer, never a larger one.
     -- ----------------------------------------------------------------------
     v_recognized := coalesce(v_speech_act IN (
         'self_commitment', 'self_report', 'expectation',
@@ -392,28 +411,45 @@ BEGIN
         'agreement', 'decision', 'outside_report', 'agent_inference'
     ), false);
 
-    IF v_speech_act IN ('self_commitment', 'self_report') THEN
-        v_want_self := true;
-    ELSIF v_speech_act = 'expectation' THEN
+    IF coalesce(v_claim_type, '') IN ('reports_to', 'owns') THEN
+        -- Rule 0. Neither end of a relationship settles that it exists.
+        NULL;
+
+    ELSIF v_claim_type = ANY (c_other_set)
+       OR v_speech_act = 'expectation' THEN
+        -- Rule 1, and the point of the ordering. An expectation is set on a
+        -- person by someone else, so the person it is set on is never its
+        -- settler, whatever the speech act says.
         v_want_manager := true;
-    ELSIF v_speech_act = 'statement_about_other' THEN
+
+    ELSIF v_recognized THEN
+        -- Rule 2.
+        IF v_speech_act IN ('self_commitment', 'self_report') THEN
+            v_want_self := true;
+        ELSIF v_speech_act = 'statement_about_other' THEN
+            v_want_self := true;
+            v_want_manager := true;
+        ELSIF v_speech_act = 'statement_about_thing' THEN
+            v_want_owner := true;
+        ELSE
+            -- agreement, decision, outside_report, agent_inference.
+            NULL;
+        END IF;
+
+    ELSIF v_claim_type = ANY (c_self_set) THEN
+        -- Rule 3. A person's own commitment or report about themselves still
+        -- settles with no setup and no speech act.
         v_want_self := true;
-        v_want_manager := true;
-    ELSIF v_speech_act = 'statement_about_thing' THEN
-        v_want_owner := true;
-    ELSIF v_speech_act IN ('agreement', 'decision', 'outside_report', 'agent_inference') THEN
-        NULL;  -- no relationship default; fall through to the area owner
+
     ELSE
-        -- Null or unrecognized: the union of whichever defaults apply.
-        v_want_self := true;
-        v_want_owner := true;
-        v_want_manager := true;
+        -- Rule 4. No claim type class, and the speech act is null or
+        -- unrecognized. Nothing local is selected; the area owner answers.
+        NULL;
     END IF;
 
     IF NOT v_halt
        AND v_step = 'none'
-       AND v_subject_found
-       AND coalesce(v_claim_type, '') NOT IN ('reports_to', 'owns') THEN
+       AND v_subject_found THEN
 
         -- Self: a person settles claims about themselves, with no setup.
         IF v_want_self AND v_subject.node_type = 'person' THEN
@@ -620,4 +656,4 @@ END;
 $$ LANGUAGE plpgsql STABLE;
 
 COMMENT ON FUNCTION rye_settlers(uuid, text, uuid, text, text, text, timestamptz, text) IS
-    'Who may settle this claim, and which of three steps said so. One lookup: a recorded grant in domain_authorities for this claim type, then the relationship between speaker and subject (self, manager via reports_to, owner via owns), then knowledge_domains.owner_node_id for the area. Contract: contracts/sql-surface.md, section "Settlement lookup" (contract_version 1). SECURITY INVOKER and read-only: it writes nothing, refuses nothing, and raises nothing for a missing answer. p_claim_type is the assertion type verbatim. p_speech_act selects which relationship default applies. p_as_of filters effective windows only. An agent identity is never returned: any ref beginning with ''agent:'' is excluded whether or not an identity backs it, other refs are matched on the slug create_agent_identity() stores, an inactive identity is still an agent, and a node that is an agent by node_type or attrs->>''actor_kind'' is excluded wherever it stands. Dropped candidates are counted in excluded_agents. step ''none'' with settlers [] and a reason is an answer, not an error, and an empty list never means nobody is authorized, only nobody authorized and visible to this caller.';
+    'Who may settle this claim, and which of three steps said so. One lookup: a recorded grant in domain_authorities for this claim type, then the relationship between speaker and subject (self, manager via reports_to, owner via owns), then knowledge_domains.owner_node_id for the area. Contract: contracts/sql-surface.md, section "Settlement lookup" (contract_version 1). SECURITY INVOKER and read-only: it writes nothing, refuses nothing, and raises nothing for a missing answer. p_claim_type is the assertion type verbatim, and it is the first selector: the relationship step tries five ordered rules and the first that applies wins. 0, a relationship edge type (reports_to, owns) falls through. 1, an other-set claim type (expectation) or a speech act of ''expectation'' gives the manager only and never self, so a missing or wrong speech act cannot make a person the settler of an expectation set on them. 2, a recognized p_speech_act gives its documented default. 3, a self-set claim type (commitment, self_commitment, self_report) gives self only. 4, anything else falls through to the area owner. There is no union: a null or unrecognized speech act never widens who may settle. Both claim-type sets are literal strings here and in the contract, matched exactly and growing additively; no table configures them. The lookup reads no assertion, so is_settler true is not permission to replace an accepted claim the caller did not check for. p_as_of filters effective windows only. An agent identity is never returned: any ref beginning with ''agent:'' is excluded whether or not an identity backs it, other refs are matched on the slug create_agent_identity() stores, an inactive identity is still an agent, and a node that is an agent by node_type or attrs->>''actor_kind'' is excluded wherever it stands. Dropped candidates are counted in excluded_agents. step ''none'' with settlers [] and a reason is an answer, not an error, and an empty list never means nobody is authorized, only nobody authorized and visible to this caller.';

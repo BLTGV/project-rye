@@ -877,6 +877,13 @@ Usage:
 Who may settle this claim, and which step of the lookup said so: a recorded
 grant, then the relationship, then the owner of the area. Advisory only.
 Omit --subject for a topical claim with no subject node.
+
+The claim type selects the relationship default first, the speech act second.
+An expectation is settled by the manager and never by the person it is set on.
+A claim type of commitment, self_commitment, or self_report is settled by the
+person themselves. Anything else with no recognized --speech-act falls through
+to the area owner: omitting the flag narrows the answer, it never widens it.
+Do not record a statement as accepted while speech_act_recognized is false.
 EOF
         return
         ;;

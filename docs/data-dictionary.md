@@ -456,20 +456,40 @@ order and the first one to produce a settler wins:
    `properties.subjects` and `properties.subject_node_types`. If any grant
    matches, the relationship step does not run — that is how a grant narrows a
    default as well as adds to one.
-2. **Relationship.** `p_speech_act` selects which default applies:
-   `self_commitment`/`self_report` → self, `expectation` → manager,
-   `statement_about_other` → the subject then the subject's manager,
-   `statement_about_thing` → owner, `agreement`/`decision`/`outside_report`/
-   `agent_inference` → none, null or unrecognized → the union. Manager is the
-   target of a `reports_to` edge from the subject; owner is the source of an
-   `owns` edge to the subject; both in effect at `p_as_of`. A claim type that
-   names a relationship edge type (`reports_to`, `owns`) has no default and
-   falls through: the area settles that a reporting line exists, not either end.
+2. **Relationship.** Two selectors, the claim type first and the speech act
+   second, in five ordered rules. The first that applies wins:
+
+   | # | Condition | Default |
+   |---|---|---|
+   | 0 | `p_claim_type` is `reports_to` or `owns` | none, fall through |
+   | 1 | `p_claim_type` is other-set, or `p_speech_act` is `expectation` | manager only; self never |
+   | 2 | `p_speech_act` is recognized | `self_commitment`/`self_report` → self; `statement_about_other` → the subject then the subject's manager; `statement_about_thing` → owner; `agreement`/`decision`/`outside_report`/`agent_inference` → none |
+   | 3 | `p_claim_type` is self-set | self only |
+   | 4 | otherwise | none, fall through |
+
+   *Other-set* claim types are claims one person sets on another: `expectation`.
+   *Self-set* claim types are a person's own commitment or report about
+   themselves: `commitment`, `self_commitment`, `self_report`. Both sets are
+   literal strings in the function and in the contract, matched exactly, and
+   grow additively — there is no table to configure.
+
+   Rule 1 is the point of the ordering: an expectation is set on a person by
+   someone else, so the person it is set on is never its settler, whatever the
+   speech act says. Rule 4 is the other point: there is no union. A null or
+   unrecognized speech act selects nothing and the answer falls through, so a
+   caller gets a smaller answer for saying less, never a larger one.
+
+   Manager is the target of a `reports_to` edge from the subject; owner is the
+   source of an `owns` edge to the subject; both in effect at `p_as_of`.
 3. **Area owner.** `knowledge_domains.owner_node_id` for the resolved area.
 
 `p_claim_type` is the assertion type verbatim — one vocabulary, no mapping
 table. The area resolves from `p_domain_key`, or from the single active
 knowledge domain when it is omitted. `p_as_of` filters effective windows only.
+
+`speech_act_recognized` false is an instruction, not a detail: classify the
+statement, pass the speech act, and look again rather than recording it as
+accepted. The same applies when rule 4 sends the answer to the area owner.
 
 The answer carries `contract_version`, `step` (`grant`, `relationship`,
 `area_owner`, `none`), `settlers`, `settler_count`, `speaker`, `subject`,
@@ -516,6 +536,12 @@ Nothing raises for a missing answer. An area with no owner returns `step` `none`
 An unknown area key returns `domain_found` false and `reason` `domain_not_found`.
 Because RLS silence applies, an empty `settlers` never means nobody is
 authorized; it means nobody is authorized and visible to this caller.
+
+**What it does not answer.** It reads no assertion, so it cannot see that a
+claim on this subject is already accepted and cannot tell a new statement from a
+contradiction of an old one. `is_settler` true is not permission to replace an
+accepted claim the caller did not check for. Objections are a later work item;
+this lookup answers who may settle a claim, not who may unsettle one.
 
 **Why it exists:** Every agent must get the same answer to "who may settle
 this", from one lookup rather than from its own judgment. `SECURITY INVOKER` and
