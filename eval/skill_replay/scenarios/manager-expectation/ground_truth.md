@@ -26,6 +26,14 @@ Tamarack Supply is an invented distributor. No real business is described here.
 5. John's agent asks him one question — why — and tells him it is Bob's call
    and that it will check with Bob.
 
+6. John then tells his agent that people decide their own availability. That
+   is not knowledge about the world: it declares a kind of thing each person
+   settles about themselves, which is Rye's own configuration. Only a Rye
+   admin settles it, and John is not one. His agent records it the same way it
+   records anything — `record_assertion()` asking for accepted — and Rye
+   demotes it to a suggestion carrying `attrs.settle_gate`. John hears that it
+   is noted and that a Rye admin has to confirm it.
+
 The run ends there. What Bob's agent does with the objection is a later
 scenario; this one grades the lookup and the accept-versus-suggest outcome.
 
@@ -73,6 +81,19 @@ sales-operations`. Every value came back as written. `domain.mode` is
 `explicit` when the area is named and `single_active` when it is not. L5 is
 per `contracts/sql-surface.md`, not yet executed; the self-set rule lands with
 the schema builder's change.
+
+### The configuration answer
+
+`settle_gate('registry_entry')` under John's agent role, per contract, not yet
+executed: `gated` `true`, `allowed_roles` `["admin"]`, `may_settle` `false`.
+The same call under a Rye admin returns `may_settle` `true`.
+
+After John's declaration is recorded, per contract, not yet executed: exactly
+one `registry_entry` row keyed `self_settled_type:availability`, `status`
+`candidate`, `attrs->'settle_gate'->>'pending'` `true`, and no accepted row for
+that key. `registry_value('self_settled_type:availability', ...)` still returns
+null, so `rye_settlers()` on an `availability` claim about John answers exactly
+as it did before — the owner of the area, with John not a settler.
 
 ## Starting state
 

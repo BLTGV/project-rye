@@ -233,15 +233,17 @@ read with `registry_value()` — scope, then plugin, then core — exactly as
 `type_alias` entries are.
 
 Rye has no dedicated registry-writing helper. Write it with
-`record_assertion()` as an accepted `registry_entry` on the registry or scope
-node, claim `{"value": true}`, and never by touching a base table. The key
-carries the canonical type; an alias is registered as an alias, not as a
-second entry. Core members need no row, so a fresh instance works with none.
+`record_assertion(..., p_status := 'accepted')` as a `registry_entry` on the
+registry or scope node, claim `{"value": true}`, and never by touching a base
+table. The key carries the canonical type; an alias is registered as an alias,
+not as a second entry. Core members need no row, so a fresh instance works with
+none.
 
-The declaration is itself a claim: run the settlement lookup on it, and record
-it as a suggestion unless the speaker may settle it. In plain words it sounds
-like "people decide their own availability", said by the area owner or a Rye
-admin. Plugin manifests cannot contribute self-settled types today.
+The declaration is configuration, not an ordinary claim. In plain words it
+sounds like "people decide their own availability", and only a Rye admin
+settles it — see the Configuration Write Convention below. An area owner who is
+not a Rye admin records the same call and it becomes a suggestion for an admin.
+Plugin manifests cannot contribute self-settled types today.
 
 An agent picks a claim type the category discovery request lists rather than
 inventing one. An invented type is in neither set, so a claim about the
@@ -293,6 +295,60 @@ speaker's own:
 `contracts/sql-surface.md` holds the normative shape. The lookup writes
 nothing and refuses nothing; it is a discipline skills follow, not a boundary
 the database holds.
+
+## Configuration Write Convention
+
+Some assertion types are Rye's own configuration rather than knowledge about
+the world, and Rye reads them to decide how it treats every other write. Only a
+Rye admin may make one accepted. Normative shape:
+`contracts/sql-surface.md`, "Configuration writes need an admin". Rationale:
+`docs/decisions/0007-configuration-writes-need-an-admin.md`.
+
+- The gate is data. `assertion_type_access` carries a third `operation` value,
+  `settle`, beside `read` and `write`. A row
+  `(assertion_type, 'settle', allowed_roles)` means only those roles may make
+  that type accepted; a type with no `settle` row is ungated. Gating a further
+  type is an `INSERT`, not a migration.
+- Two types are gated at this version, both `ARRAY['admin']`:
+  `registry_entry` (type aliases, `self_settled_type:*`, `governed_type:*`,
+  `DEFAULT_SCOPE`, basis priors, half lives, digest facets) and
+  `review_policy`.
+- `settle_gate(p_assertion_type)` answers
+  `{assertion_type, gated, allowed_roles, current_role, may_settle}`. It is
+  `STABLE`, `SECURITY INVOKER`, and writes nothing. Callers ask before
+  offering to record configuration. `may_settle_assertion_type()` and
+  `assertion_settle_roles()` are the narrower reads.
+- `record_assertion()` demotes rather than refuses. A gated accepted write by a
+  role that may not settle it becomes a candidate carrying
+  `attrs.settle_gate` (`pending`, `requested_status`, `allowed_roles`), visible
+  in `review_queue`. Nothing said is lost. The demotion is independent of the
+  review policy and applies under `open`, `candidates_only`, `strict`, and with
+  no policy recorded.
+- Every other route raises: a direct `INSERT`, any `UPDATE` to `accepted`
+  including one by a caller that sets `app.write_path` itself,
+  `accept_assertion()`, `supersede_assertion()`, `record_distillation()`, and
+  `schedule_assertion_change()`. Refusing rather than demoting is deliberate
+  where the helper marks or displaces the incumbent first: a quiet demotion
+  would leave the key with no accepted value. `rye.authoritative.promote` does
+  not open the gate.
+- The gated type is the stored spelling, matched with no alias resolution, as
+  `registry_value()` and `governing_scope()` match it. `record_assertion()`
+  canonicalizes before inserting, so an alias of a gated type is gated.
+- An unset `app.current_role` is not an admin. A migration or script that seeds
+  configuration sets the role first, as `sync_plugin_metadata.sh` does.
+- A waiting suggestion changes no answer. `registry_value()`,
+  `canonical_type()`, and `rye_settlers()` read only accepted entries, so
+  claims of the affected type route exactly as they did until an admin accepts
+  it.
+- What the person hears is the client's sentence, not the database's: it is
+  noted, and a Rye admin has to confirm it. Never a refusal, never a status,
+  never the registry.
+
+Deliberately not gated yet, each for a stated reason: `scope_status`, where
+demotion fails open; plugin enablement, which is carried by the
+`scope_enables_plugin` edge rather than an assertion; the other scope policy
+types written by `record_scope_policy()`; and `domain_authorities` grants,
+which are table rows.
 
 ## Reporting Line And Ownership Convention
 
@@ -356,7 +412,8 @@ way it treats somebody else's name: record a suggestion and confirm first.
 
 ## Registry and Confidence Convention
 
-- Store defaults as accepted `registry_entry` assertions.
+- Store defaults as accepted `registry_entry` assertions. Only a Rye admin may
+  settle one; see the Configuration Write Convention.
 - Resolve `half_life:<assertion_type>`, `basis_prior:<basis>`, and
   `digest_facets:<node_type>` with `registry_value(key, scope)`.
 - Precedence is scope override, plugin default, then core default.
@@ -379,7 +436,8 @@ default. Edge subjects check the source endpoint before the target endpoint.
 Two active scopes claiming the same type are an error. An explicit helper
 scope must match the resolved scope when both exist.
 
-Store `review_policy` on the scope with one of these values:
+Store `review_policy` on the scope with one of these values, which only a Rye
+admin may settle (Configuration Write Convention):
 
 - `open`: preserve accepted writes.
 - `candidates_only`: force non-observed writes to candidates.
@@ -393,6 +451,9 @@ Agents need `rye.authoritative.promote` to accept candidates under
 Store aliases as `registry_entry` assertions with key
 `type_alias:<kind>:<deprecated_value>` and the canonical string in
 `claim.value`. `kind` is `node_type`, `edge_type`, or `assertion_type`.
+
+Only a Rye admin may settle an alias, because every type lookup reads it; see
+the Configuration Write Convention.
 
 `canonical_type()` follows alias chains and raises on cycles. New helper writes
 use the canonical value. Existing rows retain their stored spelling. Read
@@ -559,10 +620,22 @@ Codes follow the format `{PREFIX}-{YYMM}-{SEQ}` (e.g., `OPP-2403-0042`, `TSK-240
 Authorization uses session variables, not database roles:
 
 ```sql
+BEGIN;
 SET LOCAL "app.current_user_id" = 'user:alice';
 SET LOCAL "app.current_teams"   = 'engineering,sales';
 SET LOCAL "app.current_role"    = 'team_member';
+-- ... the work ...
+COMMIT;
 ```
+
+The `BEGIN` and `COMMIT` are part of the convention, not decoration. `SET
+LOCAL` lasts only for the current transaction, and outside a transaction block
+it warns "SET LOCAL can only be used in transaction blocks" and sets nothing,
+so a pasted block leaves the role unset and every RLS-protected read comes back
+empty. For a whole session use plain `SET` instead; for a pooled connection or
+a per-call tool, where each statement is its own session, pass
+`set_config('app.current_role', 'team_member', false)` in the same call as the
+query — see the Supabase notes in `AGENTS.md`.
 
 Role hierarchy: `admin > manager > team_member > viewer > agent`.
 
