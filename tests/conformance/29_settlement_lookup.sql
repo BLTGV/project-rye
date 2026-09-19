@@ -524,12 +524,41 @@ BEGIN
         p_effective_at   := v_then
     );
 
+    -- Whitespace PostgreSQL's trim() does not strip must not smuggle an agent
+    -- past the prefix rule, and neither must a space before the colon.
+    PERFORM grant_domain_authority(
+        p_domain_key     := 'conformance-settling',
+        p_authority_kind := 'person',
+        p_authority_ref  := E'\tagent:conformance-settler-agent',
+        p_claim_types    := ARRAY['bot_claim_tab'],
+        p_effective_at   := v_then
+    );
+
+    PERFORM grant_domain_authority(
+        p_domain_key     := 'conformance-settling',
+        p_authority_kind := 'person',
+        p_authority_ref  := E' agent:conformance-settler-agent',
+        p_claim_types    := ARRAY['bot_claim_nbsp'],
+        p_effective_at   := v_then
+    );
+
+    PERFORM grant_domain_authority(
+        p_domain_key     := 'conformance-settling',
+        p_authority_kind := 'person',
+        p_authority_ref  := 'agent :conformance-settler-agent',
+        p_claim_types    := ARRAY['bot_claim_space_colon'],
+        p_effective_at   := v_then
+    );
+
     FOREACH v_case IN ARRAY ARRAY[
         'bot_claim_hyphen',
         'bot_claim_bare',
         'bot_claim_mixed_case',
         'bot_claim_unbacked',
-        'bot_claim_inactive'
+        'bot_claim_inactive',
+        'bot_claim_tab',
+        'bot_claim_nbsp',
+        'bot_claim_space_colon'
     ] LOOP
         v_answer := rye_settlers(
             p_subject_id := v_john,
@@ -560,6 +589,33 @@ BEGIN
                 v_case, v_answer;
         END IF;
     END LOOP;
+
+    -- The other direction: a person never loses authority for sharing a slug
+    -- with an agent. `person:conformance-settler-agent` is not an agent
+    -- prefix, and the whole ref slugifies to person_conformance_settler_agent,
+    -- which no identity has. The grant stands.
+    PERFORM grant_domain_authority(
+        p_domain_key     := 'conformance-settling',
+        p_authority_kind := 'person',
+        p_authority_ref  := 'person:conformance-settler-agent',
+        p_claim_types    := ARRAY['person_claim_lookalike'],
+        p_effective_at   := v_then
+    );
+
+    v_answer := rye_settlers(
+        p_subject_id := v_john,
+        p_claim_type := 'person_claim_lookalike',
+        p_domain_key := 'conformance-settling',
+        p_speech_act := 'expectation'
+    );
+
+    IF v_answer->>'step' <> 'grant'
+       OR (v_answer->>'settler_count')::int <> 1
+       OR v_answer->'settlers'->0->>'ref' <> 'person:conformance-settler-agent'
+       OR (v_answer->>'excluded_agents')::int <> 0
+    THEN
+        RAISE EXCEPTION 'A person must not be excluded for sharing a slug with an agent, got %', v_answer;
+    END IF;
 
     -- A node that is an agent by attrs->>'actor_kind' rather than by
     -- node_type is excluded wherever it stands, here as a second manager.

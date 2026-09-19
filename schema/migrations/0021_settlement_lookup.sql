@@ -85,14 +85,28 @@ COMMENT ON FUNCTION rye_settler_resolve_ref(text) IS
 -- An agent identity is never a settler, and this is the one place that rule
 -- lives. Two rules, in this order:
 --
--- 1. Fail closed on the prefix. Any ref that begins with `agent:`, case
---    insensitive and after trimming, is an agent whether or not an
---    agent_identities row backs it. A ref that says it is an agent never
---    settles. The alternative — treating an unmatched `agent:` ref as an
+-- 1. Fail closed on the prefix. Any ref whose first non-whitespace characters
+--    are `agent` followed by a colon is an agent, whatever the case and
+--    whatever whitespace sits at the front or around the colon, and whether or
+--    not an agent_identities row backs it. A ref that says it is an agent
+--    never settles. The alternative — treating an unmatched `agent:` ref as an
 --    ordinary person — turns a typo or a deleted identity into authority.
+--    Whitespace here means more than PostgreSQL's trim(), which strips plain
+--    spaces only: tab, CR, LF, form feed, vertical tab, and the non-breaking
+--    space U+00A0 are all stripped and all ignored around the colon.
 -- 2. Match on the slug, not the spelling. create_agent_identity() stores
 --    rye_slugify_key(agent_key), so `my-agent`, `My Agent`, and `my_agent`
 --    are one key and a ref in any of those spellings is the same agent.
+--
+-- Unicode lookalike letters are out of scope. A ref whose `a` is a Cyrillic
+-- а is not an agent prefix here; it slugifies to a key no identity has and
+-- resolves to no node, so it comes back as an unbound settler with no node
+-- behind it, which is what any other unrecognised ref does.
+--
+-- The prefix rule reads `agent` as a whole word before a colon, so
+-- `person:my-agent` is not an agent. A person never loses authority for
+-- sharing a slug with an agent: only the whole ref is slugified for rule 2,
+-- and `person:my-agent` slugifies to `person_my_agent`.
 --
 -- A node is an agent when its node_type is 'agent' or its attrs->>'actor_kind'
 -- is 'agent', whatever its ref says. An inactive agent identity is still an
@@ -102,11 +116,14 @@ RETURNS boolean
 SET search_path = rye, pg_catalog
 AS $$
 DECLARE
-    v_ref text := nullif(trim(p_ref), '');
+    -- Everything trim() misses, spelled out: space, tab, CR, LF, form feed,
+    -- vertical tab, non-breaking space.
+    c_space constant text := E' \t\r\n\f ';
+    v_ref text := nullif(btrim(coalesce(p_ref, ''), c_space), '');
     v_key text;
 BEGIN
     IF v_ref IS NOT NULL THEN
-        IF left(lower(v_ref), 6) = 'agent:' THEN
+        IF v_ref ~* E'^[[:space:] ]*agent[[:space:] ]*:' THEN
             RETURN true;
         END IF;
 
@@ -135,7 +152,7 @@ END;
 $$ LANGUAGE plpgsql STABLE;
 
 COMMENT ON FUNCTION rye_settler_is_agent(text, uuid) IS
-    'True when a candidate settler is an agent. Fails closed on the prefix: any ref beginning with ''agent:'' (case insensitive, after trim) is an agent whether or not an agent_identities row backs it. Otherwise the ref is matched on its slug, because create_agent_identity() stores rye_slugify_key(agent_key) — so ''my-agent'', ''My Agent'', and ''my_agent'' are one key. An inactive agent identity is still an agent; the active flag is not consulted. A node is an agent when its node_type is ''agent'' or its attrs->>''actor_kind'' is ''agent''. rye_settlers() drops these before choosing a step and counts them in excluded_agents.';
+    'True when a candidate settler is an agent. Fails closed on the prefix: a ref whose first non-whitespace characters are ''agent'' followed by a colon is an agent whether or not an agent_identities row backs it, in any case and with any whitespace at the front or around the colon — space, tab, CR, LF, form feed, vertical tab, and the non-breaking space U+00A0, which PostgreSQL''s trim() does not strip. Otherwise the ref is matched on its slug, because create_agent_identity() stores rye_slugify_key(agent_key) — so ''my-agent'', ''My Agent'', and ''my_agent'' are one key, while ''person:my-agent'' slugifies to ''person_my_agent'' and is not an agent. An inactive agent identity is still an agent; the active flag is not consulted. A node is an agent when its node_type is ''agent'' or its attrs->>''actor_kind'' is ''agent''. Unicode lookalike letters are out of scope: such a ref matches no identity and no node and comes back unbound. rye_settlers() drops agents before choosing a step and counts them in excluded_agents.';
 
 -- node_type to the settler `kind` vocabulary in contracts/sql-surface.md.
 CREATE OR REPLACE FUNCTION rye_settler_node_kind(p_node_type text)
