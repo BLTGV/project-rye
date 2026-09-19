@@ -122,7 +122,7 @@ As of 2026-09-19.
 | The one-line echo after every write | Proposed as a skill requirement; nothing enforces it |
 | Source identity binding as a confirmed, recorded step | Proposed |
 | Enforcement of the lookup from the acceptance path, for API callers | Proposed |
-| Registry write gate. Under `open`, also the answer on a fresh install with no policy recorded, a non-admin can record accepted configuration: type aliases and self-settled kinds, both of which the lookup reads | **Open.** work/005. It matters where a trusted backend sets the session variables, or where an honest agent is misled into writing configuration. A caller with a raw connection can already set its own role, so for direct database access this is the same trust boundary as everything else |
+| Configuration writes need a Rye admin. A non-admin attempt to record, end, or edit an accepted registry entry or review policy lands as a suggestion waiting for an admin, or is refused on every other route (migration 0023, work/005) | **Built.** Like all of Rye's access rules it binds callers whose session variables are set honestly or by a trusted backend. The same protection for ordinary assertions is still open: a caller can promote or end one by setting the helper-only write-path settings |
 | Row-level security on the tables holding areas and grants | Open, work/004, separate. Only `agent_api_tokens` is protected today |
 | Conditional auto-accept rules matched against verified source evidence | Proposed, narrowed. See the mechanism section |
 | Objectives, and importance computed from them rather than from recency | Proposed |
@@ -357,9 +357,10 @@ establish it.
 1. One person, or a team that trusts itself: direct SQL, the skills, an area
    with an owner, and the lookup as discipline. Prove one write and read loop
    before adding infrastructure.
-2. Close the registry write gate (work/005) before treating the lookup as
-   meaningful on a shared instance. Until it is closed, a non-admin can record
-   accepted configuration that changes who settles what.
+2. Apply migration 0023 before treating the lookup as meaningful on a shared
+   instance. It stops a non-admin from recording or ending the configuration
+   that decides who settles what. The same protection for ordinary
+   assertions is not built yet.
 3. Channel agents and unattended runners: separate API identities, narrow
    grants, `RYE_API_AUTH_MODE=required`, and refusal tests for the routes
    used. Rotate database credentials once restricted people are on the API.
