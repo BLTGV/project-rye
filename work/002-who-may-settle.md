@@ -99,4 +99,24 @@ rye-org `contributes.edge_types` and `expectation` to `assertion_types`;
 settler `kind` keeps a sixth value `other` for an area owner node that is
 not a person, team, role, or system.
 
+### Builder agent-kit, 2026-09-19
+Result: done. Branch worktree-agent-a7f18ff71cb202bfc, commit a5b42c9.
+Changed: plugins/rye-org/rye-plugin.json (`owns`, `expectation`),
+skills/rye-agent-ops/SKILL.md (new "Ask Who May Settle It Before You
+Accept"), skills/rye-agent-ops/rye-skill.json (`rye_settlers` in requires
+and entrypoints), docs/agent-ops-guide.md, docs/conventions-catalog.md,
+eval/skill_replay/README.md, eval/skill_replay/scenarios/manager-expectation/
+(ground_truth, persona_brief_bob, persona_brief_john, rubric, setup.sql).
+Tested: intake skill check passed. 22_secure_mcp_simulation.sh not run:
+environment failure, DATABASE_URL required and the Docker daemon rejects
+this user (Lead diagnosed: user not in docker group, service inactive, sudo
+needs a password). Nothing in the repo validates plugin or skill manifests
+against their JSON schemas, and eval/skill_replay has no runner; builder
+used a throwaway validator and all 9 plugin and 10 skill manifests pass.
+Learned: see docs/areas/agent-kit.md entries dated 2026-09-19. Questions,
+all accepted by Lead: the scenario lands as "designed, not yet run" until
+rye_settlers() and the CLI subcommand merge; the scenario's domain key and
+owner are scenario-local; adding rye_settlers to the skill's requires
+follows the rye_categories precedent.
+
 ## Close
