@@ -91,4 +91,23 @@ its own item); the rye.domain.admin gate on domain `properties` does not
 check grant expiry, pre-existing and untouched (Lead: out of scope here,
 to be raised as its own item).
 
+### Verifier, 2026-09-19, static pass on 5b8e608: FAIL
+Findings: (1) HIGH: HEAD requests bypass deny-by-default; Hono dispatches
+HEAD to GET handlers, the policy table and workerServesApiPath know only
+GET, so `HEAD /api/dashboard` with any agent token runs the handler and
+returns 200 with no audit row. Verified by execution. (2) MEDIUM: in the
+review-queue filter an area-key array with no sluggable key ([""], ["--"])
+collapses to "holds it somewhere" and is shown to every rye.review.read
+holder. (3) LOW: holdsInstanceWide evaluates grant semantics in TypeScript
+because no schema helper expresses "grant names no area". (4) LOW: the test
+script probes only GET and POST and never exercises the undeclared-route
+branch. (5) INFO: an unmatched path with no token returns 401 where the
+contract says 404. Clean otherwise: 31 rows match the contract exactly, all
+31 Worker routes have a row, matching cannot be shadowed by registration
+order, encoded paths resolve to the same policy, filters are parameterised
+and keep withAdminCte in the same statement, no migration, diff stays in
+the area. Build passes. All database-backed criteria unverified pending
+Docker. Lead: findings 1, 2, 4 sent to builder as fix attempt 1; 3 kept
+with a comment; 5 goes to Architect as a contract amendment.
+
 ## Close
