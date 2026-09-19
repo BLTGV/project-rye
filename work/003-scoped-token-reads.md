@@ -147,4 +147,25 @@ by reading; 5, 6 (beyond missing-token 401), and the script run in 7 remain
 pending the database. Lead: mixed-case tests requested from builder;
 contract amendment queued for Architect.
 
+### Builder admin, 2026-09-19, test addition (commit b4e8b9b)
+Result: done. Only tests/conformance/21_api_security.sh touched. Added two
+mixed area-key suggestions (junk plus held key must be shown; junk plus
+unheld key must be hidden), each asserted from both agents and present on
+the auth-off server, via the `q` filter. While adding them the builder
+found three of its own earlier assertions compared against unslugged keys
+and could never have passed (stored keys are rye_slugify_key of the input),
+and one `stats.total == 0` check that the new rows made wrong; all fixed.
+Tested: bash -n, build, check:routes pass. The script itself is still
+unexecuted, so more errors of this kind may remain until it runs under
+Docker.
+
+### Lead, 2026-09-19, integration
+Base revision 8fcf382. Merged worktree-agent-a81777e8089113486 (5b8e608,
+befe34c, b4e8b9b) into agent-roles with no conflicts. From the merged tree:
+`cd admin && npm run build` passes; `npm run check:routes` passes (31
+declared routes); `bash -n tests/conformance/21_api_security.sh` passes.
+NOT run: tests/conformance/21_api_security.sh and the combined suite.
+Docker refuses this user (not in the docker group, service inactive, sudo
+needs a password). The item stays open until they run.
+
 ## Close

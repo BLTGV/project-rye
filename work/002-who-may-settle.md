@@ -193,4 +193,20 @@ area_owner_is_agent. Criterion 11 now verified by execution. Criterion 8
 remains verified by reading. Still unexecuted: the area test commands and
 the full suite, pending Docker.
 
+### Lead, 2026-09-19, integration
+Base revision 69daeb7. Merged worktree-agent-ae27942de1b4935c1 (1c8c386)
+and worktree-agent-a7f18ff71cb202bfc (a5b42c9, d63b88e) into agent-roles
+with no conflicts. From the merged tree, on the PostgreSQL 16.2 stand-in
+with the Verifier's prelude: migration 0021 applies; tests/conformance/
+29_settlement_lookup.sql passes; the manager-expectation fixture loads; Bob
+as speaker returns step relationship with is_settler true, John returns
+the same settler with is_settler false. `bash -n` on scripts/rye and
+scripts/verify.sh passes; the intake skill check passes; all 19 plugin and
+skill manifests validate (ad hoc validator). NOT run: the area test command
+`./scripts/docker-test.sh test --reset --profiles crm,pm`,
+22_secure_mcp_simulation.sh, and the combined suite, so RLS interaction,
+migration ordering in a full install, and category discovery of
+`reports_to` and `owns` (criterion 8) are unverified by execution. Docker
+refuses this user. The item stays open until they run.
+
 ## Close
