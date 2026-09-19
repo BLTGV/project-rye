@@ -128,12 +128,29 @@ underscore, and both `ensure_knowledge_domain()` and the lookup apply it, so
 `sales-operations` and `sales_operations` are one key. The cost is that a
 `knowledge_domains` row inserted directly with a hyphenated key is unreachable:
 no argument slugifies back to it, so every lookup against it answers
-`domain_not_found`. The same applies to `create_agent_identity()`, where a
-grant `authority_ref` of `agent:my-agent` matches no stored `my_agent` and is
-therefore returned as an ordinary settler rather than excluded as an agent. The
-rejected alternative was to have the lookup fall back to a literal key match
-when the slug misses, which would rescue the hand-written row. It was declined
-because two keys for one area is worse than one unreachable area: it would let
-`sales-operations` and `sales_operations` hold different owners and different
-grants. The contract now states that areas are created with
-`ensure_knowledge_domain()` and that refs are written against the stored slug.
+`domain_not_found`. The rejected alternative was to have the lookup fall back
+to a literal key match when the slug misses, which would rescue the
+hand-written row. It was declined because two keys for one area is worse than
+one unreachable area: it would let `sales-operations` and `sales_operations`
+hold different owners and different grants. The contract now states that areas
+are created with `ensure_knowledge_domain()`.
+
+**The agent exclusion compared refs verbatim, which was a defect, and it was
+fixed inside work item 002.** Contract review found it: `create_agent_identity()`
+stores `rye_slugify_key(agent_key)`, so a grant `authority_ref` of
+`agent:my-agent` matched no stored `my_agent`, was not recognised as an agent,
+was not counted in `excluded_agents`, and came back as an ordinary settler.
+That contradicts the one rule the model rests on, so it was repaired rather
+than documented and deferred. The fix has two parts. Any ref beginning with
+`agent:`, case-insensitively and after trimming, is now excluded whether or not
+an `agent_identities` row backs it, so a typo or a deleted identity yields no
+settler instead of an accidental one. Any other ref is slugified before it is
+compared, so `my-agent`, `My Agent`, and `my_agent` are one agent. An inactive
+identity is still an agent, since the `active` flag is not consulted, and the
+same test covers node-derived settlers, so an area owner that is an agent
+returns `step` `none` with `area_owner_is_agent` and `setup_gap` true. The
+rejected alternative was to match only what `agent_identities` actually holds
+and treat an unbacked `agent:` ref as a person. It was declined because it
+makes a misspelling into authority, which is the failure this rule exists to
+prevent. The cost is that a person whose ref happens to start with `agent:`
+can never settle anything, which is a spelling the convention already reserves.

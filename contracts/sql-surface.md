@@ -228,13 +228,18 @@ and exactly one active knowledge domain exists, from that one (`single_active`);
 otherwise `mode` is `ambiguous` or `none` and `reason` is
 `domain_not_resolved`.
 
-**Agents are never settlers.** Before any step selects a winner, candidate
-settlers are dropped when the ref equals an `agent_identities.agent_key` or is
-`agent:<agent_key>` of one, or the node's `node_type` is `agent` or its
-`attrs->>'actor_kind'` is `agent`. A grant whose only holder is an agent is
-therefore not a match, and the lookup proceeds to the relationship step.
-`excluded_agents` counts what was dropped, so a caller can tell the difference
-between nobody and nobody eligible.
+**Agents are never settlers.** Before any step selects a winner, every
+candidate is tested and an agent is dropped. The test applies to grant settlers
+and to node-derived settlers alike: self, the owner of a thing, the manager,
+and the area owner. A candidate is an agent when its ref says so, when its ref
+names a stored agent identity, when the grant's `authority_kind` is `agent`, or
+when the node's `node_type` is `agent` or its `attrs->>'actor_kind'` is `agent`.
+A grant whose only holder is an agent is therefore not a match, and the lookup
+proceeds to the relationship step. `excluded_agents` counts what was dropped, so
+a caller can tell the difference between nobody and nobody eligible. When the
+area owner is the one dropped, the answer is `step` `none`, `reason`
+`area_owner_is_agent`, `setup_gap` true. Ref matching is spelled out under
+"Area keys and agent keys are slugs".
 
 ### Area keys and agent keys are slugs
 
@@ -251,11 +256,26 @@ slugifies to `sales-operations`, so that row can never be found and every call
 naming it answers `domain_not_found`. Create areas with
 `ensure_knowledge_domain()`, never by direct insert.
 
-The same rule governs agent keys. `create_agent_identity()` slugifies
-`agent_key`, so the stored key for `my-agent` is `my_agent`. A grant whose
-`authority_ref` is `agent:my-agent` therefore matches no agent identity. It is
-not recognised as an agent, it is not counted in `excluded_agents`, and it is
-returned as an ordinary settler. Write refs against the stored slug.
+The same rule governs agent keys, and the agent test is written to survive it.
+`create_agent_identity()` slugifies `agent_key`, so the stored key for
+`my-agent` is `my_agent`. Two promises follow.
+
+First, a ref that says it is an agent never settles. Any `authority_ref`
+beginning with `agent:`, compared case-insensitively after trimming, is
+excluded as an agent whether or not a matching `agent_identities` row exists.
+`agent:my-agent`, `Agent:my_agent`, and `agent:deleted-last-year` are all
+dropped. A typo or a removed identity produces no settler rather than an
+accidental one.
+
+Second, any other ref is an agent when `rye_slugify_key()` of the ref equals a
+stored `agent_key`. So `my-agent`, `My Agent`, and `my_agent` are one agent,
+and a ref in any spelling is excluded. An inactive agent identity is still an
+agent: the `active` flag is not consulted, and a retired agent does not become
+a settler by being retired.
+
+Every candidate dropped by either rule is counted in `excluded_agents`, and the
+lookup continues to the next step rather than stopping. Write refs against the
+stored slug anyway; the matching is forgiving, the rest of the schema is not.
 
 ### Versioning, freshness, failure
 
