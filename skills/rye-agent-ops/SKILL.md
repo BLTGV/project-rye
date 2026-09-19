@@ -123,7 +123,8 @@ instead of settling on their word. For a lone person that owner is themselves
 and it costs nothing. On a team it costs one question.
 
 If a person tells you the type they want is their own call to make, that is a
-declaration for the area owner to settle, not a thing you assume. See below.
+change to how Rye is set up here, and only a Rye admin settles it. Record what
+they said, never assume it. See "Rye's own setup is an admin's call" below.
 
 `speech_act_recognized` is false when you passed a value outside the
 recognized set. **Do not record anything as accepted while it is false.**
@@ -272,16 +273,49 @@ routed is yours to carry. Do not apologize for it and do not reach for a
 different type to make it settle — that is relabelling, and it is forbidden
 below.
 
+### Rye's own setup is an admin's call
+
+A few records are not knowledge about the world. They are how Rye is set up
+here, and Rye reads them to decide how it treats every other write:
+
+| What it is, in plain words | The record | What reads it |
+|---|---|---|
+| One word means another | `registry_entry`, key `type_alias:<kind>:<from>` | `canonical_type()` |
+| A kind of thing is each person's own call | `registry_entry`, key `self_settled_type:<type>` | `rye_settlers()` |
+| Anything else on the registry: default scope, governed types, basis priors, half lives, digest facets | `registry_entry` | `registry_value()` |
+| Whether a write lands accepted at all | `review_policy` | `record_assertion()` |
+
+Only a Rye admin settles these. Which types are gated is data, not code, so
+ask before you offer to record one:
+
+```sql
+SELECT settle_gate('registry_entry');
+```
+
+The answer is `{assertion_type, gated, allowed_roles, current_role,
+may_settle}`. It writes nothing and refuses nothing. `gated` `false` means the
+type is ordinary knowledge and the settlement lookup alone decides it.
+`may_settle` `false` means what you are about to record will land as a
+suggestion waiting for a Rye admin — tell the person that before you write it,
+not after. The normative shape is "Configuration writes need an admin" in
+`contracts/sql-surface.md`.
+
+This gate sits on top of the settlement lookup rather than replacing it. A
+statement can clear the lookup and still be an admin's to settle: an area owner
+who is not a Rye admin may settle claims all day and still cannot declare a
+self-settled type.
+
 ### Declaring a type a person's own call
 
-For agents working with an area owner or a Rye admin. The self set grows as
-data. A person who may settle it says in plain words that a kind of thing is
+The self set grows as data. Someone says in plain words that a kind of thing is
 each person's own call — "people decide their own availability" — and that
-becomes one registry entry.
+becomes one registry entry. Someone saying that two words mean the same thing —
+"a requirement is an expectation here" — becomes a `type_alias` entry the same
+way, and is gated the same way.
 
 Rye has no dedicated registry-writing helper. Write it with
-`record_assertion()` on the registry or scope node, the same shape
-`type_alias` entries use, and never by touching a base table:
+`record_assertion()` on the registry or scope node, the same shape `type_alias`
+entries use, and never by touching a base table:
 
 ```sql
 SELECT record_assertion(
@@ -303,15 +337,60 @@ SELECT record_assertion(
 
 The key carries the **canonical** type. An alias is registered as an alias,
 never as a second self-settled entry. Any value but `true` is not a member.
-`registry_value()` reads it back, scope first, then plugin, then core.
+`registry_value()` reads it back, scope first, then plugin, then core. The
+core members need no entry, so a fresh instance settles a plain commitment with
+nothing configured.
 
-This is a claim like any other, so ask who may settle it first. If the speaker
-may, record it accepted as above. If not, record it as a suggestion and check
-with whoever may. The core members need no entry, so a fresh instance settles
-a plain commitment with nothing configured.
+Write exactly that, with `p_status := 'accepted'`, in both cases below. Asking
+for accepted is what records that the speaker meant it to take effect. Do not
+lower the status yourself, and do not decide from the person's job title — read
+`may_settle` from `settle_gate('registry_entry')`.
 
-Echo it in one line and in their words: "Got it — people set their own
-availability." Never read the key back to them.
+**The speaker is a Rye admin** — `may_settle` `true`. It lands accepted. Echo
+one line in their words and stop:
+
+> "Got it — people set their own availability."
+
+Never read the key back to them.
+
+**The speaker is anyone else** — `may_settle` `false`. The same call lands as a
+suggestion carrying `attrs.settle_gate`, a Rye admin sees it in the review
+queue with everything else, and nothing said is lost. Then say so plainly:
+
+> "I've noted that. A Rye admin needs to confirm it before it takes effect —
+> I'll pass it on."
+
+Never tell them they lack permission, never name a status, a key, a type, or
+the registry. They said something ordinary about how the team works; the
+routing is yours to carry.
+
+**One route, and only once.** `record_assertion()` is the only way you ever
+record Rye's setup, and a suggestion is the end of the attempt, not the start
+of a workaround. Every other route raises, and trying one is a worse answer
+than the suggestion you already have:
+
+- No `INSERT INTO assertions` and no `UPDATE` of one, whatever you set
+  `app.write_path` to.
+- No `accept_assertion()`, `supersede_assertion()`, `record_distillation()`,
+  or `schedule_assertion_change()` on a gated type. These refuse instead of
+  demoting, on purpose: each marks or displaces the standing entry first, so a
+  quiet demotion would leave the key with no accepted value and a proposal
+  would erase an alias.
+- No second identity, no more permissive agent asked to write it for you, and
+  no `rye.authoritative.promote` — that grant does not open this gate.
+- Do not set `app.current_role` to `admin`. The role you present is the
+  person's, not a setting you choose.
+
+**Nothing changes while it waits.** A suggestion is read by nothing:
+`registry_value()`, `canonical_type()`, and `rye_settlers()` answer exactly as
+they did before it. So keep routing claims of that type the way you were. If
+availability settled to the owner of the area this morning, it still does, and
+the next statement about it is a suggestion you check with them:
+
+> "Still Priya's call for now. I've kept what you said."
+
+Do not treat a waiting suggestion as a declaration in force, and never tell the
+person it is in effect.
 
 ### Nobody settles it
 
@@ -347,6 +426,10 @@ canonical in anything durable and never appear in what you say.
   let you know."
 - Nobody recorded: "Nobody's recorded as deciding that yet. I've kept what you
   said and I'll find out who settles it."
+- How Rye is set up here — one word meaning another, or a kind of thing being
+  each person's own call: "I've noted that. A Rye admin needs to confirm it
+  before it takes effect — I'll pass it on." Then, until it is confirmed:
+  "Still Priya's call for now. I've kept what you said."
 - Something already on record, and you cannot tell who put it there: "There's
   already something on record for that. I've kept your version and I'll
   confirm with Priya before I change it."
@@ -360,6 +443,9 @@ canonical in anything durable and never appear in what you say.
 - Never relabel a statement's basis or speech act to get it through.
 - Never switch to an identity with wider grants, and never ask a more
   permissive agent to write it for you.
+- Never set your own role. The role you present is the person's, not a setting
+  you choose, so never set `app.current_role` to `admin` to get a write
+  through.
 - Never treat your own inference as a settled claim. You carry the authority
   of the person you act for and none of your own; no lookup ever returns an
   agent as a settler.

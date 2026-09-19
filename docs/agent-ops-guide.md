@@ -118,9 +118,10 @@ The self set grows as data. A registry entry keyed
 adds a member, read through `registry_value()`, scope first, then plugin, then
 core. Rye has no dedicated registry-writing helper: write it with
 `record_assertion()` as a `registry_entry` on the registry or scope node, the
-same shape `type_alias` entries use, never by touching a base table. It is a
-claim like any other, so the settlement lookup decides whether it is recorded
-accepted or as a suggestion. The core members need no entry.
+same shape `type_alias` entries use, never by touching a base table. It is not
+a claim like any other: `registry_entry` is Rye's own configuration and only a
+Rye admin settles it. See "Rye's own setup needs an admin" below. The core
+members need no entry.
 
 An agent choosing a claim type reuses one `rye_categories()` lists. An
 invented type, or a known one spelled differently, is in neither set, so a
@@ -175,6 +176,66 @@ Four outcomes and nothing else:
    mistake — you named no area or the wrong one. Correct the key and ask
    again. Say nothing to the person about either.
 
+### Rye's own setup needs an admin
+
+Some assertion types are not knowledge about the world. They are how Rye is set
+up here, and Rye reads them to decide how it treats every other write.
+`registry_entry` carries the type aliases that `canonical_type()` follows, the
+`self_settled_type:*` entries that `rye_settlers()` reads, and the rest of what
+`registry_value()` resolves — the default scope, governed types, basis priors,
+half lives, digest facets. `review_policy` decides whether a write lands
+accepted at all. Only a Rye admin settles either one. The normative shape is
+"Configuration writes need an admin" in `contracts/sql-surface.md`.
+
+Which types are gated is data, not code, so ask before offering to record one:
+
+```sql
+SELECT settle_gate('registry_entry');
+```
+
+It answers `{assertion_type, gated, allowed_roles, current_role, may_settle}`,
+is `STABLE` and `SECURITY INVOKER`, and writes nothing. `gated` `false` means
+the type is ordinary knowledge and the settlement lookup alone decides it.
+`may_settle` `false` means an accepted write of that type will be demoted. The
+gate sits on top of the settlement lookup rather than replacing it: an area
+owner who is not a Rye admin settles claims and still cannot declare a
+self-settled type.
+
+Record it the same way either way, with `record_assertion(...,
+p_status := 'accepted')` and the speaker as authorizer. Asking for accepted is
+what records that the speaker meant it to take effect; the caller never lowers
+the status itself.
+
+- `may_settle` `true`: it lands accepted, and the person hears one line in
+  their own words.
+- `may_settle` `false`: `record_assertion()` demotes it to a candidate carrying
+  `attrs.settle_gate` (`pending`, `requested_status`, `allowed_roles`), which a
+  Rye admin sees in `review_queue` with every other candidate. Nothing said is
+  lost and nothing is refused. The person hears that it is noted and that a Rye
+  admin has to confirm it — never that they lack permission, and never in Rye's
+  own vocabulary.
+
+A demotion ends the attempt. Every other route to an accepted row of a gated
+type raises: a direct `INSERT`, any `UPDATE` to `accepted` including one by a
+caller that sets `app.write_path` itself, `accept_assertion()`,
+`supersede_assertion()`, `record_distillation()`, and
+`schedule_assertion_change()`. The last few refuse rather than demote on
+purpose — each marks or displaces the incumbent first, so a quiet demotion
+would leave the key with no accepted value and let a proposal erase an alias.
+`rye.authoritative.promote` does not open this gate, a second identity is not
+an answer, and neither is asking a more permissive agent. An agent does not set
+`app.current_role` to `admin`: the role it presents is the person's, not a
+setting it chooses.
+
+Until an admin accepts it, the suggestion is read by nothing. `registry_value()`,
+`canonical_type()`, and `rye_settlers()` return exactly what they returned
+before, so claims of the affected type keep routing as they did, and a waiting
+suggestion is never spoken of as if it were in force.
+
+Migrations and scripts that seed configuration set `app.current_role` to
+`admin` first, as `sync_plugin_metadata.sh` does. An unset role is not an
+admin.
+
 ### What the lookup does not answer
 
 The lookup reads no assertion. It answers who may settle a claim; it does not
@@ -226,8 +287,8 @@ clock that turns silence into agreement.
 
 An agent carries the authority of the person it acts for and none of its own.
 Never relabel a basis or a speech act to get a write through, never switch to
-an identity with wider grants, and never ask a more permissive agent to write
-it. `rye_settlers()` drops agent identities before choosing a step, so no
+an identity with wider grants, never set `app.current_role` to a wider role,
+and never ask a more permissive agent to write it. `rye_settlers()` drops agent identities before choosing a step, so no
 lookup ever returns an agent.
 
 `reports_to` and `owns` are the relationships the lookup reads, declared by the
