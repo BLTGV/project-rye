@@ -498,4 +498,34 @@ DEFINER alias resolver and refusing classified aliases, since both fix
 visibility only. This changes behavior for claim types nobody has declared:
 they go to the area owner instead of the person. Listed for Casey below.
 
+### Architect, 2026-09-19, root fix (commit 9b587b8)
+Step 2 rewritten: the subject is returned as a settler only when the
+canonical claim type is positively in the self set (literals commitment,
+self_commitment, self_report, plus registry entries
+self_settled_type:<canonical type> with value true, read via
+registry_value()). Self speech acts fall through for any other type;
+statement_about_other always returns the subject's manager and the subject
+only for self-set types. Blindness is always restrictive. Rejected: a
+SECURITY DEFINER alias resolver; refusing classified aliases. Expected
+answers given for seven calls. Learned: plugin manifests cannot contribute
+self types without a manifest schema change (contributes is
+additionalProperties false); deferred as its own item.
+
+### Builder agent-kit, 2026-09-19, skill text for the self-set rule (commit 593b635)
+Result: done. SKILL.md, guide, catalog: governing sentence in all three;
+unknown and blindness both restrictive; an undeclared claim type about the
+speaker goes to the area owner and the agent says it will check, with no
+mention of types or registries; prefer a declared type from category
+discovery; a declaration procedure; canonical standing-claim guard kept.
+Scenario row L5 added (mislabelled `requirement` with self_commitment goes
+to the area owner), marked per contract; since Bob owns the fixture's area
+the name does not distinguish it, `step` and `via` do, and the rubric says
+to read those. Tested: intake check passes; 19 of 19 manifests valid.
+Learned: Rye has no registry write helper; registry entries are written
+with record_assertion() as accepted `registry_entry` assertions, the path
+0017 uses for its seeds. Lead: no role gate on registry_entry writes is
+visible in the migrations; the Verifier will test whether an agent role
+can write an accepted alias or self_settled_type entry, since an alias
+expectation -> commitment would hand a person their own expectation.
+
 ## Close
