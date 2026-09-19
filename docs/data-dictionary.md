@@ -480,11 +480,25 @@ listed. Each settler carries `kind`, `node_id`, `ref`, `label`, `via`,
 `relationship`, `bound`, and the evidence of where it came from (`grant_id` and
 the grant's windows, or `edge_id` and `edge_type`, or `domain_id`).
 
-An agent identity is never a settler: candidates whose ref is an
-`agent_identities.agent_key` or `agent:<agent_key>`, or whose node is
-`node_type` `agent` or `attrs->>'actor_kind'` `agent`, are dropped before a step
-is chosen and counted in `excluded_agents`. A grant whose only holder is an agent
-is therefore not a match and the lookup continues.
+An agent identity is never a settler. Candidates are dropped before a step is
+chosen and counted in `excluded_agents`, by two rules in this order:
+
+1. **Fail closed on the prefix.** Any ref that begins with `agent:` — case
+   insensitive, after trimming — is an agent whether or not an
+   `agent_identities` row backs it. A ref that says it is an agent never
+   settles, so a typo or a removed identity cannot become authority.
+2. **Match on the slug, not the spelling.** `create_agent_identity()` stores
+   `rye_slugify_key(agent_key)`, so the stored key for `my-agent` is
+   `my_agent`. Refs are slugified before comparison, which makes `my-agent`,
+   `My Agent`, and `my_agent` one key. An inactive agent identity is still an
+   agent; the `active` flag is not consulted.
+
+A node is an agent wherever it stands — grant holder, `reports_to` or `owns`
+endpoint, or area owner — when its `node_type` is `agent` or its
+`attrs->>'actor_kind'` is `agent`. A grant whose only holder is an agent is
+therefore not a match and the lookup continues to the next step; an area whose
+`owner_node_id` is an agent answers `step` `none` with `reason`
+`area_owner_is_agent` and `setup_gap` true.
 
 Nothing raises for a missing answer. An area with no owner returns `step` `none`,
 `reason` `area_has_no_owner`, and `setup_gap` true — a setup gap, not an error.
@@ -511,7 +525,9 @@ into a visible node id or NULL: a uuid matches by id, an
 matches `external_id` alone. `domain_authorities.authority_ref` is free text, so
 most refs resolve to no node; that is not an error, the settler comes back with
 `bound` false. `rye_settler_is_agent()` is the single place the "agents settle
-nothing" rule is implemented.
+nothing" rule is implemented: it fails closed on the `agent:` prefix and
+otherwise compares `rye_slugify_key()` of the ref against the stored
+`agent_key`, so no spelling of an agent key gets past it.
 
 #### `supersede_assertion()`
 
