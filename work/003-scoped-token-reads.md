@@ -189,4 +189,20 @@ product filter or test expectation. Sent to the builder with sole use of
 the Docker port, to find the cause by execution and run the script to the
 end. This is a newly observed problem, not a repeat of an earlier finding.
 
+### Builder admin, 2026-09-19, first executed run (commit ee6aaeb)
+Result: done. Only tests/conformance/21_api_security.sh changed; no
+production code change. Cause of the failure: wrong test expectation,
+product correct. promote_candidate_node_to_assertion (0017) ends by
+setting archived_at on the candidate node, and the queue lists only
+archived_at IS NULL, so a promoted suggestion leaves every caller's queue.
+Shown by execution: the promoted candidate had archived = t. stats.total
+counts area-visible rows and stats.filtered counts those surviving status,
+kind, and q, so total 1 / filtered 0 was the filter working. Lead confirmed
+the archive step at 0017 line 1103 and that ee6aaeb touches only the
+script. Fix: the two assertions moved ahead of the promotion; later checks
+use never-promoted markers. Tested: `./scripts/docker-test.sh test --reset
+--profiles crm,pm` passes end to end including 21, 22, and 23 from the
+host; build and check:routes pass; database torn down. Builder reports
+every acceptance criterion now verified by execution.
+
 ## Close
