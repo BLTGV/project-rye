@@ -153,6 +153,45 @@ BEGIN
     RAISE EXCEPTION 'mark_assertion_superseded function missing';
   END IF;
 
+  -- Configuration writes need an admin: the gate is data, one read function,
+  -- and one trigger that no SECURITY DEFINER helper escapes.
+  IF to_regprocedure('rye.settle_gate(text)') IS NULL THEN
+    RAISE EXCEPTION 'settle_gate function missing';
+  END IF;
+  IF to_regprocedure('rye.assertion_settle_roles(text)') IS NULL THEN
+    RAISE EXCEPTION 'assertion_settle_roles function missing';
+  END IF;
+  IF to_regprocedure('rye.may_settle_assertion_type(text)') IS NULL THEN
+    RAISE EXCEPTION 'may_settle_assertion_type function missing';
+  END IF;
+
+  IF NOT EXISTS (
+      SELECT 1
+      FROM pg_trigger t
+      JOIN pg_class c ON c.oid = t.tgrelid
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = v_schema
+        AND c.relname = 'assertions'
+        AND t.tgname = 'trg_assertion_settle_gate'
+        AND NOT t.tgisinternal
+  ) THEN
+    RAISE EXCEPTION 'trg_assertion_settle_gate is missing from assertions';
+  END IF;
+
+  IF EXISTS (
+      SELECT required.assertion_type
+      FROM (VALUES ('registry_entry'), ('review_policy')) required(assertion_type)
+      WHERE NOT EXISTS (
+          SELECT 1
+          FROM rye.assertion_type_access ata
+          WHERE ata.assertion_type = required.assertion_type
+            AND ata.operation = 'settle'
+            AND 'admin' = ANY(ata.allowed_roles)
+      )
+  ) THEN
+    RAISE EXCEPTION 'configuration assertion types are not settle-gated to admin';
+  END IF;
+
   IF NOT EXISTS (
       SELECT 1
       FROM pg_class c
