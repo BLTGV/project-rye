@@ -2,7 +2,7 @@
 
 - status: open
 - opened: 2026-09-19
-- areas: schema
+- areas: schema, agent-kit
 - contracts: contracts/sql-surface.md
 
 ## Goal
@@ -58,7 +58,9 @@ Facts the Lead checked that shape the design:
 - [ ] `agent_get_context_pack`, `has_agent_capability`, `authorize_agent_action`, `authenticate_agent_token`, `record_agent_action`, `agent_submit_observation`, and `agent_create_candidate` return the same results as before for a valid agent, when the function owner is not a superuser.
 - [ ] `rye_settlers()` returns the same answers as before for every case in its work/002 conformance test, for each role the contract lets call it, and never returns an agent identity as a settler under any role.
 - [ ] The admin Worker's domain, authority, subscription, and action-log queries return the same rows as before under `app.current_role = 'admin'`.
-- [ ] The `./scripts/rye` agent and action-log commands work as before for an admin.
+- [ ] The `./scripts/rye` agents commands (`list`, `create`, `grant`, `issue-token`, `revoke-token`, `audit` in both output forms) work as before. Today all but `list` run with no role set and would read nothing or be refused once RLS is forced; each sets the admin role in the same statement. `tests/conformance/23_cli_agent_security.sh` passes.
+- [ ] (agent-kit) `tests/conformance/22_secure_mcp_simulation.sh` and the three `eval/agent_domain_replay/*/graph_load.sql` loads, which call the write helpers with no role set today, set the admin role for their setup and pass as before. Nothing else about them changes.
+- [ ] No policy reads its own table, directly or through a function, and the order in which one table's policy may read another is the one the contract states. Every rule holds with no `infinite recursion` or stack depth error for each of the four session shapes.
 - [ ] Tests under `tests/security/` cover each criterion above. The full schema test command passes.
 
 ## Constraints
@@ -84,6 +86,7 @@ Facts the Lead checked that shape the design:
 - `agent_action_log` is append-only for everyone, admin included, matching how events are treated. Overturn: Architect.
 - `api_idempotency_keys` is read and written only through definer functions and by admin. Overturn: Architect.
 - How an agent session is tied to an agent identity for row filtering (for example `app.current_role = 'agent:<key>'` or `app.current_user_id`) follows whatever the existing agent policies in 0004 and 0006 use. Overturn: Architect.
+- The agent-kit change is limited to setting the admin role in setup code it owns; found by the Architect, 2026-09-19. Overturn: Lead.
 - No admin area work is needed because the Worker runs as admin. If the builder finds otherwise it reports back and the Lead opens the admin area. Overturn: Lead.
 
 ## Verified
