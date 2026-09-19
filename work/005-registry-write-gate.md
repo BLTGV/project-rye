@@ -1,6 +1,6 @@
 # 005 registry-write-gate
 
-- status: open
+- status: done
 - opened: 2026-09-19
 - areas: schema, agent-kit
 - contracts: contracts/sql-surface.md
@@ -23,14 +23,14 @@ authorization strategy: ordinary conversation content cannot authorize
 policy changes.
 
 ## Acceptance criteria
-- [ ] Under an agent role, a viewer, and a team member, an attempt to record an accepted registry entry (a type alias, a self-settled type, or any other registry key) never lands accepted, under review policy open, candidates_only, strict, and with no policy recorded at all.
-- [ ] Nothing a person or agent says is lost: such an attempt lands as a suggestion a Rye admin can accept or decline, with the usual evidence, and the caller is told plainly that it is waiting for an admin. It is not an error that discards the statement.
-- [ ] A Rye admin can still record and accept registry entries, and the existing seeds and onboarding flows that write registry entries still work.
-- [ ] No lifecycle helper lets a non-admin turn a registry suggestion into an accepted entry: accept, supersede, schedule, and any other path that ends in an accepted registry entry.
-- [ ] After a non-admin attempt, the answer to "who may settle an expectation on John" is unchanged for every role.
-- [ ] The same gate covers the other configuration Rye reads to make decisions, or the item says which it covers and lists the rest: scope policies, review policy, governed types, plugin enablement. The Architect names the set.
-- [ ] A conformance or security test covers each case above under a non-superuser role and refuses to pass vacuously.
-- [ ] The agent-operations skill tells an agent that declaring a self type or an alias is an admin's call, and what to say to the person in plain words.
+- [x] Under an agent role, a viewer, and a team member, an attempt to record an accepted registry entry (a type alias, a self-settled type, or any other registry key) never lands accepted, under review policy open, candidates_only, strict, and with no policy recorded at all.
+- [x] Nothing a person or agent says is lost: such an attempt lands as a suggestion a Rye admin can accept or decline, with the usual evidence, and the caller is told plainly that it is waiting for an admin. It is not an error that discards the statement.
+- [x] A Rye admin can still record and accept registry entries, and the existing seeds and onboarding flows that write registry entries still work.
+- [x] No lifecycle helper lets a non-admin turn a registry suggestion into an accepted entry: accept, supersede, schedule, and any other path that ends in an accepted registry entry.
+- [x] After a non-admin attempt, the answer to "who may settle an expectation on John" is unchanged for every role.
+- [x] The same gate covers the other configuration Rye reads to make decisions, or the item says which it covers and lists the rest: scope policies, review policy, governed types, plugin enablement. The Architect names the set.
+- [x] A conformance or security test covers each case above under a non-superuser role and refuses to pass vacuously.
+- [x] The agent-operations skill tells an agent that declaring a self type or an alias is an admin's call, and what to say to the person in plain words.
 
 ## Constraints
 - Additive: a new numbered migration. Use 0023: a separate session working on work/004 has taken 0022. Applied migrations are not edited; 0021 is now merged and treated as applied.
@@ -48,7 +48,11 @@ policy changes.
 - work/004 (RLS on the governance tables, separate session) is independent and merges separately; whichever lands second reconciles migration order. Overturn: Lead.
 
 ## Verified
-- filled in at close
+- Combined test command `./scripts/test-all.sh` passed on the final merged tree 328f404, run by Lead 2026-09-19: Docker flow including 30_configuration_gate.sql under the non-superuser conformance role and the host-run 21, 22, 23; admin build plus check:routes; site build. Log: scratchpad suite-328f404.log.
+- All eight acceptance criteria verified by execution by the Verifier, two passes on a live Docker install under SET ROLE to the non-superuser role: 36 record_assertion attempts (3 roles by 4 policies by 3 keys) all landed as candidates with attrs.settle_gate and appeared in review_queue; 210 raw UPDATE attempts (3 roles by 5 write paths by 14 columns) all raised; every lifecycle helper refused or demoted; rye.authoritative.promote did not open it; nine spellings of the admin role failed closed; gate rows are readable by every role and writable only by admin; admin can still record, accept, supersede, narrow, and label outcomes; the lookup's answers were unchanged after every attempt, including an erasure attempt; settle_gate() returns exactly what the skill says and the skill's declaration block runs verbatim.
+- The defect reproduces on a tree without 0023 and test 30 fails there; test 30 refuses to run as a superuser.
+- Found and fixed inside the item: a non-admin could end or edit an accepted configuration row by spoofing app.write_path, which for review_policy dropped an area from strict to open and let the next ordinary agent write land accepted. Ruled in scope by the Lead; closed in 0c6f77e with obligation 5b.
+- Not covered, by design: promotion and erasure for ordinary (ungated) assertion types remain possible through spoofed write-path settings; the Verifier confirmed the hole is still open there so nobody mistakes this item for the general fix. Deferred configuration: scope_status, plugin enablement, other scope policy types, domain_authorities (reasons in decision 0007).
 
 ## Reports
 Paste each role's report here as it arrives.
@@ -176,4 +180,25 @@ and gains BEGIN and COMMIT. No SET LOCAL in any SKILL.md; the two script
 hits emit BEGIN on the line before. Intake check passes. Found while
 executing the small product team cookbook; rides on this branch.
 
+### Verifier, 2026-09-19, second pass on 0c6f77e and c6dbad6: PASS, all eight criteria
+Erasure closed: the earlier reproduction is refused for registry_entry and
+review_policy; scope_review_policy() stays strict; the ordinary agent write
+stays a candidate. Findings: (1) LOW, Architect: an admin-registered alias
+pointing FROM a gated type (type_alias:assertion_type:registry_entry =
+"x") makes new writes under that name canonicalise away from the gate and
+land accepted; not an escalation, since registry_value() also matches the
+literal, so the escaped row is invisible as configuration and standing rows
+are untouched; reachable only by an admin. (2) INFO: DELETE is a silent
+no-op for every role, by RLS design. (3) INFO: the general hole for ungated
+types is still open, as intended. Cookbook re-executed: 47 statements, 0
+failed; the third closing query returns no rows because the walk records
+no promise (LOW, cookbook author). Quickstart and installation opening
+blocks paste clean and leave the role set.
+
+### Lead, 2026-09-19, integration
+Base revision ec39afd. Merged worktree-agent-a857af82028ec3665 (9502c63,
+0c6f77e) and worktree-agent-a20ce071bc8dc1085 (c6dbad6, 85df91b), no
+conflicts. Final tree 328f404. Combined suite passed.
+
 ## Close
+done 2026-09-19. Merged to agent-roles at 328f404; combined suite passed. Follow-ups: the contract should say gated types must not be aliased, or the guard should refuse such an alias (Architect, low); a `settle-gate` CLI subcommand to match the other pre-write lookups (schema, low); a glossary entry for "how Rye is set up here" (Product); promotion and erasure for ordinary assertion types (separate item, chip pending); widen the gated set to the deferred configuration types when their demotion behavior is settled.
