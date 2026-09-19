@@ -2,7 +2,7 @@
 
 - status: open
 - opened: 2026-09-19
-- areas: schema, agent-kit
+- areas: schema, agent-kit, admin
 - contracts: contracts/sql-surface.md
 
 ## Goal
@@ -87,7 +87,7 @@ Facts the Lead checked that shape the design:
 - `api_idempotency_keys` is read and written only through definer functions and by admin. Overturn: Architect.
 - How an agent session is tied to an agent identity for row filtering (for example `app.current_role = 'agent:<key>'` or `app.current_user_id`) follows whatever the existing agent policies in 0004 and 0006 use. Overturn: Architect.
 - The agent-kit change is limited to setting the admin role in setup code it owns; found by the Architect, 2026-09-19. Overturn: Lead.
-- No admin area work is needed because the Worker runs as admin. If the builder finds otherwise it reports back and the Lead opens the admin area. Overturn: Lead.
+- ~~No admin area work is needed because the Worker runs as admin.~~ Overturned by the Lead 2026-09-19: the Verifier showed `withAdminCte()` sets the role in a CTE the planner may never run before the RLS filter, so the Worker's area and action-log queries return nothing under a non-superuser owner. The admin area is opened for that fix only. The same shape at about twenty older call sites on core tables predates this item; if the central fix does not cover them they become a separate item.
 
 ## Verified
 - filled in at close
