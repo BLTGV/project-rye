@@ -68,3 +68,56 @@ is for the human reading the response. The rejected alternative was a free
 text reason assembled per route, which reads better once and is impossible to
 assert on twice. No new capability name is introduced anywhere in this item,
 so no migration is required.
+
+## Amendments after implementation
+
+Date: 2026-09-19. The contract was amended to match the verified behaviour of
+the Worker, which the Lead accepted as written.
+
+**With auth required and no valid token, every `/api/*` path is `401`, matched
+or not.** The contract's table said an unmatched path is `404`. That holds only
+for a caller the API has already authenticated. The middleware authenticates
+before it consults the route table, because until it knows who is asking it
+cannot tell a route the Worker serves but the table does not declare, which is
+`403`, from a path nothing serves, which is `404`. The rejected alternative was
+to answer `404` for unmatched paths before authenticating, which is what the
+table originally implied and is marginally friendlier to debug against. It was
+declined because it hands an anonymous caller a map of the deployment: probe
+paths, and `401` versus `404` tells you which ones exist. The existence of a
+route is instance information, and an anonymous caller gets none.
+
+**HEAD is authorized as GET, and the rule is written as a rule rather than as
+rows.** The framework dispatches `HEAD` to the `GET` handler, so a lookup keyed
+on the literal method would find no row for `HEAD`, and, if the served-path
+check also missed it, would reach the handler with no capability decision at
+all. The contract now states that any method the framework dispatches to a
+`GET` handler is authorized as that `GET` row, and that no method on any path
+reaches a handler without a policy decision. The rejected alternative was a
+`HEAD` row beside every `GET` row in the table. It was declined because it
+doubles the table, and because it fixes `HEAD` and nothing else: the next
+method the framework aliases would arrive undeclared and the same hole would
+open again. The invariant is the thing worth promising, not the enumeration.
+
+**Junk area keys are keyless, and keyless is the restrictive branch.** Review
+queue row filtering counts only area keys that survive `rye_slugify_key()`.
+`has_agent_capability` silently drops the rest, so a candidate carrying `[""]`
+or `["--"]` would otherwise test as having asked about no area and be returned
+to every holder of the capability. Treating it as having no area keys at all
+sends it down the branch that requires an instance-wide grant. The rejected
+alternative was to refuse the request when a candidate carries an unsluggable
+key. It was declined because the bad data is on a row the caller did not write
+and cannot fix, and a listing that fails outright because one stored row is
+malformed is worse than a listing that withholds it. Junk never widens access.
+
+**"Holds an instance-wide grant" is evaluated by the API, as a known
+exception.** Every other check goes through the schema's authorization helpers.
+This one cannot: `has_agent_capability` with no area keys answers "holds this
+capability somewhere", which is wider than "holds a grant that names no area",
+and no other helper expresses the narrower question. The API answers it from
+the grant rows `authenticate_agent_token` already returned for the token, so it
+is the same data and the same model read one layer out, not a second
+authorization system. The rejected alternative was a new schema helper, which
+is the right long-term answer and is what this exception is to be replaced by.
+It was declined here only because it is a migration, which work item 003 puts
+out of scope. The exception is named in `contracts/admin-api.md` so it cannot
+quietly become the norm.

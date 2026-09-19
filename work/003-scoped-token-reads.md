@@ -168,4 +168,14 @@ NOT run: tests/conformance/21_api_security.sh and the combined suite.
 Docker refuses this user (not in the docker group, service inactive, sudo
 needs a password). The item stays open until they run.
 
+### Architect, 2026-09-19, contract amendments
+Result: done. Changed: contracts/admin-api.md (new normative "Every method
+is decided, and HEAD is decided as GET"; 401/403/404 table now says no or
+invalid token is 401 on any /api path and 404 only for an authenticated
+caller; row filtering states the rye_slugify_key() rule; "holds an
+instance-wide grant" recorded as a named exception to schema-helper
+checks), docs/decisions/0006 ("Amendments after implementation"),
+docs/areas.md (admin test is now `cd admin && npm run build && npm run
+check:routes`). Lead reran scripts/gen-agents after the areas edit.
+
 ## Close

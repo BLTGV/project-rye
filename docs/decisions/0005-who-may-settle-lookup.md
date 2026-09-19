@@ -88,3 +88,52 @@ callers to wrap it in a catch, and because the same empty answer arrives when
 RLS hides the settler, which is not an error either. The cost is that a caller
 has to read `reason` rather than trusting an empty list, and the contract says
 so in as many words.
+
+## Amendments after implementation
+
+Date: 2026-09-19. The contract was amended to match the verified behaviour of
+`schema/migrations/0021_settlement_lookup.sql`, which the Lead accepted as
+written.
+
+**`reason` is six values, not three, and only two of them are setup gaps.**
+The contract named `domain_not_found`, `domain_not_resolved`, and
+`area_has_no_owner`; the implementation also returns `area_owner_not_visible`,
+`area_owner_is_agent`, and the fallback `no_settler_found`. They are kept
+because each one tells a caller something different about who to go and fix:
+the two domain reasons are the caller's own wrong or ambiguous key,
+`area_has_no_owner` and `area_owner_is_agent` are an instance that was never
+set up and carry `setup_gap` true, and `area_owner_not_visible` may be nothing
+wrong at all beyond this caller's RLS. The rejected alternative was to collapse
+the owner reasons into `area_has_no_owner`, which keeps the published set
+small. It was declined because the collapsed answer sends a Rye admin to set an
+owner that is already set, and because `setup_gap` would then be true for a
+case that is not a gap. `reason` is typed `text` and documented as additive, so
+a seventh value is not a break and callers must not switch exhaustively on it.
+
+**An unknown explicit area key stops the lookup before the relationship step.**
+Supplying `p_domain_key` that names no active area short-circuits to `step`
+`none` with `domain_not_found`, so even the zero-setup self default, which
+needs no area at all, is suppressed. The rejected alternative was to skip only
+the grant step and let the relationship defaults answer, which is more helpful
+and is what a caller who fat-fingered a key probably wanted. It was declined
+because it fails open in the one situation where the caller has already
+demonstrated a mistake: the statement would be recorded as accepted under a
+self default, on behalf of an area that does not exist. Failing closed turns it
+into a suggestion instead, which is recoverable. A caller who wants the
+relationship defaults passes no area key.
+
+**Keys are slugs, and that is a real trap worth writing down.**
+`rye_slugify_key()` folds every run of characters outside `a-z0-9` to an
+underscore, and both `ensure_knowledge_domain()` and the lookup apply it, so
+`sales-operations` and `sales_operations` are one key. The cost is that a
+`knowledge_domains` row inserted directly with a hyphenated key is unreachable:
+no argument slugifies back to it, so every lookup against it answers
+`domain_not_found`. The same applies to `create_agent_identity()`, where a
+grant `authority_ref` of `agent:my-agent` matches no stored `my_agent` and is
+therefore returned as an ordinary settler rather than excluded as an agent. The
+rejected alternative was to have the lookup fall back to a literal key match
+when the slug misses, which would rescue the hand-written row. It was declined
+because two keys for one area is worse than one unreachable area: it would let
+`sales-operations` and `sales_operations` hold different owners and different
+grants. The contract now states that areas are created with
+`ensure_knowledge_domain()` and that refs are written against the stored slug.

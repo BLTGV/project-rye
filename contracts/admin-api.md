@@ -61,6 +61,22 @@ Two exemptions, and only two:
 
 Any later exemption needs a decision record and an edit here first.
 
+### Every method is decided, and HEAD is decided as GET
+
+No method on any path reaches a handler without a policy decision. There is no
+method the middleware passes through unjudged.
+
+Any method the framework dispatches to a `GET` handler is authorized as `GET`.
+That is `HEAD` today: a `HEAD` request is judged by the `GET` row for the same
+path, and it is refused, deferred, or allowed exactly as the `GET` would be.
+The route table lists no `HEAD` rows and never will. If the framework ever
+dispatches another method to a `GET` handler, that method is authorized as
+`GET` too, by this rule and without an edit here.
+
+A method with no row of its own and no handler of its own is undeclared, and
+undeclared is refused. A route table row constrains its own method only:
+declaring `GET /api/nodes` opens nothing for `POST /api/nodes`.
+
 ### Route table
 
 `check` says what the capability is tested against:
@@ -140,6 +156,17 @@ all. A grant that names no area is instance-wide and holds every area. This
 is the same predicate the schema's `has_agent_capability` applies, called
 once per area.
 
+"Holds an instance-wide grant" is the one authorization question the API
+answers itself. Everywhere else the schema decides. Here it cannot:
+`has_agent_capability` with no area keys answers "holds this capability
+somewhere", which is a different and wider question, and no schema helper
+expresses "holds a grant that names no area". The API answers it from the
+grant rows `authenticate_agent_token` returned for this token, so it is the
+same data and the same authorization model, read one layer out. This is a
+known and bounded exception to "checks go through the schema's authorization
+helpers", recorded in `docs/decisions/0006-agent-tokens-deny-by-default.md`,
+and it is removed when a schema helper expresses the narrower question.
+
 **`GET /api/domains`.** The listing returns only areas the token holds for
 `rye.context.read`. Areas it does not hold are absent from the array
 entirely, not present with emptied fields. In particular the `authorities`
@@ -154,6 +181,13 @@ holds for `rye.review.read`. A candidate that carries no area keys is
 returned only to a token whose `rye.review.read` grant names no area. The
 total or count a listing reports counts the rows it returned, not the rows it
 filtered out.
+
+Only keys that survive `rye_slugify_key()` count as area keys here. A blank
+string, or a value made entirely of punctuation, slugifies to nothing and is
+not an area key. A candidate whose keys are all blank or junk therefore has no
+area keys at all, and takes the restrictive branch: it is returned only to a
+token holding an instance-wide `rye.review.read` grant. Junk never widens
+access.
 
 Filtering removes rows. It never returns a placeholder, a redacted stub, or a
 count of what was withheld. A caller cannot tell an area it does not hold
@@ -175,7 +209,17 @@ the answer is no.
 | Valid token, capability not held | `403` | `forbidden` |
 | Valid token, capability held for another area or scope | `403` | `forbidden` |
 | Valid token, route is `deny` or undeclared | `403` | `forbidden` |
-| Path matches no route | `404` | `not found` |
+| No or invalid token, path matches no route | `401` | as the two rows above |
+| Valid token, path matches no route | `404` | `not found` |
+
+With auth required, a caller holding no valid token gets `401` on every
+`/api/*` path, whether or not a route exists there. Authentication comes
+first, because the API cannot tell an undeclared route from a nonexistent one
+until it knows who is asking, and because an anonymous caller is not told
+which paths exist. `404` on an `/api/*` path is a fact about the deployment,
+and it is answered only to a caller the API has authenticated. The two exempt
+routes, `GET /api/health` and `GET /api/instances`, are unaffected: they take
+no token and are matched before authentication runs.
 
 Unrecognised, revoked, and expired tokens are deliberately indistinguishable
 to the caller. The API does not tell an attacker which of the three it holds.
@@ -248,8 +292,9 @@ Values sourced from profile materialized views are as fresh as the last
 ## Failure behavior
 
 `400` unknown instance or invalid body. `401` missing or invalid bearer
-token. `403` with a `reason` naming the policy that refused. `404` for an
-unmatched `/api/*` path. Errors are always
+token, on any `/api/*` path including one that matches no route. `403` with a
+`reason` naming the policy that refused. `404` for an unmatched `/api/*` path,
+to an authenticated caller. Errors are always
 `{"error": "...", "reason"?: "...", "policy"?: {...}}`. The full `401` and
 `403` rules and the shape of `reason` are in "Authorization" above.
 A `403` is a decision, not a transient failure — clients surface the reason

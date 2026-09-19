@@ -49,7 +49,7 @@ saved you time. Date each entry.
 
 - purpose: The reviewer's screen and the agent's HTTP API, on one Cloudflare Worker. React SPA plus a Hono API that proxies SQL to one of several configured Rye instances. Also holds the demonstration domain surfaces.
 - paths: admin/** surfaces/** tests/conformance/21_api_security.sh
-- test: cd admin && npm run build
+- test: cd admin && npm run build && npm run check:routes
 - record: docs/areas/admin.md
 
 ## Invariants

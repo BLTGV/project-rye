@@ -110,6 +110,28 @@ Top level: `contract_version` (integer, `1`), `step`, `settlers`,
 `step` is `grant`, `relationship`, `area_owner`, or `none`, naming the first
 step that produced a settler. `settlers` is empty exactly when `step` is `none`.
 
+`reason` is null when a step produced a settler, and one of the values below
+when none did. It is typed `text`, not an enum, and it may gain values
+additively. A caller branches on the values it knows and treats an unrecognised
+one as "no settler, no further detail".
+
+| `reason` | Returned when |
+|---|---|
+| `domain_not_found` | `p_domain_key` was supplied and no active area has that key. |
+| `domain_not_resolved` | No `p_domain_key` was supplied and none could be inferred, so `mode` is `ambiguous` or `none`. |
+| `area_has_no_owner` | The area resolved and its `owner_node_id` is null. |
+| `area_owner_not_visible` | The area names an owner and that node is archived or hidden by RLS from this caller. |
+| `area_owner_is_agent` | The area names an owner and that owner is an agent identity, which is never a settler. |
+| `no_settler_found` | `step` is `none` and no more specific reason applies. Read it as the generic "nobody". |
+
+`setup_gap` is true for exactly two of them, `area_has_no_owner` and
+`area_owner_is_agent`. Both say the area exists and its ownership was never
+set up properly, which is work for a Rye admin. The two domain reasons are not
+setup gaps. `domain_not_found` and `domain_not_resolved` mean the caller
+supplied a wrong or ambiguous area key, and the correction belongs to the
+caller, not to the instance. `area_owner_not_visible` is neither: the setup may
+be complete and this caller simply cannot see it.
+
 Each settler carries `kind`, `node_id`, `ref`, `label`, `via`, `relationship`,
 `bound`, and the evidence of where it came from:
 
@@ -141,6 +163,20 @@ settlers listed. `subject` is `{subject_id, subject_found, node_type, label}`.
 `domain` is `{requested_domain_key, domain_id, domain_key, domain_found, mode,
 has_owner}`, where `mode` is `explicit`, `single_active`, `ambiguous`, or
 `none`.
+
+### An unknown area key stops the lookup
+
+When `p_domain_key` is supplied and names no active area, the answer is `step`
+`none`, `settlers` `[]`, `domain_found` false, and `reason` `domain_not_found`.
+No step runs. The grant step is skipped because there is no area to read grants
+from, and the relationship step is skipped too, so even the zero-setup self
+default is suppressed.
+
+That is deliberate, and it is the one place the lookup answers less than it
+could. A key that names nothing is a caller mistake, and the safe response to a
+mistake is to fail closed. The caller sees no settler, `is_settler` false, and
+records a suggestion rather than accepting a statement against an area nobody
+meant. A caller that wants the relationship defaults passes no area key at all.
 
 ### The three steps
 
@@ -187,7 +223,7 @@ either end of it.
 returned as a single settler with `via` `area_owner`. When `owner_node_id` is
 null the answer is `settlers: []`, `step` `none`, `reason` `area_has_no_owner`,
 `setup_gap` true. That is a setup gap for a Rye admin, not an error. The domain
-resolves from `p_domain_key` (`mode` `explicit`); when `p_domain_key` is null
+resolves from `p_domain_key`, slugified (`mode` `explicit`); when `p_domain_key` is null
 and exactly one active knowledge domain exists, from that one (`single_active`);
 otherwise `mode` is `ambiguous` or `none` and `reason` is
 `domain_not_resolved`.
@@ -199,6 +235,27 @@ settlers are dropped when the ref equals an `agent_identities.agent_key` or is
 therefore not a match, and the lookup proceeds to the relationship step.
 `excluded_agents` counts what was dropped, so a caller can tell the difference
 between nobody and nobody eligible.
+
+### Area keys and agent keys are slugs
+
+`rye_slugify_key()` defines both. It lowercases the value, replaces every run
+of characters outside `a-z0-9` with a single underscore, strips leading and
+trailing underscores, and yields null for an empty result.
+
+`ensure_knowledge_domain()` stores the slug, and `rye_settlers()` slugifies
+`p_domain_key` before looking the area up. So `sales-operations`,
+`Sales Operations`, and `sales_operations` are one key, and either form works
+as an argument. The consequence is that a `knowledge_domains` row written
+directly with a hyphenated key is invisible to this lookup: no argument
+slugifies to `sales-operations`, so that row can never be found and every call
+naming it answers `domain_not_found`. Create areas with
+`ensure_knowledge_domain()`, never by direct insert.
+
+The same rule governs agent keys. `create_agent_identity()` slugifies
+`agent_key`, so the stored key for `my-agent` is `my_agent`. A grant whose
+`authority_ref` is `agent:my-agent` therefore matches no agent identity. It is
+not recognised as an agent, it is not counted in `excluded_agents`, and it is
+returned as an ordinary settler. Write refs against the stored slug.
 
 ### Versioning, freshness, failure
 
@@ -215,8 +272,9 @@ filters effective windows only, so a row inserted today with today's
 is excluded at every `as_of`.
 
 Nothing here raises for a missing answer. An unknown or invisible subject gives
-`subject_found` false with the relationship step skipped. An unknown domain key
-gives `domain_found` false, `step` `none`, `reason` `domain_not_found`. A
+`subject_found` false with the relationship step skipped. An unknown area key
+gives `domain_found` false, `step` `none`, `reason` `domain_not_found`, and no
+step runs at all, as above. A
 non-uuid argument fails at cast time. Because RLS silence applies, an empty
 `settlers` never means nobody is authorized; it means nobody is authorized and
 visible to this caller, and a caller must not record a claim as accepted on

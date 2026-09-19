@@ -209,4 +209,19 @@ migration ordering in a full install, and category discovery of
 `reports_to` and `owns` (criterion 8) are unverified by execution. Docker
 refuses this user. The item stays open until they run.
 
+### Architect, 2026-09-19, contract amendments
+Result: done. Changed: contracts/sql-surface.md ("Settlement lookup": six
+`reason` values with setup_gap semantics; "An unknown area key stops the
+lookup"; "Area keys and agent keys are slugs"), docs/decisions/0005
+("Amendments after implementation"). Learned: `no_settler_found` is
+unreachable in 0021, documented as the generic fallback. FOUND A BUG:
+rye_settler_is_agent() compares a ref to agent_identities.agent_key
+verbatim while create_agent_identity() slugifies on write, so a grant ref
+`agent:my-agent` escapes the agent exclusion and is returned as a settler.
+Architect proposed a separate item. Lead overruled: "an agent identity is
+never returned as a settler" is an acceptance criterion of this item.
+Lead reproduced it on the stand-in: agent stored as `my_agent`, grant ref
+`agent:my-agent`, result step grant, excluded_agents 0, one settler.
+Sent to the schema builder as fix attempt 1.
+
 ## Close

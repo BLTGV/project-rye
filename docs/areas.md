@@ -52,7 +52,7 @@ the Architect's own files under `docs/` and `contracts/` belong to no area.
   - The console reviews knowledge. It is not the day-to-day screen for domain records.
 - publishes: contracts/admin-api.md
 - consumes: contracts/sql-surface.md contracts/category-vocabulary.md
-- test: cd admin && npm run build
+- test: cd admin && npm run build && npm run check:routes
 
 ## site
 
