@@ -139,6 +139,16 @@ BEGIN
     RAISE EXCEPTION 'describe_category function missing';
   END IF;
 
+  IF to_regprocedure('rye.rye_settlers(uuid,text,uuid,text,text,text,timestamp with time zone,text)') IS NULL THEN
+    RAISE EXCEPTION 'rye_settlers function missing';
+  END IF;
+  IF to_regprocedure('rye.rye_settler_resolve_ref(text)') IS NULL THEN
+    RAISE EXCEPTION 'rye_settler_resolve_ref function missing';
+  END IF;
+  IF to_regprocedure('rye.rye_settler_is_agent(text,uuid)') IS NULL THEN
+    RAISE EXCEPTION 'rye_settler_is_agent function missing';
+  END IF;
+
   IF to_regprocedure('rye.mark_assertion_superseded(uuid,uuid)') IS NULL THEN
     RAISE EXCEPTION 'mark_assertion_superseded function missing';
   END IF;

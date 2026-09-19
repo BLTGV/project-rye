@@ -438,6 +438,81 @@ give descriptions a subject; it is never a member of the category list it
 describes except as an ordinary node type in its own right. `describe_category()`
 creates it; `rye_categories()` only reads it.
 
+#### `rye_settlers()`
+
+```
+rye_settlers(p_subject_id uuid, p_claim_type text, p_speaker_id uuid DEFAULT NULL,
+             p_speaker_ref text DEFAULT NULL, p_domain_key text DEFAULT NULL,
+             p_speech_act text DEFAULT NULL, p_as_of timestamptz DEFAULT now(),
+             p_scope_ref text DEFAULT NULL) → jsonb
+```
+
+Who may settle this claim, and which of three steps said so. The steps run in
+order and the first one to produce a settler wins:
+
+1. **Grant.** Rows in `domain_authorities` for the resolved area that are
+   `active`, in effect at `p_as_of`, and whose `claim_types` is empty or
+   contains `p_claim_type`. A grant may narrow to named subjects through
+   `properties.subjects` and `properties.subject_node_types`. If any grant
+   matches, the relationship step does not run — that is how a grant narrows a
+   default as well as adds to one.
+2. **Relationship.** `p_speech_act` selects which default applies:
+   `self_commitment`/`self_report` → self, `expectation` → manager,
+   `statement_about_other` → the subject then the subject's manager,
+   `statement_about_thing` → owner, `agreement`/`decision`/`outside_report`/
+   `agent_inference` → none, null or unrecognized → the union. Manager is the
+   target of a `reports_to` edge from the subject; owner is the source of an
+   `owns` edge to the subject; both in effect at `p_as_of`. A claim type that
+   names a relationship edge type (`reports_to`, `owns`) has no default and
+   falls through: the area settles that a reporting line exists, not either end.
+3. **Area owner.** `knowledge_domains.owner_node_id` for the resolved area.
+
+`p_claim_type` is the assertion type verbatim — one vocabulary, no mapping
+table. The area resolves from `p_domain_key`, or from the single active
+knowledge domain when it is omitted. `p_as_of` filters effective windows only.
+
+The answer carries `contract_version`, `step` (`grant`, `relationship`,
+`area_owner`, `none`), `settlers`, `settler_count`, `speaker`, `subject`,
+`claim`, `domain`, `as_of`, `advisory`, `excluded_agents`, `setup_gap`, and
+`reason`. `speaker.is_settler` is the field an agent acts on: true means record
+the statement as accepted, false means record a suggestion and ask the settlers
+listed. Each settler carries `kind`, `node_id`, `ref`, `label`, `via`,
+`relationship`, `bound`, and the evidence of where it came from (`grant_id` and
+the grant's windows, or `edge_id` and `edge_type`, or `domain_id`).
+
+An agent identity is never a settler: candidates whose ref is an
+`agent_identities.agent_key` or `agent:<agent_key>`, or whose node is
+`node_type` `agent` or `attrs->>'actor_kind'` `agent`, are dropped before a step
+is chosen and counted in `excluded_agents`. A grant whose only holder is an agent
+is therefore not a match and the lookup continues.
+
+Nothing raises for a missing answer. An area with no owner returns `step` `none`,
+`reason` `area_has_no_owner`, and `setup_gap` true — a setup gap, not an error.
+An unknown area key returns `domain_found` false and `reason` `domain_not_found`.
+Because RLS silence applies, an empty `settlers` never means nobody is
+authorized; it means nobody is authorized and visible to this caller.
+
+**Why it exists:** Every agent must get the same answer to "who may settle
+this", from one lookup rather than from its own judgment. `SECURITY INVOKER` and
+read-only: it writes nothing, not even an audit row, and it refuses nothing. The
+jsonb shape is governed by the "Settlement lookup" section of
+`contracts/sql-surface.md`.
+
+#### `rye_settler_resolve_ref()` and `rye_settler_is_agent()`
+
+```
+rye_settler_resolve_ref(p_ref text) → uuid
+rye_settler_is_agent(p_ref text, p_node_id uuid) → boolean
+```
+
+Helpers `rye_settlers()` uses. `rye_settler_resolve_ref()` turns a settler ref
+into a visible node id or NULL: a uuid matches by id, an
+`<external_source>:<external_id>` pair matches both columns, anything else
+matches `external_id` alone. `domain_authorities.authority_ref` is free text, so
+most refs resolve to no node; that is not an error, the settler comes back with
+`bound` false. `rye_settler_is_agent()` is the single place the "agents settle
+nothing" rule is implemented.
+
 #### `supersede_assertion()`
 
 ```

@@ -23,6 +23,9 @@ Usage:
   ./scripts/rye doctor [--json]
   ./scripts/rye catalog plugins|skills|capabilities [--json]
   ./scripts/rye categories [--scope <uuid-or-key>] [--json]
+  ./scripts/rye settlers --claim <assertion-type> [--subject <uuid>] [--speaker <uuid>]
+                         [--speaker-ref <source-identity>] [--domain <key>]
+                         [--speech-act <act>] [--as-of <timestamp>] [--scope <ref>] [--json]
   ./scripts/rye context [--scope <uuid-or-key>] [--json]
   ./scripts/rye sources inventory|pending-context [--json]
   ./scripts/rye agents create|grant|issue-token|revoke-token|list|audit [--json]
@@ -817,6 +820,129 @@ SELECT
 FROM answer;"
 }
 
+# Who may settle a claim. Advisory: it reports, it never refuses, and no
+# settler is an answer rather than a failure, so this exits zero either way.
+cmd_settlers() {
+  local subject=""
+  local claim=""
+  local speaker=""
+  local speaker_ref=""
+  local domain=""
+  local speech_act=""
+  local as_of=""
+  local scope_ref=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --subject)
+        subject="${2:-}"
+        shift 2
+        ;;
+      --claim)
+        claim="${2:-}"
+        shift 2
+        ;;
+      --speaker)
+        speaker="${2:-}"
+        shift 2
+        ;;
+      --speaker-ref)
+        speaker_ref="${2:-}"
+        shift 2
+        ;;
+      --domain)
+        domain="${2:-}"
+        shift 2
+        ;;
+      --speech-act)
+        speech_act="${2:-}"
+        shift 2
+        ;;
+      --as-of)
+        as_of="${2:-}"
+        shift 2
+        ;;
+      --scope)
+        scope_ref="${2:-}"
+        shift 2
+        ;;
+      -h|--help)
+        cat <<'EOF'
+Usage:
+  ./scripts/rye settlers --claim <assertion-type> [--subject <uuid>]
+                         [--speaker <uuid>] [--speaker-ref <source-identity>]
+                         [--domain <key>] [--speech-act <act>]
+                         [--as-of <timestamp>] [--scope <ref>] [--json]
+
+Who may settle this claim, and which step of the lookup said so: a recorded
+grant, then the relationship, then the owner of the area. Advisory only.
+Omit --subject for a topical claim with no subject node.
+EOF
+        return
+        ;;
+      *)
+        die "Unknown settlers option: $1"
+        ;;
+    esac
+  done
+
+  [[ -n "$claim" ]] || die "settlers requires --claim <assertion-type>"
+
+  local subject_expr="NULL::uuid"
+  local claim_expr
+  local speaker_expr="NULL::uuid"
+  local speaker_ref_expr="NULL::text"
+  local domain_expr="NULL::text"
+  local speech_expr="NULL::text"
+  local as_of_expr="now()"
+  local scope_expr="NULL::text"
+
+  [[ -z "$subject" ]] || subject_expr="$(sql_literal "$subject")::uuid"
+  claim_expr="$(sql_literal "$claim")"
+  [[ -z "$speaker" ]] || speaker_expr="$(sql_literal "$speaker")::uuid"
+  [[ -z "$speaker_ref" ]] || speaker_ref_expr="$(sql_literal "$speaker_ref")"
+  [[ -z "$domain" ]] || domain_expr="$(sql_literal "$domain")"
+  [[ -z "$speech_act" ]] || speech_expr="$(sql_literal "$speech_act")"
+  [[ -z "$as_of" ]] || as_of_expr="$(sql_literal "$as_of")::timestamptz"
+  [[ -z "$scope_ref" ]] || scope_expr="$(sql_literal "$scope_ref")"
+
+  local call
+  call="rye.rye_settlers(${subject_expr}, ${claim_expr}, ${speaker_expr}, ${speaker_ref_expr}, ${domain_expr}, ${speech_expr}, ${as_of_expr}, ${scope_expr})"
+
+  if [[ "$OUTPUT_JSON" -eq 1 ]]; then
+    psql_json "SELECT ${call};"
+    return
+  fi
+
+  psql_exec "SET search_path = rye, public, pg_catalog;
+WITH answer AS (
+  SELECT ${call} AS j
+),
+listed AS (
+  SELECT jsonb_array_elements(j->'settlers') AS s FROM answer
+)
+SELECT
+  s->>'kind' AS kind,
+  coalesce(s->>'label', s->>'ref', s->>'node_id') AS settler,
+  s->>'via' AS via,
+  coalesce(s->>'relationship', '') AS relationship,
+  s->>'bound' AS bound
+FROM listed;
+
+WITH answer AS (
+  SELECT ${call} AS j
+)
+SELECT
+  j->>'step' AS step,
+  j->>'settler_count' AS settlers,
+  j->'speaker'->>'is_settler' AS speaker_may_settle,
+  coalesce(j->'domain'->>'domain_key', '') AS area,
+  j->>'excluded_agents' AS excluded_agents,
+  j->>'setup_gap' AS setup_gap,
+  coalesce(j->>'reason', '') AS reason
+FROM answer;"
+}
+
 cmd_context() {
   local scope=""
 
@@ -1297,6 +1423,9 @@ main() {
       ;;
     categories)
       cmd_categories "$@"
+      ;;
+    settlers)
+      cmd_settlers "$@"
       ;;
     context)
       cmd_context "$@"
