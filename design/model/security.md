@@ -478,6 +478,8 @@ Nine tables say which areas exist, who holds authority in them, which channels f
 
 Two read-only helpers are the definition. `rye_current_agent_key()` returns the part after `agent:`, or null; it reads no table, so it is safe inside `agent_identities`' own policy. `rye_current_agent_id()` resolves that key to an identity id, or null; it reads the roster, so it may be used only in policies on tables below `agent_identities`. Neither is `SECURITY DEFINER`. **Own rows** always means `agent_id = rye_current_agent_id()`.
 
+**`app.current_user_id` is a label, not a binding.** It is the actor string helpers write into events, `created_by`, and audit payloads. It is free text, it is frequently a human or a test marker, and no rule here reads it. A session whose label names a different agent than its role is not an error: the label is ignored, and the session is the agent its role names, or no agent at all. `agent_can_promote_in_scope()` resolved the acting agent from the label before this and now resolves through `rye_current_agent_id()` only. A test or client that sets `app.current_role` to `agent:<key>` must use the stored key of the identity whose grants it expects.
+
 ### 7.2 Who reads, who writes
 
 | Table | admin | named role | bound agent | agent-shaped only | unknown |
@@ -522,7 +524,7 @@ Two writes are made on behalf of a caller who is not an admin, and both use the 
 | `record_agent_action` | `agent_action_log_insert_policy` | `record_agent_action()` |
 | `agent_create_candidate` | `api_idempotency_keys_insert_policy` | `agent_create_candidate()` |
 
-The log insert is admitted from any session so that a denial is recorded even when the caller was impersonating another agent.
+The log insert is admitted from any session so that a denial is recorded even when the caller was impersonating another agent. `record_agent_action()` therefore generates the row id itself rather than using `INSERT ... RETURNING`: `RETURNING` reads the new row back, which puts it through a SELECT policy that admits only the caller's own rows, and a log write that has to be readable by its writer is not an audit trail.
 
 ### 7.5 `SECURITY DEFINER` does not bypass these policies
 

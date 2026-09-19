@@ -164,6 +164,12 @@ read-only helpers are the definition: `rye_current_agent_key()` returns the key
 or null, and `rye_current_agent_id()` returns the identity id or null. Own rows
 everywhere means `agent_id = rye_current_agent_id()`.
 
+`app.current_user_id` is a label, not a binding. It is the actor string helpers
+write into events, `created_by`, and audit payloads, and no rule reads it. A
+session whose label names a different agent than its role is not an error: the
+label is ignored. Set `app.current_role` to the stored key of the identity whose
+grants you expect.
+
 **Holding an area.** An agent holds an area when it has an active, unexpired row
 in `agent_capability_grants` whose `domain_id` is that area or null. The
 capability name is not part of the rule.

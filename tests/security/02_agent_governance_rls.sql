@@ -29,8 +29,10 @@ DECLARE
     v_beta uuid;
     v_agent_one uuid;
     v_agent_two uuid;
+    v_agent_none uuid;
     v_subject uuid;
     v_manager uuid;
+    v_scope uuid;
     v_token text;
 BEGIN
     PERFORM set_config('app.current_role', 'admin', true);
@@ -52,11 +54,25 @@ BEGIN
 
     v_agent_one := create_agent_identity('rls_gov_agent_one', 'RLS Governance Agent One', 'conformance');
     v_agent_two := create_agent_identity('rls_gov_agent_two', 'RLS Governance Agent Two', 'conformance');
+    -- Holds nothing anywhere, so every capability answer about it is false
+    -- whether or not the function owner is a superuser.
+    v_agent_none := create_agent_identity('rls_gov_agent_none', 'RLS Governance Agent None', 'conformance');
 
     PERFORM grant_agent_capability('rls_gov_agent_one', 'rye.context.read', 'rls_gov_area_alpha');
     PERFORM grant_agent_capability('rls_gov_agent_one', 'rye.candidate.create', 'rls_gov_area_alpha');
     PERFORM grant_agent_capability('rls_gov_agent_one', 'rye.observation.create', 'rls_gov_area_alpha');
     PERFORM grant_agent_capability('rls_gov_agent_two', 'rye.context.read', 'rls_gov_area_beta');
+
+    -- A scope agent one may promote in, for agent_can_promote_in_scope().
+    INSERT INTO nodes (node_type, label, external_source, external_id)
+    VALUES ('onboarding_scope', 'RLS Gov Scope', 'test', 'rls-gov-scope')
+    RETURNING id INTO v_scope;
+
+    -- Named for an area, not instance-wide: a null domain_id would hold every
+    -- area and make agent one able to read beta's governance rows.
+    PERFORM grant_agent_capability(
+        'rls_gov_agent_one', 'rye.authoritative.promote', 'rls_gov_area_alpha',
+        p_scope_ref := v_scope::text);
 
     v_token := issue_agent_token('rls_gov_agent_one', 'governance rls test token');
 
@@ -91,8 +107,10 @@ BEGIN
         ('beta', v_beta::text),
         ('agent_one', v_agent_one::text),
         ('agent_two', v_agent_two::text),
+        ('agent_none', v_agent_none::text),
         ('subject', v_subject::text),
         ('manager', v_manager::text),
+        ('scope', v_scope::text),
         ('token', v_token);
 END;
 $$;
@@ -530,7 +548,7 @@ BEGIN
         -- grant_agent_capability
         v_refused := false;
         BEGIN
-            PERFORM grant_agent_capability('rls_gov_agent_one', 'rye.authoritative.promote', 'rls_gov_area_alpha');
+            PERFORM grant_agent_capability('rls_gov_agent_one', 'rye.escalation.probe', 'rls_gov_area_alpha');
         EXCEPTION WHEN OTHERS THEN
             v_refused := true;
         END;
@@ -546,7 +564,7 @@ BEGIN
        OR EXISTS (SELECT 1 FROM agent_identities WHERE agent_key = 'rls_gov_self_agent')
        OR EXISTS (SELECT 1 FROM domain_authorities WHERE authority_ref = 'person:escalating-caller')
        OR EXISTS (SELECT 1 FROM channel_domain_subscriptions WHERE channel_ref = 'slack:#rls-gov-escalate')
-       OR EXISTS (SELECT 1 FROM agent_capability_grants WHERE capability = 'rye.authoritative.promote')
+       OR EXISTS (SELECT 1 FROM agent_capability_grants WHERE capability = 'rye.escalation.probe')
     THEN
         RAISE EXCEPTION 'a non-admin escalation attempt left a row behind';
     END IF;
@@ -610,6 +628,107 @@ BEGIN
 END;
 $$;
 
+-- The gate admits a log row for any agent id, from any session. An audit trail
+-- the audited action can suppress is not one, so a caller impersonating another
+-- agent, and a session with no role at all, must both still be logged. The
+-- function generates the id rather than using RETURNING, because RETURNING
+-- would read the new row back through a policy that admits only own rows.
+DO $$
+DECLARE
+    v_agent_two uuid := (SELECT v::uuid FROM gov_fixture WHERE k = 'agent_two');
+    v_log_id uuid;
+BEGIN
+    PERFORM set_config('app.current_role', 'agent:rls_gov_agent_one', true);
+    v_log_id := record_agent_action(v_agent_two, 'gov_rls_impersonated', 'rye.context.read', false);
+    IF v_log_id IS NULL THEN
+        RAISE EXCEPTION 'record_agent_action returned no id for another agent';
+    END IF;
+
+    PERFORM set_config('app.current_role', 'agent:no_such_agent_key', true);
+    PERFORM record_agent_action(v_agent_two, 'gov_rls_unbound_session', 'rye.context.read', false);
+
+    PERFORM set_config('app.current_role', '', true);
+    PERFORM record_agent_action(v_agent_two, 'gov_rls_unknown_session', 'rye.context.read', false);
+
+    PERFORM set_config('app.current_role', 'admin', true);
+    IF (
+        SELECT count(*) FROM agent_action_log
+        WHERE agent_id = v_agent_two
+          AND action IN ('gov_rls_impersonated', 'gov_rls_unbound_session', 'gov_rls_unknown_session')
+    ) <> 3 THEN
+        RAISE EXCEPTION 'the gate did not admit a log row from every session shape';
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM agent_action_log WHERE id = v_log_id) THEN
+        RAISE EXCEPTION 'record_agent_action returned an id that names no row';
+    END IF;
+END;
+$$;
+
+-- A denial raises the function's own message, not an RLS violation.
+DO $$
+DECLARE
+    v_agent_none uuid := (SELECT v::uuid FROM gov_fixture WHERE k = 'agent_none');
+    v_message text;
+BEGIN
+    PERFORM set_config('app.current_role', 'agent:rls_gov_agent_one', true);
+    v_message := NULL;
+    BEGIN
+        PERFORM agent_get_context_pack(v_agent_none, NULL, 'slack:#rls-gov-alpha', '{}'::text[]);
+    EXCEPTION WHEN OTHERS THEN
+        v_message := SQLERRM;
+    END;
+    PERFORM set_config('app.current_role', 'admin', true);
+    IF v_message IS NULL THEN
+        RAISE EXCEPTION 'agent_get_context_pack allowed an agent that holds nothing';
+    END IF;
+    IF v_message NOT LIKE '%not authorized%' THEN
+        RAISE EXCEPTION 'the context pack denial surfaced as % instead of its own message', v_message;
+    END IF;
+END;
+$$;
+
+-- --------------------------------------------------------------------------
+-- 7b. app.current_user_id is a label, not a binding
+-- --------------------------------------------------------------------------
+-- Which agent a session is comes from app.current_role and nowhere else. A
+-- label naming a different agent is ignored, not an error.
+
+DO $$
+DECLARE
+    v_scope uuid := (SELECT v::uuid FROM gov_fixture WHERE k = 'scope');
+BEGIN
+    PERFORM set_config('app.current_role', 'agent:rls_gov_agent_one', true);
+    PERFORM set_config('app.current_user_id', 'someone:human-operator', true);
+    IF NOT agent_can_promote_in_scope(v_scope) THEN
+        RAISE EXCEPTION 'the role named the agent that holds the grant and was refused';
+    END IF;
+
+    -- The role names an agent that holds nothing; the label names the one that
+    -- does. The label must not win.
+    PERFORM set_config('app.current_role', 'agent:rls_gov_agent_two', true);
+    PERFORM set_config('app.current_user_id', 'rls_gov_agent_one', true);
+    IF agent_can_promote_in_scope(v_scope) THEN
+        RAISE EXCEPTION 'app.current_user_id was treated as a credential';
+    END IF;
+
+    -- Agent-shaped but unbound, with a capable agent in the label.
+    PERFORM set_config('app.current_role', 'agent:no_such_agent_key', true);
+    IF agent_can_promote_in_scope(v_scope) THEN
+        RAISE EXCEPTION 'an unbound agent-shaped session promoted through its label';
+    END IF;
+
+    -- No role at all.
+    PERFORM set_config('app.current_role', '', true);
+    IF agent_can_promote_in_scope(v_scope) THEN
+        RAISE EXCEPTION 'a session with no role promoted through its label';
+    END IF;
+
+    PERFORM set_config('app.current_role', 'admin', true);
+    PERFORM set_config('app.current_user_id', 'test:governance-rls', true);
+END;
+$$;
+
 -- --------------------------------------------------------------------------
 -- 8. The agent functions answer as before for a valid agent
 -- --------------------------------------------------------------------------
@@ -656,7 +775,7 @@ BEGIN
     IF (v_authz->>'allowed')::boolean IS NOT TRUE THEN
         RAISE EXCEPTION 'authorize_agent_action denied a held capability: %', v_authz;
     END IF;
-    v_authz := authorize_agent_action(v_agent_one, 'rye.authoritative.promote', ARRAY['rls_gov_area_alpha']);
+    v_authz := authorize_agent_action(v_agent_one, 'rye.candidate.adjudicate', ARRAY['rls_gov_area_alpha']);
     IF (v_authz->>'allowed')::boolean THEN
         RAISE EXCEPTION 'authorize_agent_action allowed a capability the agent does not hold';
     END IF;

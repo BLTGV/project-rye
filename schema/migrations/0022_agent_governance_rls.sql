@@ -376,6 +376,47 @@ CREATE POLICY domain_claim_policies_delete_policy ON domain_claim_policies
     USING (current_setting('app.current_role', true) = 'admin');
 
 -- --------------------------------------------------------------------------
+-- One session variable says which agent you are, and it is app.current_role
+-- --------------------------------------------------------------------------
+-- `app.current_user_id` is the actor label helpers write into events,
+-- `created_by`, and audit payloads. It is free text, it is frequently a human
+-- or a test marker, and no rule in the contract reads it. A session whose label
+-- names a different agent than its role is not an error: the label is ignored.
+--
+-- agent_can_promote_in_scope() from 0019 disagreed. It resolved the acting
+-- agent from the label first and fell back to the role, while the grants policy
+-- binds own rows from the role, so the two could name different agents and the
+-- grants went invisible. Replaced here with the same signature, resolving
+-- through rye_current_agent_id() only. The gate that calls it already fires on
+-- `app.current_role LIKE 'agent:%'` alone, so one variable now decides both
+-- whether the rule applies and who it applies to. That closes a real escape
+-- hatch: before, a session could declare itself `agent:anything` to trip the
+-- gate and then name a capable agent in the label to pass it.
+
+CREATE OR REPLACE FUNCTION agent_can_promote_in_scope(p_scope_id uuid)
+RETURNS boolean
+SECURITY DEFINER
+SET search_path = rye, pg_catalog
+AS $$
+DECLARE
+    v_agent_id uuid := rye_current_agent_id();
+    v_external_scope text;
+BEGIN
+    IF v_agent_id IS NULL THEN
+        RETURN false;
+    END IF;
+
+    SELECT external_id INTO v_external_scope FROM nodes WHERE id = p_scope_id;
+    RETURN has_agent_capability(v_agent_id, 'rye.authoritative.promote', '{}', p_scope_id::text)
+        OR (v_external_scope IS NOT NULL
+            AND has_agent_capability(v_agent_id, 'rye.authoritative.promote', '{}', v_external_scope));
+END;
+$$ LANGUAGE plpgsql STABLE;
+
+COMMENT ON FUNCTION agent_can_promote_in_scope(uuid) IS
+    'True when the agent named by app.current_role holds rye.authoritative.promote for this scope. app.current_role is the only variable that says which agent a session is; app.current_user_id is an actor label and is ignored here.';
+
+-- --------------------------------------------------------------------------
 -- The two writes made on behalf of a caller who is not an admin
 -- --------------------------------------------------------------------------
 -- Both use the established named gate: app.write_path set transaction-locally
@@ -413,10 +454,19 @@ BEGIN
         LIMIT 1;
     END IF;
 
+    -- The id is generated here and the INSERT has no RETURNING clause.
+    -- RETURNING reads the new row back, which makes the SELECT policy apply to
+    -- it, and that policy admits only the calling agent's own rows. The whole
+    -- point of the gate is that a denial is logged even when the caller was
+    -- impersonating another agent, so the log write must not depend on being
+    -- able to read what it wrote.
+    v_id := gen_random_uuid();
+
     BEGIN
         PERFORM set_config('app.write_path', 'record_agent_action', true);
 
         INSERT INTO agent_action_log (
+            id,
             agent_id,
             action,
             capability,
@@ -428,6 +478,7 @@ BEGIN
             request,
             result
         ) VALUES (
+            v_id,
             p_agent_id,
             coalesce(nullif(trim(p_action), ''), 'unknown_action'),
             p_capability,
@@ -438,8 +489,7 @@ BEGIN
             p_reason,
             coalesce(p_request, '{}'::jsonb),
             coalesce(p_result, '{}'::jsonb)
-        )
-        RETURNING id INTO v_id;
+        );
 
         PERFORM set_config('app.write_path', '', true);
     EXCEPTION WHEN OTHERS THEN
