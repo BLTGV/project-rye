@@ -59,6 +59,7 @@ agent checks with someone who can."
 - When the owner of an area is the person a reporting line is about, the Rye admin is asked instead, since nobody settles a claim about their own authority. Raised by Product. Overturn: Casey.
 - A person's asking preferences bind only their own agents. Raised by Product. Overturn: Casey.
 - An unsettled objection never expires; it stays visible as unsettled. Raised by Product. Overturn: Casey.
+- A lone person's decisions, agreements, and unclassified statements settle through area ownership, so the first area must exist with that person as owner. "No setup" means none the person does: the agent creates the first area in its first conversation. That onboarding step is a later work item. Overturn: Casey.
 - The v0.3 non-goal "tokens" means the forecasting-era stake concept, not the credential an agent presents to the API. Raised by Product. Overturn: Casey.
 
 ## Verified
@@ -315,5 +316,23 @@ widens who may settle; zero-setup self statements must survive; the
 objection path for other claim types is named as not covered). Then the
 schema builder implements, the agent-kit builder updates the skill, and the
 Verifier rechecks.
+
+### Architect, 2026-09-19, rule for the relationship step (fail-open path closed in the contract)
+contracts/sql-surface.md step 2 is now five ordered rules, first match
+wins: (0) claim type reports_to or owns: no default, fall through; (1)
+claim type in the set-on-a-person set (`expectation`) OR speech act
+`expectation`: manager only, self never returned; (2) recognized speech
+act: self_commitment and self_report give self; statement_about_other
+gives the subject then the subject's manager; statement_about_thing gives
+the owner; agreement, decision, outside_report, agent_inference fall
+through; (3) claim type in the self set (commitment, self_commitment,
+self_report): self only; (4) otherwise fall through to the area owner. The
+union is deleted. Sets are literal strings in the function, additive.
+Consumers must not accept while speech_act_recognized is false. New
+section "What the lookup does not answer" names the objection path for
+other claim types as not covered. The `agent:` prefix rule is now precise
+enough to reimplement. Expected fixture answers given for five calls.
+Learned: an unclassified statement now needs an area owner or returns step
+none. Lead: accepted. Assumption added below.
 
 ## Close

@@ -154,3 +154,46 @@ and treat an unbacked `agent:` ref as a person. It was declined because it
 makes a misspelling into authority, which is the failure this rule exists to
 prevent. The cost is that a person whose ref happens to start with `agent:`
 can never settle anything, which is a spelling the convention already reserves.
+
+**A missing or wrong speech act must never widen who may settle, so the claim
+type decides first.** Executing the merged lookup on a real install found the
+one path that failed open. With no `p_speech_act`, an expectation on John
+returned John himself alongside his manager, and `is_settler` was true for
+John. That is the first failure the model exists to prevent: John's "no"
+winning because it was said last. The rule now has five ordered cases. Rule 0,
+a relationship edge type falls through. Rule 1, an other-set claim type or a
+speech act of `expectation` gives the manager only and never self. Rule 2, a
+recognized speech act gives its documented default. Rule 3, a self-set claim
+type gives self only. Rule 4, anything else falls through to the area owner.
+The claim type therefore carries the safety on its own, so omitting the
+optional flag and mistyping it both land on the manager. The rejected
+alternative was to keep the union for a null or unrecognized speech act and
+fix it by requiring the flag. It was declined because an optional argument
+whose absence grants authority is a trap, and because every other unknown in
+this lookup already fails closed. The cost is real and accepted: an
+unclassified statement now reaches the area owner instead of the person it is
+about, so an instance with no area owner answers `step` `none` where it used to
+answer somebody. Saying less buys a smaller answer, never a larger one. The
+zero-setup case survives on two routes, a recognized self speech act or a
+self-set claim type, so a person's plain statement about themselves still
+settles with no setup at all.
+
+**Two small literal sets, not a configuration table.** Other-set is
+`expectation`. Self-set is `commitment`, `self_commitment`, `self_report`. Both
+live in the contract and in the function, matched on the exact string and
+growing additively. The rejected alternative was a claim-type-to-class table an
+instance could edit, which reads more flexible. It was declined for the reason
+the original decision declined a claim-type map: it makes "a person settles
+claims about themselves" depend on configuration, and it makes every new claim
+type a setup step. The cost is that a claim type in neither set selects nothing
+and falls to the area owner until someone adds it here.
+
+**The objection path is named as out of scope rather than half-answered.** The
+lookup reads no assertion, so it cannot see that a claim about this subject is
+already accepted. A person restating or contradicting a quota their manager set
+may well come back as a settler, because for that claim type they are one. The
+contract now says so in a section of its own, and says that `is_settler` true
+is not permission to replace an accepted claim. The rejected alternative was to
+widen the other-set list until it covered every claim a manager might set. It
+was declined because the list would never be complete, and because the real fix
+is the objection record, not a longer list.

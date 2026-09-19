@@ -197,20 +197,43 @@ manager, and owner for that claim type in that domain, so a grant that should
 not displace them names its subjects.
 
 **2. Relationship.** Runs only when no grant matched and the subject node is
-visible. The speech act selects the default:
+visible. Two selectors choose the default, the claim type first and the speech
+act second. The rules are tried in this order, and the first that applies wins:
 
-| `p_speech_act` | relationship default |
-|---|---|
-| `self_commitment`, `self_report` | self |
-| `expectation` | manager |
-| `statement_about_other` | the subject, then the subject's manager |
-| `statement_about_thing` | owner |
-| `agreement`, `decision`, `outside_report`, `agent_inference` | none, fall through |
-| null or unrecognized | the union of self, owner, and manager, whichever apply |
+| # | Condition | Relationship default |
+|---|---|---|
+| 0 | `p_claim_type` is a relationship edge type: `reports_to`, `owns` | none, fall through |
+| 1 | `p_claim_type` is other-set, or `p_speech_act` is `expectation` | manager only. Self is never returned |
+| 2 | `p_speech_act` is recognized | `self_commitment`, `self_report`: self. `statement_about_other`: the subject, then the subject's manager. `statement_about_thing`: owner. `agreement`, `decision`, `outside_report`, `agent_inference`: none, fall through |
+| 3 | `p_claim_type` is self-set | self only |
+| 4 | Otherwise: no claim type class and the speech act is null or unrecognized | none, fall through |
 
-`speech_act_recognized` is false for a value outside that set, and the union is
-returned rather than an error. Self means the subject is a person node and is
-its own settler. Manager is the target of a `reports_to` edge whose source is
+*Other-set* claim types are claims one person sets on another. The set is
+`expectation`. *Self-set* claim types are a person's own commitment or report
+about themselves. The set is `commitment`, `self_commitment`, `self_report`.
+Both sets are matched on the exact string, both may grow additively, and a
+claim type in neither set selects nothing. Membership is stated here and
+nowhere else. There is no table to configure and no migration to run.
+
+Rule 1 is the point of the ordering. An expectation is set on a person by
+someone else, so the person it is set on is never its settler, whatever the
+speech act says. A missing speech act cannot open that door, and neither can a
+wrong one.
+
+Rule 4 is the other point. A null or unrecognized speech act never widens who
+may settle. It selects no relationship default at all, exactly as `agreement`
+does, and the lookup falls through to the area owner. The union of self, owner,
+and manager is not returned, and the caller gets a smaller answer for saying
+less, not a larger one.
+
+`speech_act_recognized` is false for a value outside the recognized set, and no
+error is raised. A caller must not record a statement as accepted while
+`speech_act_recognized` is false. Classify the statement first, pass the speech
+act, and look again. The same obligation applies when the answer falls through
+to the area owner because rule 4 applied: that answer says nobody local was
+selected, not that the speaker may proceed.
+
+Self means the subject is a person node and is its own settler. Manager is the target of a `reports_to` edge whose source is
 the subject. Owner is the source of an `owns` edge whose target is the subject.
 Both edges are read as `contracts/plugin-manifest.md` declares them, and in
 effect at `p_as_of` means `archived_at` is null, `effective_from` is null or at
@@ -218,6 +241,23 @@ or before it, and `effective_to` is null or after it. A claim type that names a
 relationship edge type (`reports_to`, `owns`) has no relationship default and
 falls through: the reporting line is settled by the owner of the area, not by
 either end of it.
+
+### What the lookup does not answer
+
+It reads no assertion. It cannot see that a claim on this subject is already
+accepted, so it cannot tell a new statement from a contradiction of an old one.
+One case follows, and it is not solved here. A person restates or contradicts
+an accepted claim about themselves that somebody else authorized, under a claim
+type that is not in the other-set list. A quota their manager set is the
+example. The lookup may well return that person as a settler, because for that
+claim type and that speech act they are one, and nothing in the answer says an
+accepted claim is already standing.
+
+That is the objection path, and it is a later work item. Accepted stays
+accepted until a settler changes it, and an objection is a record of its own,
+not an overwrite. Until that work exists, a caller must not read `is_settler`
+true as permission to replace an accepted claim it did not check for. This
+lookup answers who may settle a claim. It does not answer who may unsettle one.
 
 **3. Area owner.** `knowledge_domains.owner_node_id` for the resolved domain,
 returned as a single settler with `via` `area_owner`. When `owner_node_id` is
@@ -260,12 +300,21 @@ The same rule governs agent keys, and the agent test is written to survive it.
 `create_agent_identity()` slugifies `agent_key`, so the stored key for
 `my-agent` is `my_agent`. Two promises follow.
 
-First, a ref that says it is an agent never settles. Any `authority_ref`
-beginning with `agent:`, compared case-insensitively after trimming, is
-excluded as an agent whether or not a matching `agent_identities` row exists.
-`agent:my-agent`, `Agent:my_agent`, and `agent:deleted-last-year` are all
-dropped. A typo or a removed identity produces no settler rather than an
-accidental one.
+First, a ref that says it is an agent never settles. A ref is an agent prefix
+when, reading from the start, it has only whitespace, then the letters `agent`
+in any case, then only whitespace, then a colon. Whatever follows the colon is
+irrelevant, and no `agent_identities` row need exist. `agent:my-agent`,
+`Agent:my_agent`, ` agent :x`, and `agent:deleted-last-year` are all dropped. A
+typo or a removed identity produces no settler rather than an accidental one.
+
+Whitespace here is wider than SQL `trim()`, which strips the plain space only.
+Space, tab, CR, LF, form feed, vertical tab, and the non-breaking space U+00A0
+are stripped from both ends of every ref and ignored on either side of the
+colon. `agent` is read as a whole word before the colon, so `person:my-agent`
+is not an agent prefix. Unicode lookalike letters are out of scope: a ref whose
+`a` is Cyrillic is not an agent prefix, and it comes back as an unbound settler
+like any other unrecognised ref. The same test runs on node-derived refs, not
+only on grant refs.
 
 Second, any other ref is an agent when `rye_slugify_key()` of the ref equals a
 stored `agent_key`. So `my-agent`, `My Agent`, and `my_agent` are one agent,
