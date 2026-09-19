@@ -396,6 +396,16 @@ candidate_id_2="$(json_get "$candidate_json_2" "id")"
   fail "Expected idempotent candidate id, got $candidate_id_1 and $candidate_id_2"
 }
 
+# Checked here, before the promotion below. promote_candidate_node_to_assertion
+# archives the candidate node, and the queue only lists live candidates, so
+# after promotion this row is gone from every caller's listing and an absence
+# assertion on it would prove nothing about the area filter.
+reviewer_queue="$(curl -sS -H "$(auth "$reviewer_token")" "${BASE_URL}/api/review-queue?include_closed=1&q=Brightline")"
+expect_present "reviewer sees its own area's candidate" "$reviewer_queue" "$candidate_id_1"
+
+title_queue="$(curl -sS -H "$(auth "$title_token")" "${BASE_URL}/api/review-queue?include_closed=1&q=Brightline")"
+expect_absent "title agent does not see account candidate" "$title_queue" "$candidate_id_1"
+
 # A valid token used against another area is refused.
 cross_area_body="$(curl -sS \
   -H "$(auth "$candidate_token")" \
@@ -447,15 +457,10 @@ reviewer_promote_status="$(status_code \
 # ---------------------------------------------------------------------------
 
 # Searched by a distinctive word so the assertions do not depend on how many
-# candidates other suites left in the database.
-reviewer_queue="$(curl -sS -H "$(auth "$reviewer_token")" "${BASE_URL}/api/review-queue?include_closed=1&q=Brightline")"
-expect_present "reviewer sees its own area's candidate" "$reviewer_queue" "$candidate_id_1"
-
+# candidates other suites left in the database. These markers are never
+# promoted, so they stay live for the whole run.
 reviewer_keyless="$(curl -sS -H "$(auth "$reviewer_token")" "${BASE_URL}/api/review-queue?include_closed=1&q=keyless")"
 expect_absent "reviewer does not see keyless candidate" "$reviewer_keyless" "keyless candidate marker"
-
-title_queue="$(curl -sS -H "$(auth "$title_token")" "${BASE_URL}/api/review-queue?include_closed=1&q=Brightline")"
-expect_absent "title agent does not see account candidate" "$title_queue" "$candidate_id_1"
 
 title_keyless="$(curl -sS -H "$(auth "$title_token")" "${BASE_URL}/api/review-queue?include_closed=1&q=keyless")"
 expect_absent "title agent does not see keyless candidate" "$title_keyless" "keyless candidate marker"
@@ -490,14 +495,16 @@ title_count="$(node -e "console.log(JSON.parse(process.argv[1]).candidates.lengt
 [[ "$title_total" == "$title_count" ]] || {
   fail "Expected the title agent's queue total to count only returned rows, got total=$title_total rows=$title_count"
 }
-expect_absent "title agent's queue excludes the account candidate" "$title_all" "$candidate_id_1"
 expect_absent "title agent's queue excludes keyless rows" "$title_all" "keyless candidate marker"
 expect_absent "title agent's queue excludes unsluggable rows" "$title_all" "unsluggable key candidate marker"
 expect_absent "title agent's queue excludes the account area's mixed row" "$title_all" "mixedheldmarker"
 
 # /api/candidates/review is the same listing and is filtered the same way.
-title_review="$(curl -sS -H "$(auth "$title_token")" "${BASE_URL}/api/candidates/review?include_closed=1&q=Brightline")"
-expect_absent "title agent candidates/review is filtered" "$title_review" "$candidate_id_1"
+title_review="$(curl -sS -H "$(auth "$title_token")" "${BASE_URL}/api/candidates/review?include_closed=1&q=mixedheldmarker")"
+expect_absent "title agent candidates/review is filtered" "$title_review" "mixedheldmarker"
+
+reviewer_review="$(curl -sS -H "$(auth "$reviewer_token")" "${BASE_URL}/api/candidates/review?include_closed=1&q=mixedheldmarker")"
+expect_present "reviewer candidates/review sees its own area" "$reviewer_review" "mixedheldmarker"
 
 # ---------------------------------------------------------------------------
 # The MCP adapter's tools keep working.
@@ -521,6 +528,16 @@ expect_status "mcp candidates" 201 \
   -H "Idempotency-Key: ${IDEM_KEY}-mcp" \
   -d "$candidate_body" \
   "${BASE_URL}/api/candidates"
+# Same idempotency key, so this returns the row just created rather than a new
+# one. It stays live for the rest of the run and stands in for candidate_id_1,
+# which the promotion above archived.
+mcp_candidate_json="$(curl -sS \
+  -H "$(auth "$candidate_token")" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: ${IDEM_KEY}-mcp" \
+  -d "$candidate_body" \
+  "${BASE_URL}/api/candidates")"
+mcp_candidate_id="$(json_get "$mcp_candidate_json" "id")"
 expect_status "mcp review-queue" 200 -H "$(auth "$reviewer_token")" "${BASE_URL}/api/review-queue"
 expect_status "mcp audit/actions" 200 -H "$(auth "$reviewer_token")" "${BASE_URL}/api/audit/actions"
 
@@ -564,7 +581,7 @@ expect_present "auth off sees the mixed held-key candidate" "$open_mixed_held" "
 open_mixed_unheld="$(curl -sS "${OPEN_URL}/api/review-queue?include_closed=1&q=mixedunheldmarker")"
 expect_present "auth off sees the mixed unheld-key candidate" "$open_mixed_unheld" "mixedunheldmarker"
 open_queue="$(curl -sS "${OPEN_URL}/api/review-queue?include_closed=1&q=Brightline")"
-expect_present "auth off sees the account candidate" "$open_queue" "$candidate_id_1"
+expect_present "auth off sees an account-area candidate" "$open_queue" "$mcp_candidate_id"
 
 # ---------------------------------------------------------------------------
 # A revoked token is a 401, indistinguishable from unknown and expired.
