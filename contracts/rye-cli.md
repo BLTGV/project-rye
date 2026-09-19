@@ -16,6 +16,11 @@ One executable, `./scripts/rye`, with verb-first subcommands:
 - `categories [--scope]` — the categories in a scope, what each means here,
   and whether it is on or off. See `contracts/category-vocabulary.md`.
 - `context [--scope]` — the agent's briefing for a scope.
+- `settlers --subject <uuid> --claim <assertion-type>`: who may settle this
+  claim, and which step of the lookup said so. Optional `--speaker <uuid>`,
+  `--speaker-ref <source-identity>`, `--domain <key>`, `--speech-act <act>`,
+  `--as-of <timestamp>`, `--scope <ref>`. See the settlement lookup section of
+  `contracts/sql-surface.md`. Advisory: it reports, it never refuses.
 - `sources inventory|pending-context` — what has been seen, what awaits a
   person.
 - `agents create|grant|issue-token|revoke-token|list|audit` — agent identity
@@ -28,7 +33,8 @@ never has to author it. Human output goes to stdout, diagnostics to stderr.
 `--json` emits exactly the JSON the corresponding SQL function returns
 (`rye_agent_context()`, `rye_plugin_catalog()`, `rye_skill_catalog()`,
 `rye_capability_catalog()`, `rye_source_inventory()`,
-`rye_pending_context_confirmations()`, `rye_categories()`). The CLI adds no
+`rye_pending_context_confirmations()`, `rye_categories()`,
+`rye_settlers()`). The CLI adds no
 fields of its own, so the shape of `--json` output is governed by
 `contracts/sql-surface.md` and, for `categories`,
 `contracts/category-vocabulary.md`.
@@ -54,5 +60,7 @@ Non-zero exit on any failure, with the reason on stderr. `--json` failures
 still exit non-zero; callers check the exit code first and parse second. A
 missing or unreachable database exits non-zero rather than prompting. The CLI
 is safe to re-run: `init` migrates forward, `onboard create` refuses a
-duplicate rather than overwriting. Nothing in the CLI deletes data, and
+duplicate rather than overwriting. `settlers` exits zero when it finds no
+settler: no settler is an answer, not a failure, and the reason is in the
+output. Nothing in the CLI deletes data, and
 `--fresh` is the one destructive flag — it is never implied.

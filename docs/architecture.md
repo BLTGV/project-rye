@@ -37,7 +37,11 @@ evidence rows. Candidates never answer questions. They surface in
 `accept_assertion()` or `reject_candidate()`, and only then does the claim
 become current. What the agent may write at all is bounded by the scope's
 enabled plugins and knowledge policy; a term outside them is refused with the
-policy named.
+policy named. Before recording anything as accepted, an agent asks
+`rye_settlers()` who may settle the claim: a recorded grant, then the
+relationship between speaker and subject, then the owner of the area. That read
+is advisory, so it shapes what the agent does and not what the database
+allows.
 
 **Out.** Three readers, one truth. Agents read `rye_agent_context()`,
 `agent_node_summary()`, and digests — summaries first, then what no summary

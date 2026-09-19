@@ -77,4 +77,26 @@ non-goals; work items and glossary now agree on "settle", "grant", "area
 owner", "kind of claim". Questions: four, all answered under "Assumed by
 default" above.
 
+### Architect, 2026-09-19
+Result: done. Changed: contracts/sql-surface.md (new "Settlement lookup"
+section: `rye_settlers()` signature, answer shape, three steps, agent
+exclusion, versioning, freshness, failure), contracts/plugin-manifest.md
+(new "Declared relationships the schema reads": `reports_to` and `owns`
+direction, temporal rule, who settles them, how they surface in category
+discovery), contracts/rye-cli.md (`settlers` subcommand, `--json`, exit
+zero on no settler), docs/architecture.md (one sentence),
+docs/decisions/0005-who-may-settle-lookup.md. Tested: none. Learned:
+knowledge_domains and domain_authorities have no RLS at all; only
+agent_api_tokens is protected in 0016 (Lead verified; flagged as a separate
+task, out of scope here). `authority_ref` is free text by convention
+`person:<slug>` and resolves to no node today; resolution rules are now in
+the contract. `rye_categories()` ignores `effective_to`, so an ended
+`reports_to` still appears in discovery counts; that is vocabulary, not
+truth. The plugin manifest schema has additionalProperties false and
+edge_types is a bare string array, so edge semantics live in the contract.
+Questions, both accepted by Lead: the agent-kit builder adds `owns` to
+rye-org `contributes.edge_types` and `expectation` to `assertion_types`;
+settler `kind` keeps a sixth value `other` for an area owner node that is
+not a person, team, role, or system.
+
 ## Close
