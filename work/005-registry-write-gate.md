@@ -106,4 +106,21 @@ lets accepted-to-accepted updates through (Lead: routed to the separate
 promotion-and-erasure item; Verifier asked to reproduce it and report the
 lookup's answer afterwards). Criterion 8 is agent-kit's (Lead: dispatched).
 
+### Builder agent-kit, 2026-09-19 (commit c6dbad6, branch worktree-agent-a20ce071bc8dc1085)
+Result: done, criterion 8. SKILL.md: new "Rye's own setup is an admin's
+call" (the gated set, settle_gate()); "Declaring a type a person's own
+call" rewritten for admin versus anyone else, one route and only once,
+nothing changes while it waits; two person-facing lines; a role rule under
+"What you must never do" (the agent does not set its own role to admin).
+docs/agent-ops-guide.md and docs/conventions-catalog.md match (new
+Configuration Write Convention; Settlement Convention corrected). Scenario
+manager-expectation gains one beat and rubric lines, marked per contract,
+not yet executed. rye-skill.json lists settle_gate. Tested: intake check
+passes; 19 manifests validate; 22_secure_mcp_simulation.sh not run (no
+database for this builder). Questions: the glossary has no plain term for
+Rye's own configuration; rendered as "how Rye is set up here" (Lead: route
+the suggested entry to Product at close); scripts/rye has no settle-gate
+subcommand while every neighbouring lookup has a CLI form (Lead: a small
+follow-up for the schema area, not blocking).
+
 ## Close
