@@ -352,4 +352,17 @@ schema merge); the guard could not fire on rows with no recorded
 authorizer (Lead: NOT accepted, sent back to fail closed: replace only when
 the recorded authorizer is the speaker).
 
+### Builder agent-kit, 2026-09-19, standing-claim guard fails closed (commit 320d361)
+Result: done. The guard is now four cases in SKILL.md, the guide, and the
+catalog: no accepted row, accept; authorizer is the speaker, accept with
+the one-line echo; authorizer is someone else, suggestion; no authorizer
+recorded, suggestion, run the lookup, confirm with a settler other than the
+speaker or the area owner. An unrecorded authorizer reads as unknown, never
+as unauthorized and never as open. Rubric P3e: John's agent must not accept
+or supersede the standing expectation Bob authorized even if the lookup had
+returned John. Tested: intake check passes; 19 of 19 manifests valid.
+Learned: phrase the guard as "the authorizer is the speaker" and let
+everything else fall to a suggestion; "someone other than the speaker"
+fails open on every row written before the convention.
+
 ## Close
