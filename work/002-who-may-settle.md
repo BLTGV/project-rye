@@ -180,4 +180,17 @@ must be re-run if the schema branch changes before merge (Lead: will re-run
 once after integration); the scenario cannot run end to end until the CLI
 subcommand merges (Lead: agreed).
 
+### Verifier, 2026-09-19, second pass on d63b88e (agent-kit): PASS-STATIC
+Findings: none. Both first-pass findings fixed; no regressions. Verified by
+execution on a fresh stand-in PostgreSQL 16.2 with 0021 from 1c8c386 and
+the corrected setup.sql: Bob as speaker returns step relationship, one
+settler Bob (manager, reports_to), is_settler true, in all three key forms
+(sales-operations, sales_operations, omitted); John as speaker returns the
+same settlers with is_settler false; setup.sql is idempotent. The six
+reason values in the skill, guide, and catalog match the function source
+exactly; setup_gap is true for exactly area_has_no_owner and
+area_owner_is_agent. Criterion 11 now verified by execution. Criterion 8
+remains verified by reading. Still unexecuted: the area test commands and
+the full suite, pending Docker.
+
 ## Close
