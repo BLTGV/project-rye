@@ -385,4 +385,47 @@ Base revision 01758a1. Merged worktree-agent-ae27942de1b4935c1 (dc91cc1)
 and worktree-agent-a7f18ff71cb202bfc (35e5b47, 320d361) with no conflicts.
 Final tree 716692f. Combined suite and Verifier pass in progress.
 
+### Lead, 2026-09-19, combined suite on 716692f: PASSED. Scenario rows executed.
+`./scripts/test-all.sh` on the merged tree 716692f: Docker flow OK
+(including 29_settlement_lookup.sql with the new cases, and host-run 21,
+22, 23), admin build plus check:routes OK, site build OK. Then on a fresh
+full install with the scenario's own setup.sql, through `./scripts/rye
+--json settlers --claim expectation --subject <John> --domain
+sales-operations`: speaker Bob, act expectation: [Bob Ferris], is_settler
+true, recognized true. Speaker John, act expectation: [Bob Ferris], false,
+true. Speaker John, act omitted: [Bob Ferris], false, recognized false.
+Speaker John, act banana: [Bob Ferris], false, recognized false. The
+agent-kit builder marked all four rows executed (commit ef3cff2, merged at
+52eda43, docs only).
+
+### Verifier, 2026-09-19, fifth pass on dc91cc1, 35e5b47, 320d361: PASS, conditional on the suite (which passed)
+The fail-open path is closed; criterion 3 verified by execution and now
+independent of the speech act; criterion 7 re-verified under the new rule
+order; test 29 fails at the first new case on ecea31a. Rule-order attacks
+all held: a grant beats rule 1; reports_to and owns fall through;
+unclassified with no act goes to the area owner, never self; no owner gives
+step none without error; zero setup survives; statement_about_other
+returns the subject then the manager, never the speaker. Skill sets, the
+nine acts, function literals, COMMENT, CLI help, and docs agree. The guard
+is a positive truth table. Finding, LOW: claim-type matching is
+case-sensitive and the contract does not say so; `Expectation` with
+self_commitment returns the subject, judged safe as a different stored
+type.
+
+### Lead, 2026-09-19: the low finding is wider than case. Item stays open one more round.
+Rye does not fold case, so `Expectation` is a different type. But Rye has
+type aliases: canonical_type('assertion_type', v) follows registry entries
+type_alias:assertion_type:<v>, and governing_scope(), the salience views,
+and 0019 match on the canonical type. rye_settlers() compares the raw
+string, and so does the skill's standing-claim guard. Where an organization
+aliases `requirement` to `expectation`, a call with claim type
+`requirement` and speech act self_commitment skips rule 1 and returns the
+subject as settler, and the guard would not see the manager's accepted
+`expectation`. Same fail-open shape, reachable through a documented
+feature. Sent to: schema builder (canonicalize the claim type and grants'
+claim_types before matching; report the canonical type additively; tests
+with a registered alias), agent-kit builder (guard compares canonical
+types), Architect (contract states alias resolution, case sensitivity, and
+the consumer obligation).
+
 ## Close
