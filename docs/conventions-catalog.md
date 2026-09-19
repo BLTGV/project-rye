@@ -17,8 +17,8 @@ Types are open conventions — write a new value and it exists, no migration req
 Onboarding and plugin metadata add convention-owned infrastructure types:
 
 - **Node types:** `onboarding_scope`, `intake_profile`, `retrieval_channel`, `intake_run`, `plugin`
-- **Edge types:** `scope_uses_profile`, `scope_enables_plugin`, `scope_applies_to_source`, `scope_uses_retrieval_channel`, `retrieved_via`, `observed_in_run`, `expected_by_profile`, `scope_has_context_gap`
-- **Assertion types:** `scope_status`, `scope_purpose`, `scope_boundary`, `scope_owner`, `expected_contexts`, `holding_context`, `unexpected_context_policy`, `blocked_contexts`, `retention_policy`, `evidence_policy`, `review_gate`, `agent_autonomy_policy`, `accepted_knowledge_policy`, `source_of_truth_policy`, `process_constraint`, `process_metric`, `improvement_cycle`, `convention_registry`, `plugin_policy_binding`
+- **Edge types:** `scope_uses_profile`, `scope_enables_plugin`, `scope_applies_to_source`, `scope_uses_retrieval_channel`, `retrieved_via`, `observed_in_run`, `expected_by_profile`, `scope_has_context_gap`, `reports_to`, `owns`
+- **Assertion types:** `scope_status`, `scope_purpose`, `scope_boundary`, `scope_owner`, `expected_contexts`, `holding_context`, `unexpected_context_policy`, `blocked_contexts`, `retention_policy`, `evidence_policy`, `review_gate`, `agent_autonomy_policy`, `accepted_knowledge_policy`, `source_of_truth_policy`, `process_constraint`, `process_metric`, `improvement_cycle`, `convention_registry`, `plugin_policy_binding`, `expectation`
 - **Event types:** `onboarding_started`, `scope_policy_recorded`, `plugin_policy_bound`, `onboarding_completed`, `scope_revision_proposed`
 
 Run `SELECT rye_catalog()` to see which types are in use in a given instance.
@@ -190,6 +190,83 @@ Candidates remain invisible to operational reads throughout review.
 - Evidence rows are append-only and inherit visibility from both ends.
 - Derivations inherit the maximum source classification and reject
   mixed-access sources.
+
+## Settlement Convention
+
+Who may settle a claim comes from one advisory lookup, `rye_settlers()`, in
+three steps: a recorded grant in `domain_authorities` for that claim type,
+then the relationship, then `knowledge_domains.owner_node_id`. The claim type
+is the `assertion_type` verbatim; there is no second vocabulary. Agents are
+never settlers — agent identities are dropped before a step is chosen.
+
+- A settler answer records the claim with `record_assertion(..., p_status :=
+  'accepted')`.
+- A non-settler answer records the same claim with `p_status := 'candidate'`
+  and the speaker's words as its backing. Nothing is refused and nothing is
+  dropped.
+- No settler at all (`step` `none`) still records the candidate. `setup_gap`
+  `true` means the area has no owner: a setup gap for a Rye admin, not an
+  error.
+- An empty `settlers` list may be RLS silence. It is never grounds to accept.
+
+`contracts/sql-surface.md` holds the normative shape. The lookup writes
+nothing and refuses nothing; it is a discipline skills follow, not a boundary
+the database holds.
+
+## Reporting Line And Ownership Convention
+
+Two edge types contributed by the `rye-org` plugin carry the relationship step
+of the settlement lookup. Their meaning is pinned in
+`contracts/plugin-manifest.md`, not in the manifest.
+
+- `reports_to`: source is the person reporting, target is the manager. A
+  person may have more than one; every one in effect is read. The manager
+  settles what is expected of the report.
+- `owns`: source is the owner (person, team, or system node), target is the
+  thing owned. The owner settles facts about that thing. Ownership of a thing,
+  not of a policy — `owns_policy` stays what it is.
+
+Both follow the Edge Temporal Convention: `effective_from` / `effective_to`,
+never deleted. `effective_to` ends a line that ended; `archived_at` is for a
+line recorded in error and removes it from every `as_of` answer.
+
+Neither edge is settled by the people it connects. A claim whose type is
+`reports_to` or `owns` has no relationship default and falls through to the
+owner of the area. An agent proposes these edges and never settles them.
+
+## Expectation Convention
+
+`expectation` is an assertion type contributed by the `rye-org` plugin: one
+thing a person is expected to do, set on them by someone else. The subject is
+the person the expectation is on. The settler is that person's manager over
+`reports_to`, not the person themselves, so `p_speech_act := 'expectation'`
+selects the manager default.
+
+- `assertion_key` names the expectation so it is single-valued per topic
+  (`sales_call_logging`), not `default`.
+- A statement from the subject that contradicts an accepted `expectation` does
+  not supersede it. It is recorded as a candidate on the same tuple with its
+  reason, and the accepted expectation stands until a settler changes it.
+
+## Authorizer And Executor Convention
+
+A helper write carries two named fields in the evidence `attrs`, so the person
+who authorized a claim stays distinct from the agent that executed the write:
+
+- `authorizer` — the node id of the person whose authority settled it. Also
+  set `witness_node_id` on the evidence row to that person when they are the
+  source.
+- `executor` — the `agent_key` of the agent that performed the write, or the
+  user id for a direct human write.
+
+Optional companions on the same `attrs`: `settled_via` (`grant`,
+`relationship`, `area_owner`) and `settled_relationship` (`self`, `manager`,
+`owner`), recording which step of the settlement lookup produced the
+authority. A caller-supplied actor label is not identity proof; these fields
+are provenance, not authorization.
+
+Evidence rows are append-only, so the pair is durable and never rewritten.
+Both fields are internal identifiers and never appear in what a person hears.
 
 ## Registry and Confidence Convention
 

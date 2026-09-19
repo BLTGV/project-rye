@@ -23,6 +23,7 @@
     "edge_types": [
       "member_of",
       "reports_to",
+      "owns",
       "responsible_for",
       "owns_policy",
       "follows_procedure",
@@ -39,6 +40,7 @@
       "policy_status",
       "procedure_status",
       "responsibility_scope",
+      "expectation",
       "process_constraint",
       "process_metric",
       "improvement_cycle",

@@ -18,6 +18,13 @@ skill files as context onboard a realistic business via interview, and can a
 second agent with ONLY the reader skill answer business questions from what
 was stored?
 
+Designed, not yet run: `scenarios/manager-expectation` — two people, two
+agents, one settlement lookup. A manager sets an expectation on his report and
+it is accepted; the report says no and it is recorded as a suggestion that
+objects to it. Grades the accept-versus-suggest outcome and that no Rye word
+reaches either person. Needs `rye_settlers()` and the `settlers` CLI
+subcommand installed before it can execute.
+
 ## Artifacts per scenario
 
 - `ground_truth.md` — full business reality. Grader-only. Never shown to
@@ -28,6 +35,11 @@ was stored?
 - `rubric.md` — three sections: (A) must/should/must-not DB state,
   (B) blind reader questions with expected answers, (C) process
   observations from the transcript.
+
+A scenario with more than one person has one brief per person
+(`persona_brief_<name>.md`) and may carry a `setup.sql` that seeds the graph
+the agents read. `manager-expectation` has both, and its rubric sections are
+(A) DB state, (B) process, (C) the words each person heard.
 
 ## Run layout (untracked, disposable)
 
