@@ -202,18 +202,53 @@ never settlers — agent identities are dropped before a step is chosen.
 Callers pass both the claim type and the speech act. The relationship step
 reads the claim type first:
 
-- Other-set claim types are claims one person sets on another. The set is
+Both sets are tested on the canonical type, after alias resolution.
+
+- Other-set claim types are claims one person sets on another. The core set is
   `expectation`. These give the manager only, never the person the claim is
   about, whatever speech act is passed and whether one is passed at all.
-- Self-set claim types are a person's own commitment or report about
-  themselves. The set is `commitment`, `self_commitment`, `self_report`.
-  These give self.
+- Self-set claim types are ones a person settles about themselves. The core
+  set is `commitment`, `self_commitment`, `self_report`, plus any type
+  declared self-settled in this instance. These give self.
+- The subject is returned only when the canonical claim type is positively in
+  the self set. No speech act does it alone: `self_commitment` on an
+  undeclared type returns nobody local, not the subject. Unknown is
+  restrictive, and so is blindness — a caller who cannot see an alias or a
+  declaration gets the stricter answer, never a wider one.
+- Matching is case-sensitive and case is not folded. `Expectation` with no
+  alias is a different type in neither set. The fix is a `type_alias` entry.
 - Otherwise a recognized speech act selects the default, and a null or
   unrecognized one selects none and falls through to the area owner. Saying
   less never widens the answer.
 - `claim.speech_act_recognized` `false` means the caller passed a value
   outside the recognized set. Nothing is recorded as accepted while it is
   false: classify again, pass a recognized act, and look again.
+
+### Declaring a self-settled type
+
+The self set grows as data, not code. A registry entry keyed
+`self_settled_type:<canonical assertion type>` with the jsonb value `true`
+adds a member; any other value, including `false` and null, is not one. It is
+read with `registry_value()` — scope, then plugin, then core — exactly as
+`type_alias` entries are.
+
+Rye has no dedicated registry-writing helper. Write it with
+`record_assertion()` as an accepted `registry_entry` on the registry or scope
+node, claim `{"value": true}`, and never by touching a base table. The key
+carries the canonical type; an alias is registered as an alias, not as a
+second entry. Core members need no row, so a fresh instance works with none.
+
+The declaration is itself a claim: run the settlement lookup on it, and record
+it as a suggestion unless the speaker may settle it. In plain words it sounds
+like "people decide their own availability", said by the area owner or a Rye
+admin. Plugin manifests cannot contribute self-settled types today.
+
+An agent picks a claim type the category discovery request lists rather than
+inventing one. An invented type is in neither set, so a claim about the
+speaker routes to the area owner instead of settling on their word. When that
+happens the agent records a suggestion and says it will check, in the same
+words it uses for any statement the speaker cannot settle. It never explains
+types or registries to the person.
 
 The lookup reads no assertion, so it answers who may settle a claim and not
 who may unsettle one. Before accepting on `is_settler` `true`, check

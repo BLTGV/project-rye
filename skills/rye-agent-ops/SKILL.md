@@ -84,13 +84,15 @@ reconstruct a past answer.
 Always pass both `--claim` and `--speech-act`. They are two different
 selectors and the answer depends on both.
 
-`p_claim_type` is the claim's `assertion_type` verbatim — there is no separate
-vocabulary and nothing to register. Two small sets of claim types carry
-meaning of their own, matched on the exact string:
+`p_claim_type` is the claim's `assertion_type` verbatim. Two sets of claim
+types carry meaning of their own, both tested on the **canonical** type, after
+alias resolution:
 
-- **Other-set**, a claim one person sets on another: `expectation`.
-- **Self-set**, a person's own commitment or report about themselves:
-  `commitment`, `self_commitment`, `self_report`.
+- **Other-set**, a claim one person sets on another. The core set is
+  `expectation`.
+- **Self-set**, a claim a person settles about themselves. The core set is
+  `commitment`, `self_commitment`, `self_report`, plus any type declared as
+  self-settled in this instance.
 
 `p_speech_act` is your classification of what was said. The recognized values
 are `self_commitment`, `self_report`, `expectation`, `statement_about_other`,
@@ -103,6 +105,25 @@ person it is set on is never returned as its settler — whatever speech act you
 pass, and whether you pass one at all. Saying less never widens the answer: a
 missing or unrecognized speech act selects no relationship default and falls
 through to the owner of the area.
+
+**The subject is returned only when the claim type is positively in the self
+set.** No speech act makes a person their own settler on its own. Pass
+`self_commitment` on a type nobody has declared self-settled and the answer is
+nobody local, not the speaker. Unknown is restrictive, and so is blindness: if
+you cannot see the alias or the declaration, you get the stricter answer, never
+a wider one. Matching is case-sensitive and case is not folded — `Expectation`
+with no alias registered is a different type in neither set.
+
+### Prefer a declared type over one you invent
+
+Run the category discovery request before you choose a claim type and reuse a
+type it lists. A type you invent, or a known one spelled your way, is in
+neither set, so a claim about the speaker routes to the owner of the area
+instead of settling on their word. For a lone person that owner is themselves
+and it costs nothing. On a team it costs one question.
+
+If a person tells you the type they want is their own call to make, that is a
+declaration for the area owner to settle, not a thing you assume. See below.
 
 `speech_act_recognized` is false when you passed a value outside the
 recognized set. **Do not record anything as accepted while it is false.**
@@ -128,10 +149,10 @@ of a standing one, and `is_settler` `true` is not permission to replace
 something you never looked for.
 
 The gap has one shape. A person restates or contradicts something already
-accepted about themselves that somebody else authorized, under a claim type
-outside the other-set list — a quota their manager set, say. For that claim
-type they genuinely are a settler, so the lookup returns them as one, and
-nothing in the answer mentions the standing claim.
+accepted about themselves, of a self-set type, that somebody else authorized —
+a quota their manager set, say. For that claim type they genuinely are a
+settler, so the lookup returns them as one, and nothing in the answer mentions
+the standing claim.
 
 So before you accept anything on `is_settler` `true`, read
 `current_valid_assertions` for an accepted row on the same subject, assertion
@@ -233,6 +254,64 @@ The reason is what a settler needs to answer.
 
 Then tell the person whose call it is and that you will check with them. Name
 the settler. Do not tell them they lack authority and do not name a status.
+
+### An undeclared claim type about the speaker
+
+A person says something about themselves under a claim type nobody has
+declared self-settled. The lookup does not return them; `via` is `area_owner`
+and the settler is the owner of the area. Handle it exactly as any other
+statement the speaker cannot settle: record the suggestion and say you will
+check with the owner.
+
+"I've got that down. It's Priya's call, so I'll check with her and let you
+know."
+
+Say nothing about types, registries, declarations, or why the answer came out
+that way. The person said something ordinary about themselves; the reason it
+routed is yours to carry. Do not apologize for it and do not reach for a
+different type to make it settle — that is relabelling, and it is forbidden
+below.
+
+### Declaring a type a person's own call
+
+For agents working with an area owner or a Rye admin. The self set grows as
+data. A person who may settle it says in plain words that a kind of thing is
+each person's own call — "people decide their own availability" — and that
+becomes one registry entry.
+
+Rye has no dedicated registry-writing helper. Write it with
+`record_assertion()` on the registry or scope node, the same shape
+`type_alias` entries use, and never by touching a base table:
+
+```sql
+SELECT record_assertion(
+    p_assertion_type  := 'registry_entry',
+    p_assertion_key   := 'self_settled_type:availability',
+    p_subject_node_id := '<registry_or_scope_node_uuid>'::uuid,
+    p_claim           := '{"value": true}'::jsonb,
+    p_status          := 'accepted',
+    p_basis           := 'reported',
+    p_evidence        := ARRAY[jsonb_build_object(
+        'kind', 'source',
+        'event_id', '<utterance_event_uuid>',
+        'witness_node_id', '<speaker_uuid>',
+        'attrs', jsonb_build_object('authorizer', '<speaker_uuid>',
+                                    'executor', '<agent_key>')
+    )]
+);
+```
+
+The key carries the **canonical** type. An alias is registered as an alias,
+never as a second self-settled entry. Any value but `true` is not a member.
+`registry_value()` reads it back, scope first, then plugin, then core.
+
+This is a claim like any other, so ask who may settle it first. If the speaker
+may, record it accepted as above. If not, record it as a suggestion and check
+with whoever may. The core members need no entry, so a fresh instance settles
+a plain commitment with nothing configured.
+
+Echo it in one line and in their words: "Got it — people set their own
+availability." Never read the key back to them.
 
 ### Nobody settles it
 
