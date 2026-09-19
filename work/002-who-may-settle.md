@@ -428,4 +428,36 @@ with a registered alias), agent-kit builder (guard compares canonical
 types), Architect (contract states alias resolution, case sensitivity, and
 the consumer obligation).
 
+### Alias round, 2026-09-19: Architect (4caea84), agent-kit 002b4e4, schema 247365e
+Architect: contract states p_claim_type and grants' claim_types are
+resolved with canonical_type('assertion_type', ...) before any rule or
+grant is tested; matching is case-sensitive after resolution; an alias
+cycle raises; claim.canonical_claim_type is an additive key; consumers
+compare canonical types before replacing a standing claim. Rejected
+alternative recorded: folding case in the lookup. Learned: resolution
+follows the DEFAULT_SCOPE registry value, so it is scope-dependent.
+Agent-kit: the standing-claim query wraps both sides in canonical_type();
+agents write the canonical type the lookup reports; type names are
+case-sensitive. Chose the function over a view because the only view with
+canonical types aggregates by type and cannot answer per subject and key.
+Schema: rye_settlers() resolves the claim type and grant claim_types
+through canonical_type(); chose it over the scoped variant because the
+contracted signature has no onboarding-scope argument. Test 29 fails on
+52eda43 at the first alias case with exactly the reported answer and passes
+after. Full Docker flow passed on the builder's branch. Executed through
+the CLI with requirement->expectation and promise->commitment aliases and
+Mara granted `promise`: John/requirement/self_commitment: [Bob], false;
+John/requirement/no act: [Bob], false; John/promise/no act: step grant,
+[Mara], false; Mara/commitment/no act: step grant, [Mara], true;
+John/Expectation/self_commitment: [John], true (pinned as documented:
+case-sensitive, a different type). Learned: canonical_type() reads
+current_valid_assertions, so an alias hidden by RLS or still a candidate
+does not apply. Lead: asked the Verifier to check whether an agent role can
+fail to see an alias and so get the raw, more permissive answer.
+
+### Lead, 2026-09-19, integration of the alias round
+Base revision 4caea84. Merged worktree-agent-ae27942de1b4935c1 (247365e)
+and worktree-agent-a7f18ff71cb202bfc (002b4e4), no conflicts. Final tree
+858eae2. Combined suite running.
+
 ## Close
