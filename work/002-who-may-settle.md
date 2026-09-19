@@ -59,6 +59,7 @@ agent checks with someone who can."
 - When the owner of an area is the person a reporting line is about, the Rye admin is asked instead, since nobody settles a claim about their own authority. Raised by Product. Overturn: Casey.
 - A person's asking preferences bind only their own agents. Raised by Product. Overturn: Casey.
 - An unsettled objection never expires; it stays visible as unsettled. Raised by Product. Overturn: Casey.
+- A person settles a claim about themselves only when its type is positively known to be a self type (commitment, self_commitment, self_report, plus any the organization declares). A type nobody has declared goes to the area owner, even with a self speech act. Chosen by the Lead after three fail-open variants traced to "unrecognized means the person". Cost: in a team, the area owner is asked about undeclared self types until they are declared. Overturn: Casey.
 - A lone person's decisions, agreements, and unclassified statements settle through area ownership, so the first area must exist with that person as owner. "No setup" means none the person does: the agent creates the first area in its first conversation. That onboarding step is a later work item. Overturn: Casey.
 - The v0.3 non-goal "tokens" means the forecasting-era stake concept, not the credential an agent presents to the API. Raised by Product. Overturn: Casey.
 
@@ -459,5 +460,42 @@ fail to see an alias and so get the raw, more permissive answer.
 Base revision 4caea84. Merged worktree-agent-ae27942de1b4935c1 (247365e)
 and worktree-agent-a7f18ff71cb202bfc (002b4e4), no conflicts. Final tree
 858eae2. Combined suite running.
+
+### Lead, 2026-09-19, combined suite on 858eae2: PASSED
+`./scripts/test-all.sh`: Docker flow OK, admin build plus check:routes OK,
+site build OK.
+
+### Verifier, 2026-09-19, sixth pass on the alias round, live Docker install: FAIL
+HIGH: alias resolution runs under the caller's RLS, and being blind to an
+alias yields the more permissive answer. Executed with a purpose-made
+non-superuser login: with `requirement`->`expectation` public, every role
+gets [Bob], is_settler false. With the alias assertion classified
+confidential, viewer, team_member, and agent:some-agent all get
+[John/self], is_settler TRUE where admin gets [Bob], false. Gate:
+assertion_read_policy on rye.assertions via role_classification_access;
+classifying the Rye Core Registry node hides every alias the same way. Same
+direction for a candidate-only alias and an alias outside DEFAULT_SCOPE.
+Everything else passed by execution: test 29 on the live install; alias
+cases; grant on alias matches canonical and the reverse; chains resolve; a
+cycle raises with no fallback; the five speech-act calls; three
+agent-exclusion cases; the skill's standing-claim query run verbatim found
+Bob's row for an incoming `requirement`. Note: the `rye` login in the test
+database is a superuser and bypasses RLS, so ad hoc role probes on it are
+meaningless; scripts/conformance.sh already detects this and SET ROLEs to a
+non-superuser test role, so the suite itself is sound (Lead checked).
+
+### Lead, 2026-09-19: third fail-open variant, one root. Fixing the root, not a third path.
+(1) null speech act gave the union; (2) an aliased claim type skipped rule
+1; (3) a hidden alias does the same. All end at the documented limit the
+Lead had accepted: an unrecognized claim type plus a self speech act
+returns the subject. Every way of making an expectation look unrecognized
+reopens it. New direction sent to the Architect: the subject is returned as
+a settler only when the canonical claim type is positively in the self set;
+unknown means restrictive; the self set is extensible as registry data with
+literal core members so zero setup survives; a caller blind to an alias or
+a self-set entry gets the more restrictive answer. Rejected: a SECURITY
+DEFINER alias resolver and refusing classified aliases, since both fix
+visibility only. This changes behavior for claim types nobody has declared:
+they go to the area owner instead of the person. Listed for Casey below.
 
 ## Close
