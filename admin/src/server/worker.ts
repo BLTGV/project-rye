@@ -53,9 +53,9 @@ import {
   type AgentAuthContext,
 } from "./queries";
 import {
-  DEFERRED_CHECKS,
-  matchRoutePolicy,
   matchesPattern,
+  normalizeMethod,
+  routeDecision,
   type RoutePolicy,
 } from "./route-policy";
 
@@ -368,13 +368,20 @@ async function enforceRoutePolicy(
  * nothing at all (`404`). Derived from Hono's own registry so it cannot drift.
  */
 let workerApiRoutes: { method: string; path: string }[] | null = null;
-function workerServesApiPath(method: string, path: string): boolean {
-  if (!workerApiRoutes) {
+let workerApiRoutesSize = -1;
+export function workerServesApiPath(method: string, path: string): boolean {
+  // Recomputed when the registry grows, so a route registered after the first
+  // request is still seen. Hono registers every route at module load in
+  // production; the check exists so tests can add one.
+  if (!workerApiRoutes || workerApiRoutesSize !== app.routes.length) {
     workerApiRoutes = app.routes
       .filter((route) => route.path.startsWith("/api/") && !route.path.includes("*"))
       .map((route) => ({ method: route.method.toUpperCase(), path: route.path }));
+    workerApiRoutesSize = app.routes.length;
   }
-  const wanted = method.toUpperCase();
+  // HEAD is dispatched to the GET handler, so it must resolve like GET here
+  // too, or a HEAD request would look like a path the Worker does not serve.
+  const wanted = normalizeMethod(method);
   return workerApiRoutes.some(
     (route) =>
       (route.method === "ALL" || route.method === wanted) && matchesPattern(route.path, path)
@@ -390,6 +397,14 @@ function rowFilterAgentId(c: RyeContext): string | null {
 /**
  * True when the token holds an active, unexpired grant for `capability` that
  * names no area. Such a grant is instance-wide and holds every area.
+ *
+ * This is the one predicate in the authorization path evaluated here rather
+ * than by the schema. `has_agent_capability` answers "holds it somewhere" when
+ * given no area keys, which is not the same question, and no other helper
+ * expresses "the grant names no area". Adding one is a schema migration, which
+ * work item 003 forbids. The grant rows read here come straight out of
+ * `authenticate_agent_token`, so this is the same authorization model and the
+ * same data, not a second one. Replace it with a schema helper when one exists.
  */
 function holdsInstanceWide(auth: AgentAuthContext | null, capability: string): boolean {
   if (!auth) return false;
@@ -439,11 +454,11 @@ app.use("/api/*", async (c, next) => {
     return;
   }
 
-  const policy = matchRoutePolicy(c.req.method, c.req.path);
-  c.set("policy", policy);
+  const decision = routeDecision(c.req.method, c.req.path, workerServesApiPath);
+  c.set("policy", decision.policy);
 
   // The only two routes that take no token at all.
-  if (policy?.check === "none") {
+  if (decision.kind === "open") {
     c.set("auth", null);
     await next();
     return;
@@ -463,26 +478,23 @@ app.use("/api/*", async (c, next) => {
   c.set("auth", auth);
 
   // Any valid token, caller's own record only.
-  if (policy?.check === "self") {
+  if (decision.kind === "self") {
     await next();
     return;
   }
 
-  if (!policy) {
-    // No row in the contract's table. A path the Worker does not serve at all
-    // is a 404; a route someone added without declaring it is refused.
-    if (!workerServesApiPath(c.req.method, c.req.path)) {
-      await next();
-      return;
-    }
-    return await refuseRoute(c, auth, "route_undeclared", "route declares no capability");
+  // No row and no handler: let the 404 through.
+  if (decision.kind === "unmatched") {
+    await next();
+    return;
   }
 
-  if (policy.check === "deny") {
-    return await refuseRoute(c, auth, policy.action, "route not available to agent tokens");
+  // A `deny` row, or a route the Worker serves that the table does not declare.
+  if (decision.kind === "refuse") {
+    return await refuseRoute(c, auth, decision.action!, decision.logReason!);
   }
 
-  if (policy.check === "global" || policy.check === "global + row filter") {
+  if (decision.kind === "authorize") {
     const blocked = await enforceRoutePolicy(c);
     if (blocked) return blocked;
     await next();
@@ -492,8 +504,9 @@ app.use("/api/*", async (c, next) => {
   // domain, domain + scope, and target checks need the area keys or the target
   // that only the handler can resolve. Let it run, then fail closed if it did
   // not perform the check.
+  const policy = decision.policy!;
   await next();
-  if (DEFERRED_CHECKS.has(policy.check) && !c.get("policyChecked") && c.res.status < 400) {
+  if (!c.get("policyChecked") && c.res.status < 400) {
     await recordAgentDenial(sql, {
       agentId: auth.agent_id,
       action: policy.action,

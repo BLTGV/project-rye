@@ -10,6 +10,12 @@ if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
   exit 0
 fi
 
+# The deny-by-default decision is pure and needs no database, so check every
+# branch of it first — including the ones no production route can reach over
+# HTTP, such as a route the Worker serves that the policy table does not
+# declare. Runs standalone as: cd admin && npm run check:routes
+npm --prefix admin run --silent check:routes
+
 pick_port() {
   node -e "const net = require('node:net'); const server = net.createServer(); server.listen(0, '127.0.0.1', () => { console.log(server.address().port); server.close(); });"
 }
@@ -141,6 +147,15 @@ SELECT rye.create_knowledge_candidate(
   '{}'::jsonb
 );
 
+-- A candidate whose area keys are all unsluggable. has_agent_capability drops
+-- such keys, so a filter that counted array length instead of testing the keys
+-- would hand this row to every rye.review.read holder. It is keyless.
+SELECT rye.create_knowledge_candidate(
+  'decision',
+  'API security unsluggable key candidate marker.',
+  '{"domain_keys":["","--"]}'::jsonb
+);
+
 INSERT INTO rye.nodes (node_type, label, properties)
 VALUES ('account', 'API Security Test Account', '{"suite":"api_security"}')
 RETURNING id;
@@ -249,9 +264,26 @@ for route in "${ungated_routes[@]}"; do
   expect_status "no-grant token on ${route}" 403 -H "$(auth "$nogrant_token")" "${BASE_URL}${route}"
 done
 
-# A route that declares no capability is refused by default: POST to a path the
-# Worker serves only for GET is a 404, but a declared deny route is a 403.
 expect_status "unmatched path" 404 -H "$(auth "$reviewer_token")" "${BASE_URL}/api/not-a-route"
+
+# HEAD is dispatched to the GET handler, so it is judged by the GET row. Any
+# method with no row and no handler falls through to the 404 without running
+# anything. Both directions are checked exhaustively by `npm run check:routes`;
+# these probe the real server over the wire.
+expect_status "HEAD on health" 200 -I "${BASE_URL}/api/health"
+expect_status "HEAD without a token" 401 -I "${BASE_URL}/api/catalog"
+expect_status "HEAD on a deny route" 403 -I -H "$(auth "$reviewer_token")" "${BASE_URL}/api/dashboard"
+expect_status "HEAD on a deny route, no grants" 403 -I -H "$(auth "$nogrant_token")" "${BASE_URL}/api/workspace/crm"
+expect_status "HEAD on a capability route without the grant" 403 -I -H "$(auth "$nogrant_token")" "${BASE_URL}/api/catalog"
+expect_status "HEAD on a capability route with the grant" 200 -I -H "$(auth "$reviewer_token")" "${BASE_URL}/api/catalog"
+expect_status "HEAD on the domains listing" 200 -I -H "$(auth "$reviewer_token")" "${BASE_URL}/api/domains"
+
+for method in PUT PATCH DELETE; do
+  expect_status "${method} on a deny route" 404 \
+    -X "$method" -H "$(auth "$reviewer_token")" "${BASE_URL}/api/dashboard"
+  expect_status "${method} on a capability route" 404 \
+    -X "$method" -H "$(auth "$reviewer_token")" "${BASE_URL}/api/catalog"
+done
 
 # The four console rollups are closed to every agent token, including one that
 # holds every capability the instance defines for its area.
@@ -414,6 +446,13 @@ expect_absent "title agent does not see account candidate" "$title_queue" "$cand
 title_keyless="$(curl -sS -H "$(auth "$title_token")" "${BASE_URL}/api/review-queue?include_closed=1&q=keyless")"
 expect_absent "title agent does not see keyless candidate" "$title_keyless" "keyless candidate marker"
 
+# Area keys that no sluggable key survives are keyless, not "holds it somewhere".
+reviewer_unsluggable="$(curl -sS -H "$(auth "$reviewer_token")" "${BASE_URL}/api/review-queue?include_closed=1&q=unsluggable")"
+expect_absent "reviewer does not see unsluggable-key candidate" "$reviewer_unsluggable" "unsluggable key candidate marker"
+
+title_unsluggable="$(curl -sS -H "$(auth "$title_token")" "${BASE_URL}/api/review-queue?include_closed=1&q=unsluggable")"
+expect_absent "title agent does not see unsluggable-key candidate" "$title_unsluggable" "unsluggable key candidate marker"
+
 # Counts report what was returned, not what was withheld. No candidate anywhere
 # in this instance carries the title agent's area, so its totals are zero.
 title_all="$(curl -sS -H "$(auth "$title_token")" "${BASE_URL}/api/review-queue?include_closed=1")"
@@ -485,6 +524,8 @@ expect_present "auth off sees title authority" "$open_domains" "api-title-author
 
 open_keyless="$(curl -sS "${OPEN_URL}/api/review-queue?include_closed=1&q=keyless")"
 expect_present "auth off sees the keyless candidate" "$open_keyless" "keyless candidate marker"
+open_unsluggable="$(curl -sS "${OPEN_URL}/api/review-queue?include_closed=1&q=unsluggable")"
+expect_present "auth off sees the unsluggable-key candidate" "$open_unsluggable" "unsluggable key candidate marker"
 open_queue="$(curl -sS "${OPEN_URL}/api/review-queue?include_closed=1&q=Brightline")"
 expect_present "auth off sees the account candidate" "$open_queue" "$candidate_id_1"
 

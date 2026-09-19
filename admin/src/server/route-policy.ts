@@ -86,6 +86,17 @@ export const ROUTE_POLICIES: readonly RoutePolicy[] = [
   { method: "POST", pattern: "/api/assertions/:id/reject", action: "assertion_reject", capability: "rye.candidate.adjudicate", check: "target" },
 ];
 
+/**
+ * Hono dispatches a HEAD request to the GET handler, so HEAD must be judged by
+ * the GET route's policy. Without this a HEAD request finds no row, looks
+ * undeclared, and — if the registry lookup also misses it — runs the handler
+ * with no capability check at all.
+ */
+export function normalizeMethod(method: string): string {
+  const upper = method.toUpperCase();
+  return upper === "HEAD" ? "GET" : upper;
+}
+
 function segmentsOf(path: string): string[] {
   return path.split("/").filter((part) => part.length > 0);
 }
@@ -118,7 +129,7 @@ export function matchesPattern(pattern: string, path: string): boolean {
  * not list the route. Null means refuse; it never means allow.
  */
 export function matchRoutePolicy(method: string, path: string): RoutePolicy | null {
-  const wanted = method.toUpperCase();
+  const wanted = normalizeMethod(method);
   let best: RoutePolicy | null = null;
   let bestScore = -1;
   for (const policy of ROUTE_POLICIES) {
@@ -130,4 +141,56 @@ export function matchRoutePolicy(method: string, path: string): RoutePolicy | nu
     }
   }
   return best;
+}
+
+/**
+ * What the middleware must do with a request, decided from the table alone.
+ *
+ * - `open`: no token, no check. The two exempt routes.
+ * - `self`: any valid token, caller's own record. No capability.
+ * - `authorize`: the middleware runs the capability call itself.
+ * - `defer`: the handler runs it, because only the handler knows the area keys
+ *   or the target. The middleware fails the request closed if it does not.
+ * - `refuse`: `403`. A `deny` row, or a route the Worker serves with no row.
+ * - `unmatched`: no row and no handler. Falls through to the `404`.
+ *
+ * Pure, and separated from the middleware so every branch can be exercised
+ * without a database. `servesPath` answers whether the Worker has a handler.
+ */
+export interface RouteDecision {
+  kind: "open" | "self" | "authorize" | "defer" | "refuse" | "unmatched";
+  policy: RoutePolicy | null;
+  /** Action name for the audit row, on `refuse` only. */
+  action?: string;
+  /** Free-text reason written to the audit row, on `refuse` only. */
+  logReason?: string;
+}
+
+export function routeDecision(
+  method: string,
+  path: string,
+  servesPath: (method: string, path: string) => boolean
+): RouteDecision {
+  const policy = matchRoutePolicy(method, path);
+  if (!policy) {
+    if (!servesPath(method, path)) return { kind: "unmatched", policy: null };
+    return {
+      kind: "refuse",
+      policy: null,
+      action: "route_undeclared",
+      logReason: "route declares no capability",
+    };
+  }
+  if (policy.check === "none") return { kind: "open", policy };
+  if (policy.check === "self") return { kind: "self", policy };
+  if (policy.check === "deny") {
+    return {
+      kind: "refuse",
+      policy,
+      action: policy.action,
+      logReason: "route not available to agent tokens",
+    };
+  }
+  if (DEFERRED_CHECKS.has(policy.check)) return { kind: "defer", policy };
+  return { kind: "authorize", policy };
 }

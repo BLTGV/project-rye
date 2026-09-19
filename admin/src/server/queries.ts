@@ -1851,25 +1851,36 @@ export async function fetchCandidateReviewQueue(
            AND n.archived_at IS NULL
            -- Area filter for agent callers. Applied here, before every count
            -- and facet below, so a total never reports rows that were withheld.
+           --
+           -- Only keys that rye_slugify_key accepts count. has_agent_capability
+           -- silently drops the rest, so a candidate carrying [''] or ['--']
+           -- would otherwise reach the "holds it somewhere" branch and be
+           -- returned to every rye.review.read holder. A candidate with no
+           -- sluggable key is keyless: bool_or over zero rows is NULL, and the
+           -- COALESCE falls through to the instance-wide test.
            AND (
              $7::uuid IS NULL
-             OR CASE
-                  WHEN jsonb_typeof(n.properties->'target_payload'->'domain_keys') = 'array'
-                   AND jsonb_array_length(n.properties->'target_payload'->'domain_keys') > 0
-                  THEN EXISTS (
-                    SELECT 1
+             OR COALESCE(
+                  (
+                    SELECT bool_or(
+                             rye.has_agent_capability(
+                               $7::uuid,
+                               'rye.review.read',
+                               ARRAY[dk.domain_key]::text[],
+                               NULL
+                             )
+                           )
                     FROM jsonb_array_elements_text(
-                           n.properties->'target_payload'->'domain_keys'
+                           CASE
+                             WHEN jsonb_typeof(n.properties->'target_payload'->'domain_keys') = 'array'
+                               THEN n.properties->'target_payload'->'domain_keys'
+                             ELSE '[]'::jsonb
+                           END
                          ) AS dk(domain_key)
-                    WHERE rye.has_agent_capability(
-                            $7::uuid,
-                            'rye.review.read',
-                            ARRAY[dk.domain_key]::text[],
-                            NULL
-                          )
-                  )
-                  ELSE $8::boolean
-                END
+                    WHERE rye.rye_slugify_key(dk.domain_key) IS NOT NULL
+                  ),
+                  $8::boolean
+                )
            )
        ),
        filtered AS (
