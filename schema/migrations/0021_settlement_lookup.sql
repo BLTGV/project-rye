@@ -11,7 +11,10 @@
 --
 -- Agents are never settlers. An agent carries the authority of the person it
 -- acts for and none of its own, so an agent ref is dropped before any step
--- picks a winner and counted in excluded_agents.
+-- picks a winner and counted in excluded_agents. The check fails closed on the
+-- `agent:` prefix and matches identities on their stored slug, because
+-- create_agent_identity() slugifies agent_key and a ref spelled `agent:my-agent`
+-- would otherwise match the stored `my_agent` not at all.
 
 SET search_path = rye, pg_catalog, public;
 
@@ -79,23 +82,60 @@ $$ LANGUAGE plpgsql STABLE;
 COMMENT ON FUNCTION rye_settler_resolve_ref(text) IS
     'Resolve a settler ref to a visible node id, or NULL. A uuid matches by id; an <external_source>:<external_id> pair matches both columns; anything else matches external_id alone. Used by rye_settlers(); a ref that resolves to nothing yields an unbound settler, never an error.';
 
--- An agent identity is never a settler. A ref is an agent when it names an
--- agent_identities row directly or as `agent:<agent_key>`, or when the node it
--- resolves to is an agent by node_type or attrs->>'actor_kind'.
+-- An agent identity is never a settler, and this is the one place that rule
+-- lives. Two rules, in this order:
+--
+-- 1. Fail closed on the prefix. Any ref whose first non-whitespace characters
+--    are `agent` followed by a colon is an agent, whatever the case and
+--    whatever whitespace sits at the front or around the colon, and whether or
+--    not an agent_identities row backs it. A ref that says it is an agent
+--    never settles. The alternative — treating an unmatched `agent:` ref as an
+--    ordinary person — turns a typo or a deleted identity into authority.
+--    Whitespace here means more than PostgreSQL's trim(), which strips plain
+--    spaces only: tab, CR, LF, form feed, vertical tab, and the non-breaking
+--    space U+00A0 are all stripped and all ignored around the colon.
+-- 2. Match on the slug, not the spelling. create_agent_identity() stores
+--    rye_slugify_key(agent_key), so `my-agent`, `My Agent`, and `my_agent`
+--    are one key and a ref in any of those spellings is the same agent.
+--
+-- Unicode lookalike letters are out of scope. A ref whose `a` is a Cyrillic
+-- а is not an agent prefix here; it slugifies to a key no identity has and
+-- resolves to no node, so it comes back as an unbound settler with no node
+-- behind it, which is what any other unrecognised ref does.
+--
+-- The prefix rule reads `agent` as a whole word before a colon, so
+-- `person:my-agent` is not an agent. A person never loses authority for
+-- sharing a slug with an agent: only the whole ref is slugified for rule 2,
+-- and `person:my-agent` slugifies to `person_my_agent`.
+--
+-- A node is an agent when its node_type is 'agent' or its attrs->>'actor_kind'
+-- is 'agent', whatever its ref says. An inactive agent identity is still an
+-- agent: the active flag is not consulted.
 CREATE OR REPLACE FUNCTION rye_settler_is_agent(p_ref text, p_node_id uuid)
 RETURNS boolean
 SET search_path = rye, pg_catalog
 AS $$
 DECLARE
-    v_ref text := nullif(trim(p_ref), '');
+    -- Everything trim() misses, spelled out: space, tab, CR, LF, form feed,
+    -- vertical tab, non-breaking space.
+    c_space constant text := E' \t\r\n\f ';
+    v_ref text := nullif(btrim(coalesce(p_ref, ''), c_space), '');
+    v_key text;
 BEGIN
-    IF v_ref IS NOT NULL AND EXISTS (
-        SELECT 1
-        FROM agent_identities ai
-        WHERE ai.agent_key = v_ref
-           OR 'agent:' || ai.agent_key = v_ref
-    ) THEN
-        RETURN true;
+    IF v_ref IS NOT NULL THEN
+        IF v_ref ~* E'^[[:space:] ]*agent[[:space:] ]*:' THEN
+            RETURN true;
+        END IF;
+
+        v_key := rye_slugify_key(v_ref);
+
+        IF v_key IS NOT NULL AND EXISTS (
+            SELECT 1
+            FROM agent_identities ai
+            WHERE ai.agent_key = v_key
+        ) THEN
+            RETURN true;
+        END IF;
     END IF;
 
     IF p_node_id IS NOT NULL AND EXISTS (
@@ -112,7 +152,7 @@ END;
 $$ LANGUAGE plpgsql STABLE;
 
 COMMENT ON FUNCTION rye_settler_is_agent(text, uuid) IS
-    'True when a candidate settler is an agent identity: the ref is an agent_key or agent:<agent_key>, or the node is node_type ''agent'' or attrs->>''actor_kind'' = ''agent''. rye_settlers() drops these before choosing a step and counts them in excluded_agents.';
+    'True when a candidate settler is an agent. Fails closed on the prefix: a ref whose first non-whitespace characters are ''agent'' followed by a colon is an agent whether or not an agent_identities row backs it, in any case and with any whitespace at the front or around the colon — space, tab, CR, LF, form feed, vertical tab, and the non-breaking space U+00A0, which PostgreSQL''s trim() does not strip. Otherwise the ref is matched on its slug, because create_agent_identity() stores rye_slugify_key(agent_key) — so ''my-agent'', ''My Agent'', and ''my_agent'' are one key, while ''person:my-agent'' slugifies to ''person_my_agent'' and is not an agent. An inactive agent identity is still an agent; the active flag is not consulted. A node is an agent when its node_type is ''agent'' or its attrs->>''actor_kind'' is ''agent''. Unicode lookalike letters are out of scope: such a ref matches no identity and no node and comes back unbound. rye_settlers() drops agents before choosing a step and counts them in excluded_agents.';
 
 -- node_type to the settler `kind` vocabulary in contracts/sql-surface.md.
 CREATE OR REPLACE FUNCTION rye_settler_node_kind(p_node_type text)
@@ -188,6 +228,7 @@ DECLARE
     v_halt         boolean := false;
     v_matches      boolean;
     v_node_id      uuid;
+    v_ref          text;
 
     r              record;
 BEGIN
@@ -309,7 +350,8 @@ BEGIN
 
             v_node_id := rye_settler_resolve_ref(r.authority_ref);
 
-            IF rye_settler_is_agent(r.authority_ref, v_node_id) THEN
+            IF lower(coalesce(r.authority_kind, '')) = 'agent'
+               OR rye_settler_is_agent(r.authority_ref, v_node_id) THEN
                 v_excluded := v_excluded + 1;
                 CONTINUE;
             END IF;
@@ -375,7 +417,7 @@ BEGIN
 
         -- Self: a person settles claims about themselves, with no setup.
         IF v_want_self AND v_subject.node_type = 'person' THEN
-            IF rye_settler_is_agent(NULL::text, v_subject.id) THEN
+            IF rye_settler_is_agent(v_subject_ref, v_subject.id) THEN
                 v_excluded := v_excluded + 1;
             ELSE
                 v_self := v_self || jsonb_build_object(
@@ -406,7 +448,12 @@ BEGIN
                   AND (e.effective_to IS NULL OR e.effective_to > v_as_of)
                 ORDER BY n.label NULLS LAST, n.id
             LOOP
-                IF rye_settler_is_agent(NULL::text, r.node_id) THEN
+                v_ref := CASE
+                             WHEN r.external_source IS NOT NULL AND r.external_id IS NOT NULL
+                             THEN r.external_source || ':' || r.external_id
+                         END;
+
+                IF rye_settler_is_agent(v_ref, r.node_id) THEN
                     v_excluded := v_excluded + 1;
                     CONTINUE;
                 END IF;
@@ -414,10 +461,7 @@ BEGIN
                 v_owners := v_owners || jsonb_build_object(
                     'kind',         rye_settler_node_kind(r.node_type),
                     'node_id',      r.node_id,
-                    'ref',          CASE
-                                        WHEN r.external_source IS NOT NULL AND r.external_id IS NOT NULL
-                                        THEN r.external_source || ':' || r.external_id
-                                    END,
+                    'ref',          v_ref,
                     'label',        r.label,
                     'via',          'relationship',
                     'relationship', 'owner',
@@ -442,7 +486,12 @@ BEGIN
                   AND (e.effective_to IS NULL OR e.effective_to > v_as_of)
                 ORDER BY n.label NULLS LAST, n.id
             LOOP
-                IF rye_settler_is_agent(NULL::text, r.node_id) THEN
+                v_ref := CASE
+                             WHEN r.external_source IS NOT NULL AND r.external_id IS NOT NULL
+                             THEN r.external_source || ':' || r.external_id
+                         END;
+
+                IF rye_settler_is_agent(v_ref, r.node_id) THEN
                     v_excluded := v_excluded + 1;
                     CONTINUE;
                 END IF;
@@ -450,10 +499,7 @@ BEGIN
                 v_managers := v_managers || jsonb_build_object(
                     'kind',         rye_settler_node_kind(r.node_type),
                     'node_id',      r.node_id,
-                    'ref',          CASE
-                                        WHEN r.external_source IS NOT NULL AND r.external_id IS NOT NULL
-                                        THEN r.external_source || ':' || r.external_id
-                                    END,
+                    'ref',          v_ref,
                     'label',        r.label,
                     'via',          'relationship',
                     'relationship', 'manager',
@@ -487,11 +533,17 @@ BEGIN
             WHERE n.id = v_owner_id
               AND n.archived_at IS NULL;
 
+            v_ref := CASE
+                         WHEN v_owner_node.external_source IS NOT NULL
+                          AND v_owner_node.external_id IS NOT NULL
+                         THEN v_owner_node.external_source || ':' || v_owner_node.external_id
+                     END;
+
             IF v_owner_node.id IS NULL THEN
                 -- Archived, or hidden by RLS. Either way the caller gets the
                 -- same empty answer and must read the reason.
                 v_reason := 'area_owner_not_visible';
-            ELSIF rye_settler_is_agent(NULL::text, v_owner_node.id) THEN
+            ELSIF rye_settler_is_agent(v_ref, v_owner_node.id) THEN
                 v_excluded := v_excluded + 1;
                 v_reason := 'area_owner_is_agent';
                 v_setup_gap := true;
@@ -499,11 +551,7 @@ BEGIN
                 v_settlers := jsonb_build_array(jsonb_build_object(
                     'kind',         rye_settler_node_kind(v_owner_node.node_type),
                     'node_id',      v_owner_node.id,
-                    'ref',          CASE
-                                        WHEN v_owner_node.external_source IS NOT NULL
-                                         AND v_owner_node.external_id IS NOT NULL
-                                        THEN v_owner_node.external_source || ':' || v_owner_node.external_id
-                                    END,
+                    'ref',          v_ref,
                     'label',        v_owner_node.label,
                     'via',          'area_owner',
                     'relationship', NULL::text,
@@ -572,4 +620,4 @@ END;
 $$ LANGUAGE plpgsql STABLE;
 
 COMMENT ON FUNCTION rye_settlers(uuid, text, uuid, text, text, text, timestamptz, text) IS
-    'Who may settle this claim, and which of three steps said so. One lookup: a recorded grant in domain_authorities for this claim type, then the relationship between speaker and subject (self, manager via reports_to, owner via owns), then knowledge_domains.owner_node_id for the area. Contract: contracts/sql-surface.md, section "Settlement lookup" (contract_version 1). SECURITY INVOKER and read-only: it writes nothing, refuses nothing, and raises nothing for a missing answer. p_claim_type is the assertion type verbatim. p_speech_act selects which relationship default applies. p_as_of filters effective windows only. An agent identity is never returned; dropped candidates are counted in excluded_agents. step ''none'' with settlers [] and a reason is an answer, not an error, and an empty list never means nobody is authorized, only nobody authorized and visible to this caller.';
+    'Who may settle this claim, and which of three steps said so. One lookup: a recorded grant in domain_authorities for this claim type, then the relationship between speaker and subject (self, manager via reports_to, owner via owns), then knowledge_domains.owner_node_id for the area. Contract: contracts/sql-surface.md, section "Settlement lookup" (contract_version 1). SECURITY INVOKER and read-only: it writes nothing, refuses nothing, and raises nothing for a missing answer. p_claim_type is the assertion type verbatim. p_speech_act selects which relationship default applies. p_as_of filters effective windows only. An agent identity is never returned: any ref beginning with ''agent:'' is excluded whether or not an identity backs it, other refs are matched on the slug create_agent_identity() stores, an inactive identity is still an agent, and a node that is an agent by node_type or attrs->>''actor_kind'' is excluded wherever it stands. Dropped candidates are counted in excluded_agents. step ''none'' with settlers [] and a reason is an answer, not an error, and an empty list never means nobody is authorized, only nobody authorized and visible to this caller.';

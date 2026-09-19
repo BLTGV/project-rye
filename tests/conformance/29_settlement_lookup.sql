@@ -14,6 +14,10 @@ DECLARE
     v_settler     jsonb;
     v_agent_id    uuid;
     v_agent_node  uuid;
+    v_case        text;
+    v_delegate    uuid;
+    v_delegate_edge uuid;
+    v_bot_two     uuid;
     v_bob         uuid;
     v_dana        uuid;
     v_domain      uuid;
@@ -465,6 +469,181 @@ BEGIN
         RAISE EXCEPTION 'An agent identity must never be returned as a settler, got %', v_answer;
     END IF;
 
+    -- Agent keys are slugs. create_agent_identity() stores
+    -- rye_slugify_key(agent_key), so the identity above is stored as
+    -- conformance_settler_agent. A ref spelled any other way is the same
+    -- agent and must be excluded just the same. Each case below falls
+    -- through to Bob, the manager, and counts exactly one exclusion.
+    PERFORM grant_domain_authority(
+        p_domain_key     := 'conformance-settling',
+        p_authority_kind := 'person',
+        p_authority_ref  := 'agent:conformance-settler-agent',
+        p_claim_types    := ARRAY['bot_claim_hyphen'],
+        p_effective_at   := v_then
+    );
+
+    PERFORM grant_domain_authority(
+        p_domain_key     := 'conformance-settling',
+        p_authority_kind := 'person',
+        p_authority_ref  := 'conformance-settler-agent',
+        p_claim_types    := ARRAY['bot_claim_bare'],
+        p_effective_at   := v_then
+    );
+
+    PERFORM grant_domain_authority(
+        p_domain_key     := 'conformance-settling',
+        p_authority_kind := 'person',
+        p_authority_ref  := '  Agent:Conformance-Settler-Agent  ',
+        p_claim_types    := ARRAY['bot_claim_mixed_case'],
+        p_effective_at   := v_then
+    );
+
+    -- Fail closed: a ref that says it is an agent never settles, whether or
+    -- not an agent_identities row backs it.
+    PERFORM grant_domain_authority(
+        p_domain_key     := 'conformance-settling',
+        p_authority_kind := 'person',
+        p_authority_ref  := 'agent:no-such-identity-anywhere',
+        p_claim_types    := ARRAY['bot_claim_unbacked'],
+        p_effective_at   := v_then
+    );
+
+    -- An inactive agent identity is still an agent.
+    v_bot_two := create_agent_identity(
+        p_agent_key := 'conformance-retired-agent',
+        p_label     := 'Conformance Retired Agent',
+        p_runtime   := 'conformance'
+    );
+    UPDATE agent_identities SET active = false WHERE id = v_bot_two;
+
+    PERFORM grant_domain_authority(
+        p_domain_key     := 'conformance-settling',
+        p_authority_kind := 'person',
+        p_authority_ref  := 'conformance-retired-agent',
+        p_claim_types    := ARRAY['bot_claim_inactive'],
+        p_effective_at   := v_then
+    );
+
+    -- Whitespace PostgreSQL's trim() does not strip must not smuggle an agent
+    -- past the prefix rule, and neither must a space before the colon.
+    PERFORM grant_domain_authority(
+        p_domain_key     := 'conformance-settling',
+        p_authority_kind := 'person',
+        p_authority_ref  := E'\tagent:conformance-settler-agent',
+        p_claim_types    := ARRAY['bot_claim_tab'],
+        p_effective_at   := v_then
+    );
+
+    PERFORM grant_domain_authority(
+        p_domain_key     := 'conformance-settling',
+        p_authority_kind := 'person',
+        p_authority_ref  := E' agent:conformance-settler-agent',
+        p_claim_types    := ARRAY['bot_claim_nbsp'],
+        p_effective_at   := v_then
+    );
+
+    PERFORM grant_domain_authority(
+        p_domain_key     := 'conformance-settling',
+        p_authority_kind := 'person',
+        p_authority_ref  := 'agent :conformance-settler-agent',
+        p_claim_types    := ARRAY['bot_claim_space_colon'],
+        p_effective_at   := v_then
+    );
+
+    FOREACH v_case IN ARRAY ARRAY[
+        'bot_claim_hyphen',
+        'bot_claim_bare',
+        'bot_claim_mixed_case',
+        'bot_claim_unbacked',
+        'bot_claim_inactive',
+        'bot_claim_tab',
+        'bot_claim_nbsp',
+        'bot_claim_space_colon'
+    ] LOOP
+        v_answer := rye_settlers(
+            p_subject_id := v_john,
+            p_claim_type := v_case,
+            p_domain_key := 'conformance-settling',
+            p_speech_act := 'expectation'
+        );
+
+        IF (v_answer->>'excluded_agents')::int <> 1 THEN
+            RAISE EXCEPTION 'Expected % to exclude exactly one agent, got %',
+                v_case, v_answer;
+        END IF;
+
+        IF EXISTS (
+            SELECT 1
+            FROM jsonb_array_elements(v_answer->'settlers') AS s(value)
+            WHERE lower(coalesce(s.value->>'ref', '')) LIKE '%agent%'
+        ) THEN
+            RAISE EXCEPTION 'An agent must never be returned as a settler for %, got %',
+                v_case, v_answer;
+        END IF;
+
+        IF v_answer->>'step' <> 'relationship'
+           OR (v_answer->>'settler_count')::int <> 1
+           OR v_answer->'settlers'->0->>'node_id' <> v_bob::text
+        THEN
+            RAISE EXCEPTION 'Expected % to fall through to the manager, got %',
+                v_case, v_answer;
+        END IF;
+    END LOOP;
+
+    -- The other direction: a person never loses authority for sharing a slug
+    -- with an agent. `person:conformance-settler-agent` is not an agent
+    -- prefix, and the whole ref slugifies to person_conformance_settler_agent,
+    -- which no identity has. The grant stands.
+    PERFORM grant_domain_authority(
+        p_domain_key     := 'conformance-settling',
+        p_authority_kind := 'person',
+        p_authority_ref  := 'person:conformance-settler-agent',
+        p_claim_types    := ARRAY['person_claim_lookalike'],
+        p_effective_at   := v_then
+    );
+
+    v_answer := rye_settlers(
+        p_subject_id := v_john,
+        p_claim_type := 'person_claim_lookalike',
+        p_domain_key := 'conformance-settling',
+        p_speech_act := 'expectation'
+    );
+
+    IF v_answer->>'step' <> 'grant'
+       OR (v_answer->>'settler_count')::int <> 1
+       OR v_answer->'settlers'->0->>'ref' <> 'person:conformance-settler-agent'
+       OR (v_answer->>'excluded_agents')::int <> 0
+    THEN
+        RAISE EXCEPTION 'A person must not be excluded for sharing a slug with an agent, got %', v_answer;
+    END IF;
+
+    -- A node that is an agent by attrs->>'actor_kind' rather than by
+    -- node_type is excluded wherever it stands, here as a second manager.
+    INSERT INTO nodes (node_type, label, external_source, external_id, attrs)
+    VALUES ('person', 'Delegate', 'conformance_org', 'delegate',
+            '{"actor_kind": "agent"}'::jsonb)
+    RETURNING id INTO v_delegate;
+
+    INSERT INTO edges (edge_type, source_id, target_id, effective_from)
+    VALUES ('reports_to', v_john, v_delegate, v_then)
+    RETURNING id INTO v_delegate_edge;
+
+    v_answer := rye_settlers(
+        p_subject_id := v_john,
+        p_claim_type := 'availability',
+        p_domain_key := 'conformance-settling',
+        p_speech_act := 'expectation'
+    );
+
+    IF (v_answer->>'settler_count')::int <> 1
+       OR v_answer->'settlers'->0->>'node_id' <> v_bob::text
+       OR (v_answer->>'excluded_agents')::int <> 1
+    THEN
+        RAISE EXCEPTION 'Expected an actor_kind agent manager to be dropped and counted, got %', v_answer;
+    END IF;
+
+    UPDATE edges SET archived_at = now() WHERE id = v_delegate_edge;
+
     -- An agent node standing in a relationship is dropped the same way.
     INSERT INTO nodes (node_type, label, external_source, external_id)
     VALUES ('agent', 'Standing Assistant', 'conformance_org', 'standing-assistant')
@@ -507,6 +686,33 @@ BEGIN
        OR (v_answer->'domain'->>'has_owner')::boolean IS DISTINCT FROM false
     THEN
         RAISE EXCEPTION 'Expected an unowned area to answer no settler, got %', v_answer;
+    END IF;
+
+    -- ------------------------------------------------------------------
+    -- An area whose owner is an agent has no settler either. The agent is
+    -- dropped at the last step as at every other, counted, and reported as a
+    -- setup gap for a person to close.
+    PERFORM ensure_knowledge_domain(
+        p_domain_key    := 'conformance-settling-botrun',
+        p_label         := 'Conformance Settling, Agent-Owned',
+        p_purpose       := 'An area whose owner node is an agent.',
+        p_owner_node_id := v_agent_node
+    );
+
+    v_answer := rye_settlers(
+        p_subject_id := v_press,
+        p_claim_type := 'budget_line',
+        p_domain_key := 'conformance-settling-botrun',
+        p_speech_act := 'decision'
+    );
+
+    IF v_answer->>'step' <> 'none'
+       OR (v_answer->>'settler_count')::int <> 0
+       OR v_answer->>'reason' <> 'area_owner_is_agent'
+       OR (v_answer->>'excluded_agents')::int <> 1
+       OR (v_answer->>'setup_gap')::boolean IS DISTINCT FROM true
+    THEN
+        RAISE EXCEPTION 'Expected an agent area owner to settle nothing, got %', v_answer;
     END IF;
 
     -- ------------------------------------------------------------------
