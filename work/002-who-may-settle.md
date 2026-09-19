@@ -335,4 +335,21 @@ enough to reimplement. Expected fixture answers given for five calls.
 Learned: an unclassified statement now needs an area owner or returns step
 none. Lead: accepted. Assumption added below.
 
+### Builder agent-kit, 2026-09-19, claim-type-first skill text (commit 35e5b47)
+Result: done. SKILL.md, agent-ops-guide, conventions-catalog: union wording
+replaced with the claim-type-first rule; set-on-a-person and self claim
+type lists; the nine recognized speech acts; always pass both;
+speech_act_recognized false blocks an accepted write; new "What the lookup
+does not tell you" with a standing-claim check. Scenario ground truth now
+has four lookup rows; speech act omitted and unrecognized both give Bob
+only, marked "per contract, not yet executed". Rubric fails an agent that
+forgot the speech act and then accepted John's objection. Tested: intake
+check passes; 19 of 19 manifests valid. Learned: rye_settlers() reads no
+assertion, so is_settler true is not permission to replace a standing
+claim; the guard is skill discipline, not enforcement. Questions: the two
+new rows stand on the contract until executed (Lead: will execute after the
+schema merge); the guard could not fire on rows with no recorded
+authorizer (Lead: NOT accepted, sent back to fail closed: replace only when
+the recorded authorizer is the speaker).
+
 ## Close
