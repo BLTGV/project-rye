@@ -218,9 +218,20 @@ reads the claim type first:
 The lookup reads no assertion, so it answers who may settle a claim and not
 who may unsettle one. Before accepting on `is_settler` `true`, check
 `current_valid_assertions` for an accepted row on the same subject, assertion
-type, and assertion key whose evidence `attrs.authorizer` is somebody other
-than the speaker. If one exists, record a suggestion instead. Otherwise a
+type, and assertion key, and read its evidence `attrs.authorizer`. Otherwise a
 person restating a quota their manager set would overwrite it.
+
+The check fails closed. One recorded authorizer lets the write through, the
+speaker's own:
+
+- No accepted row: accept.
+- `authorizer` is the speaker: accept. A person correcting their own earlier
+  words goes straight through with the one-line echo.
+- `authorizer` is somebody else: record a suggestion.
+- No `authorizer` recorded: record a suggestion. Rows written before this
+  convention carry nothing, and a missing field is never permission. Do not
+  guess whose call it is — run the lookup, confirm with a settler other than
+  the speaker or with the area owner, and say so to the person.
 
 - A settler answer with no standing claim from another authorizer records the
   claim with `record_assertion(..., p_status := 'accepted')`.
@@ -294,6 +305,11 @@ are provenance, not authorization.
 
 Evidence rows are append-only, so the pair is durable and never rewritten.
 Both fields are internal identifiers and never appear in what a person hears.
+
+An assertion with no recorded `authorizer` — anything written before this
+convention — reads as unknown, never as unauthorized and never as open. The
+Settlement Convention's standing-claim check treats a missing field the same
+way it treats somebody else's name: record a suggestion and confirm first.
 
 ## Registry and Confidence Convention
 

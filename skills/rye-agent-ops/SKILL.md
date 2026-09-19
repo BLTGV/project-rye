@@ -146,13 +146,29 @@ WHERE a.subject_node_id = '<subject_uuid>'::uuid
   AND a.assertion_key  = '<key>';
 ```
 
-If a row exists and its `authorizer` is somebody other than the speaker, stop.
-Do not accept and do not supersede. Record a suggestion and tell the person
-whose call it is, exactly as in the expectation case below. Accepted stays
-accepted until a settler changes it.
+The guard fails closed. One recorded authorizer lets a write through, and it
+is the speaker's own:
+
+| What stands | What you do |
+|---|---|
+| No accepted row | Accept, as below. Nothing is being replaced. |
+| A row whose `authorizer` **is the speaker** | Accept. The person is correcting their own earlier words. One line back and you are done. |
+| A row whose `authorizer` is **somebody else** | Record a suggestion. Tell the person whose call it is. |
+| A row with **no `authorizer` recorded** | Record a suggestion. Do not guess whose call it is. |
+
+The last row is the one to get right. Rows written before the
+authorizer/executor convention carry nothing, and an unrecorded authorizer is
+not an absent one. Do not read a missing field as permission, and do not
+decide for yourself who put the claim there. Run the lookup for that claim and
+check with a settler it returns other than the speaker; if it returns no other
+settler, check with the owner of the area. Tell the person plainly that you
+want to confirm with that person before changing something already on record.
+
+Never accept and never supersede a standing claim on a missing field. Accepted
+stays accepted until a settler changes it.
 
 Routing that objection onward is a later work item. This is only the guard
-that keeps it from being overwritten.
+that keeps a standing claim from being overwritten.
 
 ### The speaker is a settler
 
@@ -235,6 +251,11 @@ canonical in anything durable and never appear in what you say.
   let you know."
 - Nobody recorded: "Nobody's recorded as deciding that yet. I've kept what you
   said and I'll find out who settles it."
+- Something already on record, and you cannot tell who put it there: "There's
+  already something on record for that. I've kept your version and I'll
+  confirm with Priya before I change it."
+- Correcting their own earlier words: accept it and echo one line. Do not
+  make them explain themselves.
 - Asked about an unsettled claim: say the claim exists, say it is unsettled,
   and say who said it. Do not hide it and do not answer with it.
 

@@ -158,11 +158,23 @@ nothing about the standing claim.
 
 So before accepting on `is_settler` `true`, read `current_valid_assertions`
 for an accepted row on the same subject, assertion type, and assertion key,
-and read its evidence `attrs.authorizer`. If a row exists and its authorizer
-is somebody other than the speaker, do not accept and do not supersede.
-Record a suggestion and tell the person whose call it is, exactly as in
-outcome 2. Routing that objection onward is a later work item; this is only
-the guard.
+and read its evidence `attrs.authorizer`. The guard fails closed: exactly one
+recorded authorizer lets the write through, and it is the speaker's own.
+
+| What stands | What the caller does |
+|---|---|
+| No accepted row | Accept. Nothing is being replaced. |
+| `authorizer` is the speaker | Accept. The person is correcting their own earlier words; one line back. |
+| `authorizer` is somebody else | Record a suggestion, as in outcome 2. |
+| No `authorizer` recorded | Record a suggestion. Do not guess whose call it is. |
+
+Rows written before the authorizer/executor convention carry no authorizer,
+and an unrecorded authorizer is not an absent one. A missing field is never
+permission. Run the lookup for that claim, check with a settler it returns
+other than the speaker, or with the area owner if it returns no other, and
+tell the person plainly that the confirmation comes first. Never supersede a
+standing claim on a missing field. Routing that objection onward is a later
+work item; this is only the guard.
 
 Accepted stays accepted until a settler changes it. A later statement from
 someone who cannot settle a claim does not overwrite it and does not vanish —
