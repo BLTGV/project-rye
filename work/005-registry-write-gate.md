@@ -123,4 +123,32 @@ the suggested entry to Product at close); scripts/rye has no settle-gate
 subcommand while every neighbouring lookup has a CLI form (Lead: a small
 follow-up for the schema area, not blocking).
 
+### Verifier, 2026-09-19, live Docker install on its own port, commit 9502c63: PASS on criteria 1-7; 8 pending
+Criteria 1-7 verified by execution under SET ROLE to the non-superuser
+conformance role. 36 record_assertion attempts (3 roles by 4 policies by 3
+keys) all landed as candidates with attrs.settle_gate.pending true and
+appeared in review_queue; registry_value() stayed null. accept_assertion,
+a raw UPDATE with spoofed write-path settings, supersede_assertion, direct
+INSERT, and record_distillation all raised insufficient_privilege;
+schedule_assertion_change and record_scope_policy demoted;
+rye.authoritative.promote did not open it. After 143 probe attempts
+rye_settlers(John, expectation, self_commitment) was byte-identical to
+baseline for admin, agent, viewer, team_member. Admin paths work; the full
+suite passed including seeds and onboarding. Test 30 refuses to run as
+superuser and fails on a tree without 0023, where the original defect
+reproduces exactly. Role-string attacks (Admin, ADMIN, padded, agent:admin,
+admin,admin, empty, unset) all failed closed. Gate rows readable by every
+role; DELETE and UPDATE affected 0 rows and INSERT raised for non-admins.
+record_assertion() differs from the 0018 version by exactly the demotion
+block, placed before supersession. FINDING, HIGH, reproduced: a non-admin
+can end an accepted gated row by spoofing app.write_path =
+'supersede_assertion' (0023 lines 392-394 return NEW when OLD.status is
+accepted). For registry_entry the result is restrictive. For review_policy
+it is NOT: scope_review_policy() fell from strict to open and the same
+ordinary agent write then landed accepted. Lead: ruled in scope, since the
+goal is that only an admin changes configuration; sent to the schema
+builder as fix attempt 1. Cookbook: 39 statements executed, 3 failed from
+one ordering bug, 3 were silent no-ops (SET LOCAL outside a transaction);
+everything else confirmed correct; sent to the cookbook author.
+
 ## Close
