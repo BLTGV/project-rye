@@ -22,14 +22,25 @@ GitHub holds the work, not the reasons. Rye records the reasons and points at
 the work.
 
 Examples below use `'<...>'::uuid` where a real script would pass an id it
-already holds. Every statement sets the session context first:
+already holds. The sections run in order: section 3 creates the people,
+components, area, and agents that everything after it refers to.
+
+Set the session context once, at the top of the session. Plain `SET`, not
+`SET LOCAL`:
 
 ```sql
 SET search_path = rye, public, pg_catalog;
-SET LOCAL "app.current_user_id" = 'user:ines';
-SET LOCAL "app.current_teams" = 'product';
-SET LOCAL "app.current_role" = 'operator';
+SET "app.current_user_id" = 'user:ines';
+SET "app.current_teams" = 'product';
+SET "app.current_role" = 'operator';
 ```
+
+`SET LOCAL` only lasts for the current transaction, so pasted outside a
+`BEGIN` it warns and sets nothing, and every later statement runs with no
+role. Use `SET LOCAL` inside an explicit `BEGIN` block. With a pooled or
+per-call SQL tool, neither form carries over: set the context with
+`set_config()` in the same call as the query. See the Supabase notes in
+`AGENTS.md`.
 
 ---
 
@@ -58,7 +69,8 @@ a comment thread. It records identity and lifecycle, and points back.
 | `github` | `pull_request` | `quillstone/api#419` |
 | `github` | `release` | `quillstone/api@v0.9.0` |
 
-`link_record()` writes the node and the mapping in one call:
+`link_record()` writes the node and the mapping in one call. This is the call
+step 5 of the walk makes when the issue is opened, shown here for its shape:
 
 ```sql
 SELECT link_record(
@@ -151,7 +163,31 @@ owner of the area.
 
 ---
 
-## 3. The Agents
+## 3. Setup: The Area, The People, And The Agents
+
+Order matters here. `grant_agent_capability()` raises
+`Knowledge domain product not found` if the area does not exist yet, and
+`ensure_knowledge_domain()` needs its owner's node. So: people and components
+first, then the area, then the agents.
+
+```sql
+-- The two developers, the two customers, and one component.
+INSERT INTO nodes (node_type, label, external_source, external_id, properties) VALUES
+('person',    'Ines Vaz',            'quillstone_people', 'ines',      '{"github_login": "inesv"}'),
+('person',    'Tomas Reeder',        'quillstone_people', 'tomas',     '{"github_login": "treeder"}'),
+('org',       'Wandercrate Ltd',     'quillstone_orgs',   'wandercrate', '{"plan": "team"}'),
+('org',       'Bellwether Bakeries', 'quillstone_orgs',   'bellwether',  '{"plan": "team"}'),
+('component', 'exporter',            'quillstone_code',   'exporter',  '{"path": "src/export"}');
+
+-- The area, owned by Ines. Every grant below names it.
+SELECT ensure_knowledge_domain(
+    p_domain_key    := 'product',
+    p_label         := 'Quillstone product',
+    p_purpose       := 'Decide what we build, why, and what we told customers.',
+    p_owner_node_id := (SELECT id FROM nodes WHERE external_source = 'quillstone_people'
+                                               AND external_id = 'ines')
+);
+```
 
 Three agents, and they are not alike.
 
@@ -205,18 +241,9 @@ claims.
 
 ## 4. Authority With Two Developers
 
-Set the area up once, with an owner:
-
-```sql
-SELECT ensure_knowledge_domain(
-    p_domain_key    := 'product',
-    p_label         := 'Quillstone product',
-    p_purpose       := 'Decide what we build, why, and what we told customers.',
-    p_owner_node_id := '<ines_uuid>'::uuid
-);
-```
-
-Then three rules:
+The area from section 3 names Ines as its owner. That owner is the last resort
+of the lookup: anything nobody else is recorded for settles with her. On top of
+that, three rules:
 
 1. Each developer settles their own commitments. `commitment` is a core
    self-settled type, so this needs no configuration at all.
@@ -371,9 +398,39 @@ yet. The agent is not in a conversation.
 
 ### Step 4. Amir says the same thing in Slack, two days later
 
-This is not a second request. It is a second person backing the same one.
+This is not a second request. It is a second person backing the same one. The
+agent resolves Amir the way it resolved Jo in step 1, stores the message and
+its excerpt the way step 2 does, then appends the evidence to the claim that
+already exists.
 
 ```sql
+INSERT INTO nodes (node_type, label, external_source, external_id, properties)
+VALUES ('person', 'Amir Dost', 'quillstone_people', 'amir-dost',
+        '{"email": "amir@bellwether.example"}');
+
+INSERT INTO edges (edge_type, source_id, target_id, effective_from)
+VALUES ('employs', '<bellwether_uuid>'::uuid, '<amir_uuid>'::uuid, now());
+
+SELECT record_event(
+    p_event_type        := 'feedback_received',
+    p_summary           := 'Amir Dost said the same about CSV exports in Slack',
+    p_properties        := '{"channel": "slack", "permalink": "https://quillstone.slack.com/archives/C04/p17410"}',
+    p_participant_ids   := ARRAY['<amir_uuid>', '<bellwether_uuid>', '<exporter_uuid>']::uuid[],
+    p_participant_roles := ARRAY['speaker', 'regarding', 'regarding'],
+    p_actor             := 'agent:feedback-intake',
+    p_occurred_at       := '2026-03-06T09:12:00Z'::timestamptz
+);
+
+SELECT record_artifact(
+    p_artifact_type    := 'feedback_excerpt',
+    p_content          := '{"text": "Same here. Our end-of-month CSV never finishes.",
+                            "speaker": "Amir Dost"}',
+    p_source_event_id  := '<slack_event_uuid>'::uuid,
+    p_source_node_id   := '<amir_uuid>'::uuid,
+    p_related_node_ids := ARRAY['<bellwether_uuid>', '<exporter_uuid>']::uuid[],
+    p_content_hash     := 'sha256:b30e77...'
+);
+
 SELECT append_assertion_evidence(
     p_assertion_id := '<request_assertion_uuid>'::uuid,
     p_evidence     := ARRAY[jsonb_build_object(
@@ -504,12 +561,20 @@ SELECT advance_task_status(
 
 > We're paginating rather than streaming.
 
-That is a statement about a thing she owns. Her agent runs the first lookup
-from section 4 and gets `is_settler` `true`. Before accepting, it checks for a
-standing claim, because the lookup reads no assertion and never says whether
-one exists:
+That is a statement about a thing she owns. Her agent records what she said,
+then runs the first lookup from section 4 and gets `is_settler` `true`. Before
+accepting, it checks for a standing claim, because the lookup reads no
+assertion and never says whether one exists:
 
 ```sql
+SELECT record_event(
+    p_event_type        := 'statement_made',
+    p_summary           := 'Ines: we are paginating the export rather than streaming',
+    p_participant_ids   := ARRAY['<ines_uuid>', '<exporter_uuid>']::uuid[],
+    p_participant_roles := ARRAY['speaker', 'regarding'],
+    p_actor             := 'agent:ines-coding'
+);
+
 SELECT a.id, e.attrs->>'authorizer' AS authorizer
 FROM current_valid_assertions a
 LEFT JOIN assertion_evidence e ON e.assertion_id = a.id
@@ -659,6 +724,11 @@ ORDER BY distinct_companies DESC, distinct_askers DESC, last_heard DESC;
 That last one is the report the team never had. It reads the suggestions the
 intake agent filed and nobody turned into work.
 
+Run against the walk above it returns nothing, and that is the right answer.
+The one request there got an issue in step 5, so it has `reported_by` edges and
+the `NOT EXISTS` clause excludes it. Rows appear once the intake agent has been
+running for a week and has filed requests nobody has acted on.
+
 ---
 
 ## 7. What Is Enforced and What Is Discipline
@@ -667,11 +737,16 @@ Be clear about which rules the database holds and which the skills follow.
 
 **Discipline, not enforcement.** Both coding agents hold a direct database
 connection. Rye authorizes on session variables, and anyone with a connection
-sets their own. `SET LOCAL "app.current_role" = 'admin'` is one line. Every
+sets their own. `SET "app.current_role" = 'admin'` is one line. Every
 rule in section 4 is a rule the skills follow, not a boundary the database
 holds. Two developers who trust each other lose nothing by this. A third person
 who should be restricted gains nothing from it until the connection string goes
 away.
+
+Setup is not gated either. The whole of section 3 runs under a non-admin role:
+`ensure_knowledge_domain()`, `create_agent_identity()`, and
+`grant_agent_capability()` all succeed for an `operator`. Whoever can reach the
+database can create an area, mint an agent identity, and grant it capabilities.
 
 **`rye_settlers()` is advisory.** It is `SECURITY INVOKER`, it writes nothing,
 and **no write path calls it**. Neither `record_assertion()` nor
