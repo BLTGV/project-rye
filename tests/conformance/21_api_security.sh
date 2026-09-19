@@ -156,6 +156,20 @@ SELECT rye.create_knowledge_candidate(
   '{"domain_keys":["","--"]}'::jsonb
 );
 
+-- Mixed arrays: a junk key beside a real one. The junk key must neither hide a
+-- held area nor reveal an unheld one. Area keys are stored slugified, which is
+-- what rye_slugify_key makes of the hyphenated form used everywhere else here.
+SELECT rye.create_knowledge_candidate(
+  'decision',
+  'API security mixedheldmarker candidate.',
+  '{"domain_keys":["","api_account_updates"]}'::jsonb
+);
+SELECT rye.create_knowledge_candidate(
+  'decision',
+  'API security mixedunheldmarker candidate.',
+  '{"domain_keys":["--","api_title_diligence"]}'::jsonb
+);
+
 INSERT INTO rye.nodes (node_type, label, properties)
 VALUES ('account', 'API Security Test Account', '{"suite":"api_security"}')
 RETURNING id;
@@ -232,7 +246,7 @@ expect_status "instances without token" 200 "${BASE_URL}/api/instances"
 # /api/agent/me takes any valid token and reports only the caller.
 me_body="$(curl -sS -H "$(auth "$nogrant_token")" "${BASE_URL}/api/agent/me")"
 expect_field "agent/me auth_required" "$me_body" "auth_required" "true"
-expect_field "agent/me identity" "$me_body" "agent.agent_key" "api-nograntee-agent"
+expect_field "agent/me identity" "$me_body" "agent.agent_key" "api_nograntee_agent"
 expect_status "agent/me without token" 401 "${BASE_URL}/api/agent/me"
 
 # ---------------------------------------------------------------------------
@@ -334,14 +348,14 @@ done
 
 domains_json="$(curl -sS -H "$(auth "$candidate_token")" "${BASE_URL}/api/domains")"
 expect_absent "low-privilege domain properties" "$domains_json" "secret_internal_note"
-expect_present "held area present" "$domains_json" '"domain_key":"api-account-updates"'
-expect_absent "unheld area absent" "$domains_json" '"domain_key":"api-title-diligence"'
+expect_present "held area present" "$domains_json" '"domain_key":"api_account_updates"'
+expect_absent "unheld area absent" "$domains_json" '"domain_key":"api_title_diligence"'
 expect_absent "unheld area authority absent" "$domains_json" "api-title-authority-marker"
 expect_absent "unheld area channel absent" "$domains_json" "slack:#api-title-marker"
 
 title_domains_json="$(curl -sS -H "$(auth "$title_token")" "${BASE_URL}/api/domains")"
-expect_present "title agent sees its own area" "$title_domains_json" '"domain_key":"api-title-diligence"'
-expect_absent "title agent cannot see account area" "$title_domains_json" '"domain_key":"api-account-updates"'
+expect_present "title agent sees its own area" "$title_domains_json" '"domain_key":"api_title_diligence"'
+expect_absent "title agent cannot see account area" "$title_domains_json" '"domain_key":"api_account_updates"'
 expect_absent "title agent cannot see account authority" "$title_domains_json" "api-account-authority-marker"
 expect_absent "title agent cannot see account channel" "$title_domains_json" "slack:#api-account-marker"
 
@@ -453,14 +467,33 @@ expect_absent "reviewer does not see unsluggable-key candidate" "$reviewer_unslu
 title_unsluggable="$(curl -sS -H "$(auth "$title_token")" "${BASE_URL}/api/review-queue?include_closed=1&q=unsluggable")"
 expect_absent "title agent does not see unsluggable-key candidate" "$title_unsluggable" "unsluggable key candidate marker"
 
-# Counts report what was returned, not what was withheld. No candidate anywhere
-# in this instance carries the title agent's area, so its totals are zero.
+# A junk key beside a real key the token holds: shown. Beside one it does not
+# hold: hidden. The junk key changes nothing in either direction.
+reviewer_mixed_held="$(curl -sS -H "$(auth "$reviewer_token")" "${BASE_URL}/api/review-queue?include_closed=1&q=mixedheldmarker")"
+expect_present "reviewer sees mixed array with a held key" "$reviewer_mixed_held" "mixedheldmarker"
+
+title_mixed_held="$(curl -sS -H "$(auth "$title_token")" "${BASE_URL}/api/review-queue?include_closed=1&q=mixedheldmarker")"
+expect_absent "title agent does not see the account area's mixed candidate" "$title_mixed_held" "mixedheldmarker"
+
+reviewer_mixed_unheld="$(curl -sS -H "$(auth "$reviewer_token")" "${BASE_URL}/api/review-queue?include_closed=1&q=mixedunheldmarker")"
+expect_absent "reviewer does not see mixed array with an unheld key" "$reviewer_mixed_unheld" "mixedunheldmarker"
+
+title_mixed_unheld="$(curl -sS -H "$(auth "$title_token")" "${BASE_URL}/api/review-queue?include_closed=1&q=mixedunheldmarker")"
+expect_present "title agent sees its own area's mixed candidate" "$title_mixed_unheld" "mixedunheldmarker"
+
+# Counts report what was returned, not what was withheld. The instance holds
+# far more candidates than the title agent may see, so an unfiltered listing
+# whose total equals the number of rows it returned is the whole check.
 title_all="$(curl -sS -H "$(auth "$title_token")" "${BASE_URL}/api/review-queue?include_closed=1")"
 title_total="$(json_get "$title_all" "stats.total")"
-title_candidates="$(json_get "$title_all" "candidates")"
-[[ "$title_total" == "0" && "$title_candidates" == "[]" ]] || {
-  fail "Expected the title agent's queue total to count only returned rows, got total=$title_total"
+title_count="$(node -e "console.log(JSON.parse(process.argv[1]).candidates.length)" "$title_all")"
+[[ "$title_total" == "$title_count" ]] || {
+  fail "Expected the title agent's queue total to count only returned rows, got total=$title_total rows=$title_count"
 }
+expect_absent "title agent's queue excludes the account candidate" "$title_all" "$candidate_id_1"
+expect_absent "title agent's queue excludes keyless rows" "$title_all" "keyless candidate marker"
+expect_absent "title agent's queue excludes unsluggable rows" "$title_all" "unsluggable key candidate marker"
+expect_absent "title agent's queue excludes the account area's mixed row" "$title_all" "mixedheldmarker"
 
 # /api/candidates/review is the same listing and is filtered the same way.
 title_review="$(curl -sS -H "$(auth "$title_token")" "${BASE_URL}/api/candidates/review?include_closed=1&q=Brightline")"
@@ -517,8 +550,8 @@ expect_field "auth off agent/me auth_required" "$open_me" "auth_required" "false
 expect_field "auth off agent/me agent" "$open_me" "agent" "null"
 
 open_domains="$(curl -sS "${OPEN_URL}/api/domains")"
-expect_present "auth off sees account area" "$open_domains" '"domain_key":"api-account-updates"'
-expect_present "auth off sees title area" "$open_domains" '"domain_key":"api-title-diligence"'
+expect_present "auth off sees account area" "$open_domains" '"domain_key":"api_account_updates"'
+expect_present "auth off sees title area" "$open_domains" '"domain_key":"api_title_diligence"'
 expect_present "auth off sees account authority" "$open_domains" "api-account-authority-marker"
 expect_present "auth off sees title authority" "$open_domains" "api-title-authority-marker"
 
@@ -526,6 +559,10 @@ open_keyless="$(curl -sS "${OPEN_URL}/api/review-queue?include_closed=1&q=keyles
 expect_present "auth off sees the keyless candidate" "$open_keyless" "keyless candidate marker"
 open_unsluggable="$(curl -sS "${OPEN_URL}/api/review-queue?include_closed=1&q=unsluggable")"
 expect_present "auth off sees the unsluggable-key candidate" "$open_unsluggable" "unsluggable key candidate marker"
+open_mixed_held="$(curl -sS "${OPEN_URL}/api/review-queue?include_closed=1&q=mixedheldmarker")"
+expect_present "auth off sees the mixed held-key candidate" "$open_mixed_held" "mixedheldmarker"
+open_mixed_unheld="$(curl -sS "${OPEN_URL}/api/review-queue?include_closed=1&q=mixedunheldmarker")"
+expect_present "auth off sees the mixed unheld-key candidate" "$open_mixed_unheld" "mixedunheldmarker"
 open_queue="$(curl -sS "${OPEN_URL}/api/review-queue?include_closed=1&q=Brightline")"
 expect_present "auth off sees the account candidate" "$open_queue" "$candidate_id_1"
 
