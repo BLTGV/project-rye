@@ -1,6 +1,6 @@
 # 002 who-may-settle
 
-- status: open
+- status: done
 - opened: 2026-09-19
 - areas: schema, agent-kit
 - contracts: contracts/sql-surface.md, contracts/plugin-manifest.md
@@ -22,17 +22,17 @@ lost. If they cannot settle it, it is recorded as a suggestion and their
 agent checks with someone who can."
 
 ## Acceptance criteria
-- [ ] Given a speaker, a subject, a kind of claim, and an area, one request returns the people who may settle it and which step of the lookup produced the answer (grant, relationship, area owner).
-- [ ] A person is returned as a settler for claims about themselves with no setup.
-- [ ] With a reporting line recorded from John to Bob, Bob is returned as the settler of an expectation on John, and John is not. With the reporting line ended, Bob is no longer returned.
-- [ ] With an ownership relationship recorded, the owner is returned as the settler of claims about the thing they own.
-- [ ] A recorded grant for a kind of claim wins over the relationship. A grant naming a system or a source identity is returned as such.
-- [ ] A kind of claim with no grant and no relationship returns the area owner. An area with no owner returns no settler and says so; it is not an error.
-- [ ] An agent identity is never returned as a settler.
-- [ ] Reporting lines and ownership are relationships declared by the `rye-org` plugin as `reports_to` and `owns`, visible through the category discovery request from work/001.
-- [ ] The answer is reconstructible for a past date: asking "as of" a date uses the relationships and grants in effect then.
-- [ ] The request is reachable from the CLI, and the agent-operations skill tells an agent to make it before recording a statement as accepted.
-- [ ] A conformance test covers each case above. A replay scenario covers the manager and report case end to end with no Rye vocabulary in what the person sees.
+- [x] Given a speaker, a subject, a kind of claim, and an area, one request returns the people who may settle it and which step of the lookup produced the answer (grant, relationship, area owner).
+- [x] A person is returned as a settler for claims about themselves with no setup.
+- [x] With a reporting line recorded from John to Bob, Bob is returned as the settler of an expectation on John, and John is not. With the reporting line ended, Bob is no longer returned.
+- [x] With an ownership relationship recorded, the owner is returned as the settler of claims about the thing they own.
+- [x] A recorded grant for a kind of claim wins over the relationship. A grant naming a system or a source identity is returned as such.
+- [x] A kind of claim with no grant and no relationship returns the area owner. An area with no owner returns no settler and says so; it is not an error.
+- [x] An agent identity is never returned as a settler.
+- [x] Reporting lines and ownership are relationships declared by the `rye-org` plugin as `reports_to` and `owns`, visible through the category discovery request from work/001.
+- [x] The answer is reconstructible for a past date: asking "as of" a date uses the relationships and grants in effect then.
+- [x] The request is reachable from the CLI, and the agent-operations skill tells an agent to make it before recording a statement as accepted.
+- [x] A conformance test covers each case above. A replay scenario covers the manager and report case end to end with no Rye vocabulary in what the person sees.
 
 ## Constraints
 - SQL and bash only in schema. Additive: a new numbered migration; applied migrations are not edited; existing functions keep their signatures.
@@ -64,7 +64,11 @@ agent checks with someone who can."
 - The v0.3 non-goal "tokens" means the forecasting-era stake concept, not the credential an agent presents to the API. Raised by Product. Overturn: Casey.
 
 ## Verified
-- filled in at close
+- Combined test command `./scripts/test-all.sh` passed on the final merged tree e90bbbe, run by Lead 2026-09-19: Docker flow (install through migration 0021, conformance including 29_settlement_lookup.sql under the non-superuser conformance role, security, concurrency, scenarios, host-run 21, 22, 23), admin build plus check:routes, site build. Log: scratchpad suite-e90bbbe.log. Earlier passing runs on 4701e1a, 716692f, 858eae2.
+- All eleven acceptance criteria verified by execution. Criterion 8 (reports_to and owns visible through category discovery) executed by Lead on a full install. Criterion 11's scenario lookup rows L1 to L4 executed by Lead on a full install with the scenario's own fixture; row L5 is per contract and matches the schema builder's executed area-owner cases.
+- Verifier, seven passes, final verdict PASS on a live Docker install under non-superuser roles: hidden alias, classified registry node, candidate-only alias all give blind roles the area owner, never the subject; self-set visibility is restrictive; 25 combinations of claim type and speech act never return the subject for something set on them; agent exclusion holds under every rule (agent: prefix in any case or whitespace, slug match, inactive identity, agent manager, agent owner, agent area owner, agent speaking about itself); grants win; alias chains resolve and a cycle raises; zero setup holds with no area; the skill's standing-claim query, run verbatim, finds the manager's row for an incoming synonym.
+- Defects found and fixed inside this item, each with a test that fails before the fix: a fixture writing an area with a hyphenated key the lookup could not see; agent refs compared verbatim instead of on the slug; the prefix check trimming spaces only; a null speech act returning the union of self, owner, and manager; aliased claim types skipping the expectation rule; a hidden alias giving blind roles the permissive answer. The last three shared one root, removed by the rule that the subject settles only positively known self types.
+- Not verified here, by design: the replay scenario end to end (no replay runner exists); enforcement (the lookup is advisory and nothing in an acceptance path calls it yet); the objection path.
 
 ## Reports
 Paste each role's report here as it arrives.
@@ -556,4 +560,22 @@ check:routes OK, site build OK. Verifier given the live database for a
 final pass, including an attempt to change who may settle an expectation
 by writing registry configuration as an agent role.
 
+### Verifier, 2026-09-19, seventh pass on e90bbbe, live Docker install: PASS
+PASS for work/002 as scoped; the root fix closes the fail-open class. One
+HIGH finding, pre-existing and outside this item's criteria: there is no
+assertion_type_access write row for `registry_entry`, so under review
+policy `open`, which is also what scope_review_policy() returns on a fresh
+install with no policy row, a caller under agent:some-agent (and viewer,
+team_member) wrote ACCEPTED registry entries on the Rye Core Registry node:
+type_alias:assertion_type:expectation = "commitment", and
+self_settled_type rows. Afterwards rye_settlers(John, expectation, John,
+self_commitment) returned canonical commitment, [John/self], is_settler
+true, for admin too. Under candidates_only and strict every such write
+lands as a candidate and has no effect. Rule 1 itself is sound:
+self_settled_type:expectation alone leaves expectation with the manager.
+Smallest fix named: an assertion_type_access write row limiting
+registry_entry to admin, and the same for the lifecycle helpers. Lead:
+opened as work/004.
+
 ## Close
+done 2026-09-19. Merged to agent-roles at e90bbbe; combined suite passed. rye_settlers() is read-only and advisory. Follow-ups: work/004 registry write gate (HIGH, pre-existing, found here); let plugin manifests contribute self-settled types so rye-org can ship a starter list (needs a manifest schema change); a replay runner so manager-expectation runs end to end; the agent creates the first area with the person as owner, so zero setup covers decisions as well as self statements; then the next v0.4 items in order: write echo, the questions a person owes, objections, and calling the lookup from the acceptance path for API callers.
