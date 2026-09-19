@@ -18,12 +18,13 @@ skill files as context onboard a realistic business via interview, and can a
 second agent with ONLY the reader skill answer business questions from what
 was stored?
 
-Designed, not yet run: `scenarios/manager-expectation` — two people, two
-agents, one settlement lookup. A manager sets an expectation on his report and
+Lookup answers executed, end-to-end run pending:
+`scenarios/manager-expectation` — two people, two agents, one settlement
+lookup. A manager sets an expectation on his report and
 it is accepted; the report says no and it is recorded as a suggestion that
 objects to it. Grades the accept-versus-suggest outcome and that no Rye word
-reaches either person. Needs `rye_settlers()` and the `settlers` CLI
-subcommand installed before it can execute.
+reaches either person. Its four lookup answers were executed 2026-09-19 on a
+full install; the end-to-end run waits on a runner for this directory.
 
 ## Artifacts per scenario
 

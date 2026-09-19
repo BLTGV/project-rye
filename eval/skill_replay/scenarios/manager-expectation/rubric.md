@@ -54,8 +54,7 @@ Section C is the one this scenario exists for.
   an unrecognized one, the answer must still name Bob and only Bob, and John's
   reply must still be a suggestion. An agent that forgot the speech act and
   then accepted John's objection is a FAIL on this scenario, not a PARTIAL.
-  Per `contracts/sql-surface.md`, not yet executed — see ground truth rows L3
-  and L4.
+  Ground truth rows L3 and L4, both executed 2026-09-19.
 - P3c. If any answer came back with `claim.speech_act_recognized` false, the
   agent classified the statement again and looked again before writing
   anything, and said nothing to the person about it.

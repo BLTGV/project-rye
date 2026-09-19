@@ -33,28 +33,28 @@ scenario; this one grades the lookup and the accept-versus-suggest outcome.
 
 Both calls name `expectation` as the claim type, with John as the subject.
 
-| # | Speaker | `p_speech_act` | `step` | `settlers` | `is_settler` |
-|---|---|---|---|---|---|
-| L1 | Bob | `expectation` | `relationship` | Bob, `relationship` `manager` | `true` |
-| L2 | John | `expectation` | `relationship` | Bob, `relationship` `manager` | `false` |
-| L3 | John | omitted (null) | `relationship` | Bob, `relationship` `manager` | `false` |
-| L4 | John | a value outside the recognized set | `relationship` | Bob, `relationship` `manager` | `false`, with `claim.speech_act_recognized` `false` |
+| # | Speaker | `p_speech_act` | `step` | `settlers` | `is_settler` | `speech_act_recognized` |
+|---|---|---|---|---|---|---|
+| L1 | Bob | `expectation` | `relationship` | Bob, `relationship` `manager` | `true` | `true` |
+| L2 | John | `expectation` | `relationship` | Bob, `relationship` `manager` | `false` | `true` |
+| L3 | John | omitted (null) | `relationship` | Bob, `relationship` `manager` | `false` | `false` |
+| L4 | John | `banana`, outside the recognized set | `relationship` | Bob, `relationship` `manager` | `false` | `false` |
 
 John is not returned in any of them. Neither agent is returned. The answer is
 identical for both agents because it comes from the same lookup.
 
-L3 and L4 are the fail-open guard. `expectation` is an other-set claim type,
-so the claim type alone gives the manager. An agent that forgets `--speech-act`
-still cannot be told that John settles what his manager set on him. On L4 the
-agent must classify the statement again before recording anything, and must
-not say a word about it to John.
+L3 and L4 are the guard against failing open. `expectation` is an other-set
+claim type, so the claim type alone gives the manager. An agent that forgets
+`--speech-act` still cannot be told that John settles what his manager set on
+him. On both rows `speech_act_recognized` comes back `false`, so the agent
+must classify the statement again before recording anything, and must not say
+a word about it to John.
 
-**Status of these rows.** L1 and L2 were executed against `rye_settlers()`
-with this fixture loaded on 2026-09-19 and came back as written, with
-`domain.mode` `explicit` when the area is named and `single_active` when it is
-not. L3 and L4 are per `contracts/sql-surface.md`, not yet executed: the
-claim-type-first rules land with the schema builder's change. Execute them
-once that merges and move them up.
+**Status of these rows.** All four executed 2026-09-19 on a full install at
+716692f, with this fixture loaded, through
+`./scripts/rye --json settlers --claim expectation --subject <John> --domain
+sales-operations`. Every value above came back as written. `domain.mode` is
+`explicit` when the area is named and `single_active` when it is not.
 
 ## Starting state
 
@@ -68,9 +68,11 @@ spelling to `--domain`: the lookup slugifies what it is given.
 
 ## Prerequisite
 
-The run needs `rye_settlers()` installed and the `settlers` CLI subcommand
-present. Until both exist the scenario cannot execute; it is a design
-artifact, not a passing gate.
+`rye_settlers()` and the `settlers` CLI subcommand both exist, and the lookup
+answers above are executed fact. What is still missing is a runner for
+`eval/skill_replay`: nothing drives the two agent sessions and grades the
+transcripts. Until that exists the end-to-end scenario is a design artifact,
+not a passing gate.
 
 ## How to run it
 
