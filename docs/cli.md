@@ -216,6 +216,9 @@ nothing said is lost.
 A type is gated when the spelling given has a `settle` row or its canonical
 spelling does, which is the rule `record_assertion()` applies. `gated_as` names
 the other spelling and is empty when the spelling given is itself the gated one.
+Surrounding whitespace is trimmed the same way `record_assertion()` trims it, so
+the answer is the one the write will act on. Case is not folded: `REVIEW_POLICY`
+is a different assertion type, and nothing reads it as configuration.
 The CLI sets no `app.current_role`, so `may_settle` is false for a gated type —
 that is the answer for a session with no role, not a claim about the caller's
 person. It reports, it never refuses, and it writes nothing.

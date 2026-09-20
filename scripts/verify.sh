@@ -395,8 +395,24 @@ BEGIN
         AND p.proname = 'settle_gate'
         AND p.prosrc LIKE '%gated_as%'
         AND p.prosrc LIKE '%canonical_type%'
+        AND p.prosrc LIKE '%trim(p_assertion_type)%'
   ) THEN
-    RAISE EXCEPTION 'settle_gate does not judge the written name as well as the canonical one';
+    RAISE EXCEPTION
+      'settle_gate does not judge the written name as well as the canonical one, or does not normalise its argument as record_assertion does';
+  END IF;
+
+  -- The demotion marker is itself a gate: without this, a row demoted under a
+  -- pre-gate alias is stored under an ungated type and the excluded role can
+  -- accept its own write.
+  IF NOT EXISTS (
+      SELECT 1 FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = v_schema
+        AND p.proname = 'assertion_settle_gate_guard'
+        AND p.prosrc LIKE '%settle_gate%allowed_roles%'
+  ) THEN
+    RAISE EXCEPTION
+      'assertion_settle_gate_guard does not read the attrs.settle_gate marker, so a demotion can be settled by the role it excluded';
   END IF;
 
   -- A repeat describe_category() works for an agent because the function opens

@@ -897,4 +897,290 @@ BEGIN
 END
 $$;
 
+-- ==========================================================================
+-- 42.10  A demotion cannot be settled by the role it excluded.
+--
+-- Found by verification of the first cut of 0036: the demoted row's STORED
+-- type is the ungated alias target, so assertion_settle_gate_guard() saw an
+-- ordinary candidate and accept_assertion() promoted it FOR THE VERY ROLE THE
+-- GATE HAD JUST EXCLUDED, while review_queue told the reviewer an admin was
+-- required. The row is the gate: attrs.settle_gate.allowed_roles now drives
+-- the same two refusals the type gate makes.
+--
+-- Runs after the block above, which leaves the pre-gate alias standing.
+-- ==========================================================================
+DO $$
+DECLARE
+    v_attrs   jsonb;
+    v_failed  boolean;
+    v_gate    jsonb;
+    v_id      uuid;
+    v_ids     uuid[] := '{}'::uuid[];
+    v_msg     text;
+    v_role    text;
+    v_roles   text[] := ARRAY['team_member', 'agent:t'];
+    v_row     assertions;
+    v_rows    integer;
+    v_subject uuid;
+BEGIN
+    PERFORM set_config('app.current_role', 'admin', true);
+
+    -- Premise: the alias from the block above still stands, so a write under
+    -- the gated name is stored under an UNGATED type. Without that, every
+    -- refusal below would be the ordinary type gate and would prove nothing.
+    IF canonical_type('assertion_type', 'review_policy') = 'review_policy'
+       OR assertion_settle_roles(canonical_type('assertion_type', 'review_policy')) IS NOT NULL
+    THEN
+        RAISE EXCEPTION
+            'Refusing to pass vacuously: the pre-gate alias does not stand, or its target is itself gated';
+    END IF;
+
+    FOREACH v_role IN ARRAY v_roles LOOP
+        PERFORM set_config('app.current_role', 'admin', true);
+        INSERT INTO nodes (node_type, label) VALUES ('thing', 'Leftovers settle marker subject')
+        RETURNING id INTO v_subject;
+
+        PERFORM set_config('app.current_role', v_role, true);
+        v_id := record_assertion(
+            'review_policy', '{"review_policy":"open"}', v_subject,
+            p_assertion_key := 'default', p_status := 'accepted', p_basis := 'assumed'
+        );
+        v_ids := v_ids || v_id;
+        SELECT * INTO v_row FROM assertions WHERE id = v_id;
+        IF v_row.status <> 'candidate'
+           OR NOT (v_row.attrs->'settle_gate'->'allowed_roles' @> '["admin"]'::jsonb)
+        THEN
+            RAISE EXCEPTION
+                'Premise broken for "%": the write landed % with settle_gate %',
+                v_role, v_row.status, v_row.attrs->'settle_gate';
+        END IF;
+        IF assertion_settle_roles(v_row.assertion_type) IS NOT NULL THEN
+            RAISE EXCEPTION
+                'Premise broken: the stored type % is itself gated, so the marker is not what refuses',
+                v_row.assertion_type;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM review_queue WHERE assertion_type = v_row.assertion_type) THEN
+            RAISE EXCEPTION 'Premise broken for "%": the demotion is not in review_queue', v_role;
+        END IF;
+
+        -- accept_assertion() refuses. It is SECURITY DEFINER, so on the Docker
+        -- owner it runs as a superuser and the trigger is the only thing that
+        -- can stop it -- which is the point of putting the rule there.
+        v_failed := false;
+        BEGIN
+            PERFORM accept_assertion(v_id);
+        EXCEPTION WHEN OTHERS THEN
+            v_failed := true;
+            v_msg := SQLERRM;
+        END;
+        IF NOT v_failed THEN
+            RAISE EXCEPTION
+                'Role "%" accepted its own settle-gate demotion through accept_assertion()', v_role;
+        END IF;
+        IF v_msg NOT LIKE '%waiting on the settle gate%' THEN
+            RAISE EXCEPTION 'Role "%" was refused for the wrong reason: %', v_role, v_msg;
+        END IF;
+        IF (SELECT status FROM assertions WHERE id = v_id) <> 'candidate' THEN
+            RAISE EXCEPTION 'Role "%" left its demotion accepted', v_role;
+        END IF;
+
+        -- The raw UPDATE with the accept write path forged, which is the shape
+        -- any caller can produce, so the refusal must not rest on the policy.
+        PERFORM set_config('app.write_path', 'accept_assertion', true);
+        PERFORM set_config('app.accept_assertion_id', v_id::text, true);
+        v_failed := false;
+        v_rows := 0;
+        BEGIN
+            UPDATE assertions SET status = 'accepted' WHERE id = v_id;
+            GET DIAGNOSTICS v_rows = ROW_COUNT;
+        EXCEPTION WHEN OTHERS THEN
+            v_failed := true;
+        END;
+        PERFORM set_config('app.write_path', '', true);
+        PERFORM set_config('app.accept_assertion_id', '', true);
+        IF NOT v_failed AND v_rows <> 0 THEN
+            RAISE EXCEPTION
+                'Role "%" promoted its own demotion with a forged accept path: % rows', v_role, v_rows;
+        END IF;
+        IF (SELECT status FROM assertions WHERE id = v_id) <> 'candidate' THEN
+            RAISE EXCEPTION 'Role "%" promoted its own demotion by raw UPDATE', v_role;
+        END IF;
+
+        -- The marker cannot be washed off first. 0025 refuses an attrs write
+        -- that drops a key or changes an existing key's value, including
+        -- through the forged assertion_outcome write path.
+        v_failed := false;
+        v_rows := 0;
+        BEGIN
+            UPDATE assertions SET attrs = attrs - 'settle_gate' WHERE id = v_id;
+            GET DIAGNOSTICS v_rows = ROW_COUNT;
+        EXCEPTION WHEN OTHERS THEN
+            v_failed := true;
+        END;
+        IF NOT v_failed AND v_rows <> 0 THEN
+            RAISE EXCEPTION 'Role "%" stripped the settle_gate marker: % rows', v_role, v_rows;
+        END IF;
+
+        PERFORM set_config('app.write_path', 'assertion_outcome', true);
+        PERFORM set_config('app.outcome_assertion_id', v_id::text, true);
+        v_failed := false;
+        v_rows := 0;
+        BEGIN
+            UPDATE assertions
+            SET attrs = (attrs - 'settle_gate') || jsonb_build_object('outcome', 'correct')
+            WHERE id = v_id;
+            GET DIAGNOSTICS v_rows = ROW_COUNT;
+        EXCEPTION WHEN OTHERS THEN
+            v_failed := true;
+        END;
+        IF NOT v_failed AND v_rows <> 0 THEN
+            RAISE EXCEPTION
+                'Role "%" stripped the settle_gate marker through the outcome path: % rows',
+                v_role, v_rows;
+        END IF;
+
+        v_failed := false;
+        v_rows := 0;
+        BEGIN
+            UPDATE assertions
+            SET attrs = jsonb_set(attrs, '{settle_gate,allowed_roles}', to_jsonb(ARRAY[v_role]))
+                        || jsonb_build_object('outcome', 'correct')
+            WHERE id = v_id;
+            GET DIAGNOSTICS v_rows = ROW_COUNT;
+        EXCEPTION WHEN OTHERS THEN
+            v_failed := true;
+        END;
+        PERFORM set_config('app.write_path', '', true);
+        PERFORM set_config('app.outcome_assertion_id', '', true);
+        IF NOT v_failed AND v_rows <> 0 THEN
+            RAISE EXCEPTION
+                'Role "%" rewrote settle_gate.allowed_roles to name itself: % rows', v_role, v_rows;
+        END IF;
+
+        SELECT attrs INTO v_attrs FROM assertions WHERE id = v_id;
+        IF NOT (v_attrs->'settle_gate'->'allowed_roles' @> '["admin"]'::jsonb) THEN
+            RAISE EXCEPTION 'Role "%" changed the marker: attrs are now %', v_role, v_attrs;
+        END IF;
+    END LOOP;
+
+    -- Anti-vacuity: an admin still accepts both, so the rule is the gate and
+    -- not a wall. Without this every refusal above could be a broken helper.
+    PERFORM set_config('app.current_role', 'admin', true);
+    FOREACH v_id IN ARRAY v_ids LOOP
+        PERFORM accept_assertion(v_id);
+        IF (SELECT status FROM assertions WHERE id = v_id) <> 'accepted' THEN
+            RAISE EXCEPTION 'An admin could not accept a settle-gate demotion';
+        END IF;
+    END LOOP;
+
+    -- A raw INSERT at accepted carrying a forged marker naming the caller's own
+    -- role gains nothing: the marker is read only when the stored type is
+    -- UNGATED, and for an ungated type an accepted row was always allowed. It
+    -- can add a refusal, never remove one. Pinned so the forged case is on the
+    -- record as a no-op rather than as an untested hole.
+    PERFORM set_config('app.current_role', 'team_member', true);
+    INSERT INTO nodes (node_type, label) VALUES ('thing', 'Leftovers forged marker subject')
+    RETURNING id INTO v_subject;
+    INSERT INTO assertions
+        (assertion_type, assertion_key, status, basis, subject_node_id, claim, attrs)
+    VALUES ('leftover_policy_note', 'default', 'accepted', 'assumed', v_subject,
+            '{"review_policy":"open"}',
+            '{"settle_gate":{"allowed_roles":["team_member"]}}');
+
+    -- And a forged marker naming somebody else only refuses the forger.
+    INSERT INTO nodes (node_type, label) VALUES ('thing', 'Leftovers forged marker subject two')
+    RETURNING id INTO v_subject;
+    v_failed := false;
+    BEGIN
+        INSERT INTO assertions
+            (assertion_type, assertion_key, status, basis, subject_node_id, claim, attrs)
+        VALUES ('leftover_policy_note', 'default', 'accepted', 'assumed', v_subject,
+                '{"review_policy":"open"}',
+                '{"settle_gate":{"allowed_roles":["admin"]}}');
+    EXCEPTION WHEN OTHERS THEN
+        v_failed := true;
+        v_msg := SQLERRM;
+    END;
+    IF NOT v_failed OR v_msg NOT LIKE '%waiting on the settle gate%' THEN
+        RAISE EXCEPTION
+            'A forged marker naming another role did not refuse the forger: failed=% msg=%',
+            v_failed, v_msg;
+    END IF;
+
+    -- A gated STORED type is still judged by its settle row, never by a marker,
+    -- so a forged marker can never widen the type gate.
+    v_failed := false;
+    BEGIN
+        INSERT INTO assertions
+            (assertion_type, assertion_key, status, basis, subject_node_id, claim, attrs)
+        VALUES ('registry_entry', 'leftover_forged_marker', 'accepted', 'assumed', v_subject,
+                '{"value":"x"}',
+                '{"settle_gate":{"allowed_roles":["team_member"]}}');
+    EXCEPTION WHEN OTHERS THEN
+        v_failed := true;
+        v_msg := SQLERRM;
+    END;
+    IF NOT v_failed OR v_msg NOT LIKE '%is Rye configuration%' THEN
+        RAISE EXCEPTION
+            'A forged marker widened the type gate on a gated stored type: failed=% msg=%',
+            v_failed, v_msg;
+    END IF;
+
+    -- ------------------------------------------------------------------
+    -- settle_gate() normalises its argument exactly as record_assertion()
+    -- does, so asking first is truthful. It did not, and a padded spelling
+    -- answered gated false / may_settle true and was then demoted.
+    -- ------------------------------------------------------------------
+    PERFORM set_config('app.current_role', 'team_member', true);
+    v_gate := settle_gate(' review_policy ');
+    IF (v_gate->>'gated')::boolean IS DISTINCT FROM true
+       OR (v_gate->>'may_settle')::boolean IS DISTINCT FROM false
+       OR v_gate->>'assertion_type' IS DISTINCT FROM 'review_policy'
+       OR NOT (v_gate->'allowed_roles' @> '["admin"]'::jsonb)
+    THEN
+        RAISE EXCEPTION 'settle_gate with a padded argument returned %', v_gate;
+    END IF;
+
+    INSERT INTO nodes (node_type, label) VALUES ('thing', 'Leftovers padded subject')
+    RETURNING id INTO v_subject;
+    v_id := record_assertion(
+        ' review_policy ', '{"review_policy":"open"}', v_subject,
+        p_assertion_key := 'default', p_status := 'accepted', p_basis := 'assumed'
+    );
+    IF (SELECT status FROM assertions WHERE id = v_id) <> 'candidate' THEN
+        RAISE EXCEPTION
+            'A padded gated type was not demoted, so settle_gate and record_assertion still disagree';
+    END IF;
+
+    -- A CASE VARIANT IS A DIFFERENT TYPE, and that is not a regression.
+    -- Neither settle_gate() nor record_assertion() lowercases, so
+    -- 'REVIEW_POLICY' is an assertion type of its own: ungated, and a write
+    -- under it lands accepted under that spelling. It is a policy no-op,
+    -- because registry_value() and governing_scope() match the literal
+    -- 'review_policy' and never read 'REVIEW_POLICY' as configuration. It
+    -- predates migration 0036 and is pinned here so nobody mistakes it for one.
+    v_gate := settle_gate('REVIEW_POLICY');
+    IF (v_gate->>'gated')::boolean IS DISTINCT FROM false THEN
+        RAISE EXCEPTION 'A case variant is now gated; this pin needs rewriting: %', v_gate;
+    END IF;
+    INSERT INTO nodes (node_type, label) VALUES ('thing', 'Leftovers case variant subject')
+    RETURNING id INTO v_subject;
+    v_id := record_assertion(
+        'REVIEW_POLICY', '{"review_policy":"open"}', v_subject,
+        p_assertion_key := 'default', p_status := 'accepted', p_basis := 'assumed'
+    );
+    SELECT * INTO v_row FROM assertions WHERE id = v_id;
+    IF v_row.status <> 'accepted' OR v_row.assertion_type <> 'REVIEW_POLICY' THEN
+        RAISE EXCEPTION
+            'The case variant behaved differently than pinned: status % type %',
+            v_row.status, v_row.assertion_type;
+    END IF;
+    -- The no-op half: nothing reads it as a review policy.
+    PERFORM set_config('app.current_role', 'admin', true);
+    IF scope_review_policy('42000001-0000-4000-8000-000000000004') <> 'open' THEN
+        RAISE EXCEPTION 'A case variant was read as configuration somewhere';
+    END IF;
+END
+$$;
+
 ROLLBACK;
