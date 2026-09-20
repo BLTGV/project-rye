@@ -72,6 +72,7 @@ Local NDJSON, snapshot, change-plan, and SQL files are intermediate execution ar
   - reads NDJSON and emits `rye_stage_record` NDJSON
 - `tabular_commit_rye.mts`
   - reads NDJSON and writes Rye nodes, events, assertions, and artifacts into PostgreSQL
+  - reports how many of its assertion writes landed accepted and how many are waiting for review
   - with `--emit-sql`, prints a SQL script instead of connecting to PostgreSQL
 
 If the user wants to inspect, extract, map, or stage data without touching the database, stop before `tabular_commit_rye.mts`.
@@ -81,6 +82,54 @@ If the user has no `DATABASE_URL` but can execute SQL through a tool such as a S
 The commit step writes with the authority of a person, so it will not start without one. Pass `--role <name>`, or set `RYE_SESSION_ROLE`; there is no default. `team_member` is enough for everything this skill does, and an agent does not pick a person's role for them — ask which role to use. `viewer` and an agent role are refused, because a session with no role set or set to `viewer` writes nothing at all: every insert into `nodes`, `events`, `assertions`, `artifacts`, and `node_source_map` comes back refused. The role goes into the SQL the script runs and into the script it emits, so do not strip those lines out.
 
 `assets/postgres/link_stage_records.sql` takes the role the same way, as a psql variable: `psql "$DATABASE_URL" -v rye_role=team_member -f link_stage_records.sql`. Through a tool with no psql variables, replace `:'rye_role'` with the role in quotes.
+
+## What The Run Left Waiting
+
+A commit prints `{"kind": "tabular_commit_rye_summary", ..., "assertions":
+{...}, "waiting_for_review": [...]}`, and the script `--emit-sql` produces ends
+with a `SELECT` that returns the same two fields. They use the same words as
+`source_context_commit_rye.mts`, so one vocabulary covers both intakes.
+
+`assertions.considered` is one per input record. Each of them ends the run with
+exactly one live claim, so `accepted` and `waiting_for_review` add up to it.
+`waiting_for_review` is everything the area's review policy filed as a
+suggestion instead of an answer: the earlier claim, if there was one, still
+answers until a person accepts the new one. The same word counts them inside
+`assertions` and lists them beside it. `waiting_filed_this_run` and
+`waiting_from_earlier_run` split that count into what this run put there and
+what was already waiting.
+
+Each listed row names the policy that held it — `review_policy`, from the row's
+own `attrs.review_gate`, and null on a row written before Rye recorded that
+marker — and `still_current_assertion_id`, the claim that still answers, which
+is null when the claim is new and nothing stood before it. `subject_id` is the
+row node's `external_id`.
+
+The commit still succeeded. A demoted write changes nothing else: run node, row
+nodes, events, artifacts, and source mappings are written exactly as under an
+open policy. Never report a waiting subject as loaded or updated.
+
+Assertions from this skill have basis `observed`, so under `candidates_only`
+they still land accepted — that policy demotes only the other bases. Under
+`strict` every one of them waits.
+
+Reruns are the normal shape of an intake, and a rerun is safe. Before writing,
+the commit looks for a live claim with the same `payload_hash` on the same
+subject, type, and key; if one is there it writes nothing and reports it again
+with `filed_this_run` false. A changed row has a different `payload_hash`, so
+it files one more suggestion. A suggestion someone declined is closed and no
+longer blocks a refile. Three identical runs therefore leave one suggestion per
+row, not three.
+
+Say it to the person in their words:
+
+> Two rows are waiting for you as suggestions: this area's review policy has
+> people accept what comes in rather than recording it directly. Nothing was
+> lost and nothing was changed — the rows are imported, and these two claims
+> answer nothing until you accept or decline them.
+
+Say **suggestion**, never "candidate", and **accepting** or **declining** one,
+never "promote" or "reject". The full list is `docs/glossary.md`.
 
 ## Runs And Duplicates
 
@@ -122,6 +171,7 @@ The duplicate check is database-wide for the connected Rye instance. If a later 
   - wraps extracted or mapped rows in a Rye-friendly staging envelope
 - `tabular_commit_rye.mts`
   - writes extracted, mapped, or staged records into Rye nodes, events, assertions, and source-file artifacts
+  - counts what landed accepted and what is waiting for review, naming the policy that held each suggestion
   - fingerprints original source files with SHA1 and rejects duplicate runs of the same run kind unless `--allow-duplicate-source` is passed
   - can emit a transaction SQL script for SQL-only environments
 - `rye-import-inspector`
@@ -307,6 +357,7 @@ Read [references/cli-contract.md](references/cli-contract.md) when you need:
 - the declarative mapping config format
 - example mapping modules
 - guidance on staging records into Rye nodes/assertions/artifacts
+- the `assertions` tally and `waiting_for_review` list a commit returns
 - the distinct `rye_tabular_intake_*` event, assertion, artifact, and node types
 - the JSON Schema contracts under `assets/schemas/`
 

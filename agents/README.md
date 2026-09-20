@@ -11,7 +11,7 @@ transcript.
 | Architect | `docs/architecture.md`, `docs/areas.md`, `contracts/`, `docs/decisions/` | where does it go, what is the interface | contracts only |
 | Builder:area | the paths listed for its area in `docs/areas.md` | how | yes, in its area |
 | Verifier | nothing | does the diff meet the work item and contracts | never edits |
-| Operator | `infra/`, CI, deploy scripts, `docs/runbooks/` | how does it run | infra only |
+| Operator | `infra/`, the local test gate, deploy scripts, `docs/runbooks/` | how does it run | infra only |
 
 Builders are generated, one per area in `docs/areas.md`. The other five are
 fixed. The prompts in this directory are the single source; the files under
@@ -43,7 +43,8 @@ scripts/gen-agents       renders role prompts into each tool's format
 3. Lead dispatches Architect. Architect writes `docs/architecture.md`,
    `docs/areas.md`, `contracts/`, and the first decision record.
 4. Lead runs `scripts/gen-agents`. One builder per area now exists.
-5. Lead dispatches Operator to set up the test runner, CI, and one deploy path.
+5. Lead dispatches Operator to set up the test runner and one deploy path.
+   There is no hosted CI; `./scripts/test-all.sh` run locally is the gate.
 6. Work begins.
 
 Rerun `scripts/gen-agents` whenever `docs/areas.md` or a role prompt changes.
@@ -59,7 +60,8 @@ Rerun `scripts/gen-agents` whenever `docs/areas.md` or a role prompt changes.
    touches.
 5. Lead dispatches Verifier with the diff and the work item. On fail, the
    builder gets only the findings. Two fails and the human gets the PR.
-6. Operator handles CI and deploy when affected.
+6. Operator keeps the local test gate (`./scripts/test-all.sh`) passing and
+   handles deploy when affected.
 7. Lead appends what builders learned to `docs/areas/<area>.md` and closes
    the work item.
 

@@ -22,7 +22,17 @@ Directed relationships between nodes with optional temporal bounds and weights.
 
 **Why it exists:** The relationships between entities (who works where, which ticket is about which customer, which task blocks which task) are often more valuable than the entities themselves. These relationships live in different systems and are invisible to each other. Edges make them explicit and queryable.
 
-**Key columns:** `edge_type` (open convention), `source_id` / `target_id` (directionality), `effective_from` / `effective_to` (temporal bounds), `weight` (relevance ranking), `archived_at` (soft delete — use instead of deletion).
+**Key columns:** `edge_type` (open convention), `source_id` / `target_id` (directionality), `effective_from` / `effective_to` (temporal bounds), `weight` (relevance ranking), `archived_at` (soft delete — use instead of deletion), `attrs` (system metadata: classification, teams).
+
+**An edge carries its own classification (0037).** `attrs.classification` and
+`attrs.teams` decide who may read the edge, ANDed with the unchanged rule that
+both endpoints must be visible. `attrs.teams` without an
+`attrs.classification` is refused at write time. Assertions about a hidden edge
+are hidden with it, and traversal inherits the same answer. There is no admin
+exemption, so an operator marking the first edge gives `admin` — or whoever
+must keep seeing it — a matching team or an `access_grants` row with
+`resource_type = 'edge'`, exactly as for nodes. See
+`enforce_edge_classification_with_teams()`.
 
 #### `events` — Activity Log
 
@@ -60,6 +70,12 @@ time, and classification.
 **Write convention:** Use `record_assertion()`. Direct inserts without evidence
 are reserved for explicit `assumed` assertions. Use lifecycle helpers for
 acceptance, rejection, supersession, and scheduling.
+
+**Authorship:** `attrs.recorded_by` is written by Rye on every insert from
+`app.current_role`, overwriting whatever the caller supplied, and
+`attrs.recorded_by_label` carries `app.current_user_id` as a label that decides
+nothing. It is what "an agent may close only its own suggestion" reads. Rows
+written before `0037` carry neither. See `assertion_authorship_stamp()`.
 
 #### `assertion_evidence` — Assertion Provenance
 
@@ -145,7 +161,11 @@ Controls which roles can read, write, or settle specific assertion types. An ass
 - `registry_entry` — type aliases, `self_settled_type:*`, `governed_type:*`, `DEFAULT_SCOPE`, basis priors, half lives, digest facets.
 - `review_policy` — decides whether other writes land accepted at all.
 
-A non-admin's accepted write of a gated type is **demoted, not refused**, by `record_assertion()`: it lands as a candidate carrying `attrs.settle_gate = {"pending": true, "requested_status": "accepted", "allowed_roles": [...]}` and appears in `review_queue` for an admin to accept or reject, so nothing the person said is lost. Every other route to an accepted gated row raises: a direct `INSERT`, any `UPDATE` that moves a row to `accepted` (including `accept_assertion()` and a raw `UPDATE` by a caller who sets `app.write_path` itself), `supersede_assertion()`, and `record_distillation()`. An agent capability grant (`rye.authoritative.promote`) does not open the gate. Gating a further type is an `INSERT`, not a migration.
+A non-admin's accepted write of a gated type is **demoted, not refused**, by `record_assertion()`: it lands as a candidate carrying `attrs.settle_gate = {"pending": true, "requested_status": "accepted", "assertion_type": <canonical>, "gated_as": <spelling>, "allowed_roles": [...]}` and appears in `review_queue` for an admin to accept or reject, so nothing the person said is lost. Every other route to an accepted gated row raises: a direct `INSERT`, any `UPDATE` that moves a row to `accepted` (including `accept_assertion()` and a raw `UPDATE` by a caller who sets `app.write_path` itself), `supersede_assertion()`, and `record_distillation()`. An agent capability grant (`rye.authoritative.promote`) does not open the gate. Gating a further type is an `INSERT`, not a migration.
+
+**The gate judges the written name too** (migration `0036`). A type is gated for `record_assertion()` when the canonical spelling has a `settle` row **or** the spelling the caller passed does, and `attrs.settle_gate.gated_as` names which one gated it. This closes an alias recorded *before* its type was gated, which the rule below — no new alias out of a gated type — cannot reach. `settle_gate()` answers by the same rule, and normalises its argument with the same `nullif(trim(...), '')` expression `record_assertion()` uses, so asking first is truthful. A **case** variant is a different assertion type, not a spelling of this one: nothing reads `REVIEW_POLICY` as configuration, so a write under it is a policy no-op.
+
+**The demotion marker is itself a gate.** A row demoted under a standing pre-gate alias is *stored* under the alias target, which is ungated — so `assertion_settle_gate_guard()` would see an ordinary candidate and the excluded role could accept its own write while `review_queue` told the reviewer an admin was needed. Where the stored type is ungated, the trigger therefore reads `attrs.settle_gate.allowed_roles` on the row and makes the same two refusals it makes for a gated stored type: no promotion to `accepted`, and no change to an already-accepted row, unless `app.current_role` is in that list. The marker is consulted **only** when the stored type is ungated, so a forged one can add refusals and never remove any; and it cannot be washed off first, because `assertions_immutable_guard()` refuses an `attrs` write that drops a key or changes an existing key's value, including through the `assertion_outcome` write path.
 
 **No alias points out of a gated type.** A `registry_entry` whose `assertion_key` is `type_alias:assertion_type:<T>`, where `T` has a `settle` row, is refused for every caller at every status — candidate included, admin included (migration `0028`). `record_assertion()` canonicalizes before it inserts and the gate compares the stored spelling, so such an alias would route every later write under the gated name to a type the gate does not read. An alias *into* a gated type is unaffected: it narrows, because the write then canonicalizes to the gated spelling and is demoted like any other configuration write. The rule is data like the rest of the gate — add a `settle` row for a type and aliases out of it are refused with no further migration.
 
@@ -204,8 +224,12 @@ keep current.
 
 On `assertions` the name is chosen so the triggers sort
 `trg_assertion_settle_gate`, `trg_assertions_gate_may_write`,
-`trg_assertions_immutable`, `trg_assertions_insert_review` — the settle gate's
-message still wins, and the shape guards still run after the role is settled.
+`trg_assertions_immutable`, `trg_assertions_insert_review`,
+`trg_assertions_review_policy_value` — the settle gate's message still wins, and
+the shape guards still run after the role is settled. The review-policy value
+guard (`0036`) sorts last of the five deliberately: where a caller is also
+refused by an earlier one, that message is the one it sees, and both are
+refusals.
 
 `node_source_map` is in the list because a mapping decides which node a tracked
 table's change events attach to. Before `0026` its insert policy was
@@ -713,6 +737,16 @@ the next `rye_categories()` call show the new words. Going through
 policy the words land as a candidate and stay invisible until `accept_assertion()`
 promotes them. Corrections are new assertions; nothing is updated in place.
 
+**A repeat description works for an agent** (migration `0036`). The second
+description of a type is an `UPDATE` of the existing category node, and
+`node_update_policy` admits an `agent:*` caller's `UPDATE` only through the named
+`update_node_properties` write path. A client never sets `app.write_path` itself,
+so the function opens it transaction-locally around its own upsert and clears it
+on the normal and the exception path — the mechanism `record_agent_action()` and
+`agent_create_candidate()` already use. `app.write_path` is empty after the call.
+A `viewer` and a session with no role set are still refused by the write gate one
+layer below.
+
 #### Category node convention
 
 A category is represented by a node with `node_type = 'category'`,
@@ -982,6 +1016,56 @@ optional outcome label. Inferred candidates cannot displace non-inferred
 incumbents. Scoped restrictive policy requires a human or the
 `rye.authoritative.promote` capability.
 
+**Who may reject (0037).** Closing a suggestion is an authority, not
+bookkeeping:
+
+| caller | may close a live candidate |
+|---|---|
+| `admin` | any, configuration included |
+| named role with `may_write` | any **except** an assertion type carrying a `settle` row |
+| agent-shaped (`agent:<key>`) | only one whose `attrs.recorded_by` is its own role, and never a settle-gated type |
+| `viewer`, unset, unknown, `system:cdc` | none, as "who may write" already says |
+
+A type is settle-gated by its stored spelling, by the spelling
+`canonical_type()` resolves it to, or — where both are ungated — by
+`attrs.settle_gate.allowed_roles`, the marker `record_assertion()` writes when
+the **written** name was gated and the canonical one was not (`0036`). A row
+carrying that marker is a suggestion waiting for an admin, so the role the
+demotion excluded may not close it either. Its author is the one exception,
+whatever shape of role it is: the caller whose `attrs.recorded_by` is this
+session's role withdraws its own marked suggestion, because the stored type is
+ungated and withdrawing your own words decides nobody else's. Unknown
+authorship is not own authorship, and a row whose stored type is gated has no
+such exception at all.
+
+`reject_candidate()` refuses before it labels an outcome or marks the row, so a
+refused rejection records no `candidate_rejected` event and the candidate is
+still waiting. The rule itself is
+`trg_assertions_reject_authority`, a `BEFORE UPDATE` trigger firing on the
+rejection shape — a live candidate ending with `superseded_by` null — so a raw
+`UPDATE` with a forged `app.write_path` is bound identically. An agent's
+documented correction route is unchanged: close your own pending suggestion,
+file a corrected one.
+
+#### `assertion_authorship_stamp()`
+
+`BEFORE INSERT` trigger on `assertions`, trigger
+`trg_assertion_authorship_stamp` (0037). Writes `attrs.recorded_by` from
+`app.current_role` and `attrs.recorded_by_label` from `app.current_user_id`,
+overwriting anything the caller supplied, on every route — helper and raw
+`INSERT` alike.
+
+**Why it exists:** `assertions` has no author column and `record_assertion()`
+takes no actor, so "an agent may close only its own suggestion" had nothing to
+read. A trigger is the only place the write cannot be skipped, and it also means
+a caller can never claim another author. Consequences a client meets: a row
+written before `0037` carries no `recorded_by` and **no agent may close it** —
+unknown authorship is not own authorship, and `attrs` is immutable so there is
+no backfill; and a `merge_nodes()` copy carries the recorded_by of the session
+that ran the merge, because that session is what put that row on the canonical
+node. The original row keeps its own author. `review_queue` and the other review
+surfaces already project `attrs`, so "who suggested this" needs no view change.
+
 #### `schedule_assertion_change()`
 
 Creates an accepted future-effective replacement for any assertion type and
@@ -1038,10 +1122,31 @@ tie-break. For an edge subject the source endpoint still beats the target
 endpoint before restrictiveness is consulted.
 
 `scope_review_policy_rank(p_scope_id) → int` does the ranking: `0` strict, `1`
-candidates_only, `2` everything else. Unlike `scope_review_policy()` it never
-raises, so one scope carrying an unsupported stored value cannot refuse writes on
-a neighbouring subject; if that scope is the one selected,
-`scope_review_policy()` still raises on it.
+candidates_only, `2` open. A null scope and a scope with **no** `review_policy`
+assertion rank `2`.
+
+**An unsupported policy value is strict, and cannot be recorded** (migration
+`0036`). `scope_review_policy()` returns `strict` for a stored value it does not
+recognise, and for a row that exists but carries no readable value at all —
+`{"policy":"strict"}`, `{"review_policy":null}`, `{}` — and
+`scope_review_policy_rank()` ranks both `0`, so ordering and selection agree.
+Neither raises, for any input. A scope with no `review_policy` row still reads
+`open`: absent is not broken, present and unreadable is.
+`effective_review_policy()` composes the two and inherits both answers.
+
+Writing one is closed from both ends: `record_scope_policy()` refuses with
+`Unsupported review_policy "%": use open, candidates_only, or strict`, and
+`assertion_review_policy_value_guard()` (trigger
+`trg_assertions_review_policy_value`, `BEFORE INSERT OR UPDATE ... FOR EACH ROW`)
+refuses any `review_policy` assertion whose claim does not read as one of the
+three — at every status, for every role, because it reads no role. It
+deliberately does **not** refuse an `UPDATE` that leaves the claim alone and does
+not make the row accepted, so an instance that already holds a broken row can
+still supersede, end, or reject it; that is how the repair works. One helper,
+`review_policy_claim_value(p_claim jsonb) → text`, holds the extraction
+(`claim->>'review_policy'`, then `claim->>'value'`, then a bare string claim,
+`NULL` when none of those read), and `review_policy_value_supported(p_claim)` is
+the boolean every site tests, so the sites cannot drift apart.
 
 #### `canonical_type()`
 
@@ -1058,12 +1163,17 @@ empty targets raise. Existing stored rows are not rewritten.
 settle_gate(p_assertion_type) → jsonb
 ```
 
-Answers `{assertion_type, gated, allowed_roles, current_role, may_settle}` for
-an assertion type. `STABLE`, `SECURITY INVOKER`, writes nothing. Call it before
-offering to record configuration, so a client can tell the person what will
-happen — the schema returns facts, the sentence a person hears is the client's.
-Matches the stored spelling with no alias resolution, the same way
-`registry_value()` and `governing_scope()` do.
+Answers `{assertion_type, gated, gated_as, allowed_roles, current_role,
+may_settle}` for an assertion type. `STABLE`, `SECURITY INVOKER`, writes
+nothing. Call it before offering to record configuration, so a client can tell
+the person what will happen — the schema returns facts, the sentence a person
+hears is the client's.
+
+`gated` is true when the spelling given has a `settle` row **or** its canonical
+spelling does, which is the rule `record_assertion()` applies (migration
+`0036`); `allowed_roles` and `may_settle` follow whichever gated it. `gated_as`
+names the other spelling and is `null` when the spelling given is itself the
+gated one, which is the ordinary case.
 
 `assertion_settle_roles(p_assertion_type)` returns the allowed roles or `NULL`
 when the type is ungated. `may_settle_assertion_type(p_assertion_type)` is the
@@ -1617,6 +1727,23 @@ helper because a trigger fires inside a `SECURITY DEFINER` helper and on a raw
 BEFORE INSERT/UPDATE trigger on `nodes`. Rejects nodes that have `attrs->'teams'` (non-empty array) but no `attrs->>'classification'`.
 
 **Why it exists:** Team-scoped nodes without a classification would be visible to all users by default, creating a security hole. This trigger catches the mistake at write time.
+
+#### `enforce_edge_classification_with_teams()`
+
+`BEFORE INSERT OR UPDATE` trigger on `edges`, trigger
+`trg_edges_classification_check` (0037). The same rule, one table over:
+a non-empty `attrs.teams` with no `attrs.classification` is refused.
+
+**Why it exists:** since `0037` an edge's own `attrs.classification` and
+`attrs.teams` decide who may read it, ANDed with endpoint visibility. Without
+this trigger a team-marked edge with no classification would take the
+`classification IS NULL` branch and be world-readable — the same hole the node
+trigger closes. The trigger judges writes, not history: an edge that already
+carries teams and no classification stays readable until a write sets one, and
+setting one is an `UPDATE` the trigger accepts. There is no admin exemption on
+the read side, exactly as there is none for nodes, and an `UPDATE`'s new row is
+checked against the SELECT policy, so the session doing the marking must hold
+the team it is about to require.
 
 #### `mark_assertion_superseded()`
 

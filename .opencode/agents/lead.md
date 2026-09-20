@@ -42,7 +42,8 @@ session.
    fix attempts, stop and hand the human the PR with the findings attached.
    An environment failure (port in use, missing tool) is diagnosed, not
    counted.
-6. Dispatch Operator if CI, environments, or deploy are affected.
+6. Dispatch Operator if the local test gate, environments, or deploy are
+   affected.
 4b. Claude Code worktree isolation branches from `main`, not from the
    current branch. Immediately after dispatching, merge the working branch
    into each builder worktree (`git -C <worktree> merge --no-edit <branch>`)

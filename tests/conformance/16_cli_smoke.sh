@@ -59,9 +59,63 @@ require_contains "$categories_json" '"categories"' "categories --json"
 require_contains "$categories_json" '"category_count"' "categories --json"
 require_contains "$categories_json" '"empty"' "categories --json"
 
-categories_unknown_json="$("${rye_cmd[@]}" categories --scope ffffffff-ffff-4fff-8fff-ffffffffffff --json)"
-require_contains "$categories_unknown_json" '"scope_found": false' "categories --scope --json"
-require_contains "$categories_unknown_json" '"empty": true' "categories --scope --json"
+# Obligation 42.9 (docs/decisions/0013-leftovers-fail-restrictive.md): an
+# unknown --scope is answered, never substituted. A key that names nothing and
+# a uuid that names nothing take the identical path -- the documented empty
+# answer with scope_found false -- and both exit non-zero, because the caller
+# asked about something that does not exist. Before migration 0036 an unknown
+# KEY resolved to NULL and the function answered with automatic scope
+# selection, so an agent got another scope's vocabulary without a word.
+categories_unknown_json="$("${rye_cmd[@]}" categories --scope ffffffff-ffff-4fff-8fff-ffffffffffff --json 2>/dev/null || true)"
+require_contains "$categories_unknown_json" '"scope_found": false' "categories --scope uuid --json"
+require_contains "$categories_unknown_json" '"empty": true' "categories --scope uuid --json"
+
+if "${rye_cmd[@]}" categories --scope ffffffff-ffff-4fff-8fff-ffffffffffff --json >/dev/null 2>&1; then
+  echo "Expected categories --scope <unknown uuid> --json to exit non-zero" >&2
+  exit 1
+fi
+
+categories_unknown_key_json="$("${rye_cmd[@]}" categories --scope no-such-scope-key --json 2>/dev/null || true)"
+require_contains "$categories_unknown_key_json" '"scope_found": false' "categories --scope key --json"
+require_contains "$categories_unknown_key_json" '"empty": true' "categories --scope key --json"
+require_contains "$categories_unknown_key_json" '"categories": []' "categories --scope key --json"
+require_contains "$categories_unknown_key_json" '"mode": "explicit"' "categories --scope key --json"
+
+if "${rye_cmd[@]}" categories --scope no-such-scope-key --json >/dev/null 2>&1; then
+  echo "Expected categories --scope <unknown key> --json to exit non-zero" >&2
+  exit 1
+fi
+
+categories_unknown_key_text="$("${rye_cmd[@]}" categories --scope no-such-scope-key 2>&1 || true)"
+require_contains "$categories_unknown_key_text" "scope not found: no-such-scope-key" "categories --scope key"
+
+# Anti-vacuity: the unscoped call answers, exits zero, and differs from the
+# empty answer above. An unknown scope that returned what the unscoped call
+# returns would pass every check above and still be the bug.
+categories_all_json="$("${rye_cmd[@]}" categories --json)"
+require_contains "$categories_all_json" '"category_count"' "categories --json"
+if [[ "$categories_all_json" == *'"categories": []'* ]]; then
+  echo "Expected the unscoped categories answer to list at least one category" >&2
+  echo "$categories_all_json" >&2
+  exit 1
+fi
+if [[ "$categories_all_json" == "$categories_unknown_key_json" ]]; then
+  echo "An unknown --scope key returned the same answer as no --scope at all" >&2
+  exit 1
+fi
+
+# The same rule governs context --scope.
+context_unknown_key_json="$("${rye_cmd[@]}" context --scope no-such-scope-key --json 2>/dev/null || true)"
+require_contains "$context_unknown_key_json" '"selected_scope_found": false' "context --scope key --json"
+require_contains "$context_unknown_key_json" '"mode": "explicit"' "context --scope key --json"
+
+if "${rye_cmd[@]}" context --scope no-such-scope-key --json >/dev/null 2>&1; then
+  echo "Expected context --scope <unknown key> --json to exit non-zero" >&2
+  exit 1
+fi
+
+context_unknown_key_text="$("${rye_cmd[@]}" context --scope no-such-scope-key 2>&1 || true)"
+require_contains "$context_unknown_key_text" "scope not found: no-such-scope-key" "context --scope key"
 
 "${rye_cmd[@]}" categories >/dev/null
 
@@ -76,11 +130,17 @@ require_contains "$settle_gate_json" '"gated": true' "settle-gate --json"
 require_contains "$settle_gate_json" '"admin"' "settle-gate --json"
 require_contains "$settle_gate_json" '"may_settle": false' "settle-gate --json"
 
+# gated_as names the OTHER spelling and is null when the spelling given is
+# itself the gated one, which is the case for both seeded configuration types.
+require_contains "$settle_gate_json" '"gated_as": null' "settle-gate --json"
+
 settle_gate_policy_json="$("${rye_cmd[@]}" settle-gate review_policy --json)"
 require_contains "$settle_gate_policy_json" '"gated": true' "settle-gate review_policy --json"
+require_contains "$settle_gate_policy_json" '"gated_as": null' "settle-gate review_policy --json"
 
 settle_gate_open_json="$("${rye_cmd[@]}" settle-gate cli_smoke_ungated_type --json)"
 require_contains "$settle_gate_open_json" '"gated": false' "settle-gate ungated --json"
+require_contains "$settle_gate_open_json" '"gated_as": null' "settle-gate ungated --json"
 require_contains "$settle_gate_open_json" '"allowed_roles": null' "settle-gate ungated --json"
 require_contains "$settle_gate_open_json" '"may_settle": true' "settle-gate ungated --json"
 
@@ -89,7 +149,7 @@ require_contains "$settle_gate_table" "registry_entry" "settle-gate"
 require_contains "$settle_gate_table" "admin" "settle-gate"
 # The table headers are the JSON field names, so the two forms cannot drift
 # into two names for one value.
-for field in assertion_type gated allowed_roles current_role may_settle; do
+for field in assertion_type gated gated_as allowed_roles current_role may_settle; do
   require_contains "$settle_gate_table" "$field" "settle-gate header"
 done
 require_not_contains "$settle_gate_table" "session_role" "settle-gate header"

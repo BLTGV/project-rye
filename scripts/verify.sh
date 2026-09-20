@@ -318,6 +318,115 @@ BEGIN
     RAISE EXCEPTION 'the 0025 insert exemption is still present in assertions_insert_review_guard';
   END IF;
 
+  -- Leftovers fail restrictive (0036). Four facts: one extraction helper that
+  -- the reading sites share, two reading functions that no longer raise, the
+  -- value guard and its trigger, and the written-name settle gate.
+  IF to_regprocedure('rye.review_policy_claim_value(jsonb)') IS NULL
+     OR to_regprocedure('rye.review_policy_value_supported(jsonb)') IS NULL
+  THEN
+    RAISE EXCEPTION 'the review policy claim extraction helpers are missing';
+  END IF;
+
+  IF EXISTS (
+      SELECT required.name
+      FROM (VALUES ('scope_review_policy'), ('scope_review_policy_rank'),
+                   ('record_scope_policy'), ('assertion_review_policy_value_guard'))
+           required(name)
+      WHERE NOT EXISTS (
+          SELECT 1 FROM pg_proc p
+          JOIN pg_namespace n ON n.oid = p.pronamespace
+          WHERE n.nspname = v_schema
+            AND p.proname = required.name
+            AND (p.prosrc LIKE '%review_policy_claim_value%'
+                 OR p.prosrc LIKE '%review_policy_value_supported%')
+      )
+  ) THEN
+    RAISE EXCEPTION
+      'one or more review-policy sites do not read the shared claim extraction, so they can drift apart';
+  END IF;
+
+  -- Reading a stored policy value must not raise. The old body is the only
+  -- thing in the tree that raised, so its sentence is the marker.
+  IF EXISTS (
+      SELECT 1 FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = v_schema
+        AND p.proname = 'scope_review_policy'
+        AND p.prosrc LIKE '%Unsupported review_policy % on scope%'
+  ) THEN
+    RAISE EXCEPTION 'scope_review_policy still raises on an unsupported stored value';
+  END IF;
+
+  IF NOT EXISTS (
+      SELECT 1
+      FROM pg_trigger t
+      JOIN pg_class c ON c.oid = t.tgrelid
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = v_schema
+        AND c.relname = 'assertions'
+        AND t.tgname = 'trg_assertions_review_policy_value'
+        AND NOT t.tgisinternal
+        AND t.tgenabled = 'O'
+        AND t.tgtype & 1 = 1  -- FOR EACH ROW
+        AND t.tgtype & 2 = 2  -- BEFORE
+        AND t.tgtype & 4 = 4  -- INSERT
+        AND t.tgtype & 16 = 16 -- UPDATE
+  ) THEN
+    RAISE EXCEPTION
+      'trg_assertions_review_policy_value is missing, disabled, or is not BEFORE INSERT OR UPDATE FOR EACH ROW';
+  END IF;
+
+  -- The settle gate judges the written name as well as the canonical one, and
+  -- says which spelling gated the write.
+  IF NOT EXISTS (
+      SELECT 1 FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = v_schema
+        AND p.proname = 'record_assertion'
+        AND p.prosrc LIKE '%gated_as%'
+  ) THEN
+    RAISE EXCEPTION 'record_assertion does not mark which spelling gated a settle-gate demotion';
+  END IF;
+
+  IF NOT EXISTS (
+      SELECT 1 FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = v_schema
+        AND p.proname = 'settle_gate'
+        AND p.prosrc LIKE '%gated_as%'
+        AND p.prosrc LIKE '%canonical_type%'
+        AND p.prosrc LIKE '%trim(p_assertion_type)%'
+  ) THEN
+    RAISE EXCEPTION
+      'settle_gate does not judge the written name as well as the canonical one, or does not normalise its argument as record_assertion does';
+  END IF;
+
+  -- The demotion marker is itself a gate: without this, a row demoted under a
+  -- pre-gate alias is stored under an ungated type and the excluded role can
+  -- accept its own write.
+  IF NOT EXISTS (
+      SELECT 1 FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = v_schema
+        AND p.proname = 'assertion_settle_gate_guard'
+        AND p.prosrc LIKE '%settle_gate%allowed_roles%'
+  ) THEN
+    RAISE EXCEPTION
+      'assertion_settle_gate_guard does not read the attrs.settle_gate marker, so a demotion can be settled by the role it excluded';
+  END IF;
+
+  -- A repeat describe_category() works for an agent because the function opens
+  -- the named write path around its own upsert.
+  IF NOT EXISTS (
+      SELECT 1 FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = v_schema
+        AND p.proname = 'describe_category'
+        AND p.prosrc LIKE '%update_node_properties%'
+  ) THEN
+    RAISE EXCEPTION 'describe_category does not open the named write path around its upsert';
+  END IF;
+
   IF NOT EXISTS (
       SELECT 1
       FROM pg_class c
@@ -1053,6 +1162,98 @@ BEGIN
         AND p.prosrc LIKE '%log_agent_query%'
   ) THEN
     RAISE EXCEPTION 'a function in the rye schema calls log_agent_query; tracing is caller-driven and no read may write';
+  END IF;
+
+  -- Who may reject a suggestion, and an edge carries its own classification
+  -- (0037). Three triggers and one policy; the helper's own refusal is not
+  -- the rule, so the triggers are what is checked here.
+  IF to_regprocedure('rye.assertion_authorship_stamp()') IS NULL
+     OR to_regprocedure('rye.assertion_rejection_authority_guard()') IS NULL
+     OR to_regprocedure('rye.enforce_edge_classification_with_teams()') IS NULL
+  THEN
+    RAISE EXCEPTION
+      'one or more of the 0037 trigger functions is missing (assertion_authorship_stamp, assertion_rejection_authority_guard, enforce_edge_classification_with_teams)';
+  END IF;
+
+  IF EXISTS (
+      SELECT required.tgname
+      FROM (VALUES
+          ('assertions', 'trg_assertion_authorship_stamp', 4),   -- BEFORE INSERT
+          ('assertions', 'trg_assertions_reject_authority', 16), -- BEFORE UPDATE
+          ('edges',      'trg_edges_classification_check', 20)   -- BEFORE INSERT OR UPDATE
+      ) required(relname, tgname, events)
+      WHERE NOT EXISTS (
+          SELECT 1
+          FROM pg_trigger t
+          JOIN pg_class c ON c.oid = t.tgrelid
+          JOIN pg_namespace ns ON ns.oid = c.relnamespace
+          WHERE ns.nspname = v_schema
+            AND c.relname = required.relname
+            AND t.tgname = required.tgname
+            AND NOT t.tgisinternal
+            AND t.tgenabled <> 'D'
+            AND t.tgtype & 1 = 1 -- FOR EACH ROW
+            AND t.tgtype & 2 = 2 -- BEFORE
+            AND t.tgtype & required.events = required.events
+      )
+  ) THEN
+    RAISE EXCEPTION
+      'one or more of the 0037 triggers is missing, disabled, or has the wrong timing';
+  END IF;
+
+  -- Order, in its own check so that the four-name check above stays where it
+  -- is: the stamp never raises and may sort first; the authority guard must
+  -- fall after the settle gate, the may-write gate and the immutability guard,
+  -- so no existing refusal message moves.
+  IF NOT (
+      (SELECT array_position(names, 'trg_assertion_settle_gate')
+              < array_position(names, 'trg_assertions_reject_authority')
+          AND array_position(names, 'trg_assertions_gate_may_write')
+              < array_position(names, 'trg_assertions_reject_authority')
+          AND array_position(names, 'trg_assertions_immutable')
+              < array_position(names, 'trg_assertions_reject_authority')
+       FROM (
+          SELECT array_agg(t.tgname ORDER BY t.tgname) AS names
+          FROM pg_trigger t
+          JOIN pg_class c ON c.oid = t.tgrelid
+          JOIN pg_namespace ns ON ns.oid = c.relnamespace
+          WHERE ns.nspname = v_schema
+            AND c.relname = 'assertions'
+            AND NOT t.tgisinternal
+       ) ordered)
+  ) THEN
+    RAISE EXCEPTION
+      'trg_assertions_reject_authority does not sort after the settle gate, the may-write gate and the immutability guard';
+  END IF;
+
+  -- The edge read rule reads the edge's own attrs. CREATE POLICY stores the
+  -- expression unfolded, so a pg_policies grep is sound.
+  IF NOT EXISTS (
+      SELECT 1 FROM pg_policies
+      WHERE schemaname = v_schema
+        AND tablename = 'edges'
+        AND policyname = 'edge_read_policy'
+        AND qual LIKE '%classification%'
+        AND qual LIKE '%access_grants%'
+  ) THEN
+    RAISE EXCEPTION
+      'edge_read_policy does not read the edge''s own classification, teams and grants';
+  END IF;
+
+  -- reject_candidate() keeps its SECURITY DEFINER setting and refuses before
+  -- it writes. The trigger is the rule; this is the sentence a caller gets.
+  IF NOT EXISTS (
+      SELECT 1
+      FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = v_schema
+        AND p.proname = 'reject_candidate'
+        AND p.prosecdef
+        AND p.prosrc LIKE '%may close only its own%'
+        AND p.prosrc LIKE '%is Rye configuration%'
+  ) THEN
+    RAISE EXCEPTION
+      'reject_candidate is not SECURITY DEFINER or does not gate the caller before it writes';
   END IF;
 END
 $$;

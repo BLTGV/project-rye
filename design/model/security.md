@@ -92,12 +92,33 @@ CREATE POLICY node_read_policy ON nodes
 Edges, assertions, and events inherit visibility from the nodes they reference.
 
 ```sql
--- Edges: must see both endpoints
+-- Edges: must see both endpoints, AND the edge's own mark must let you in
+-- (0037). The second half is the node rule with the nouns changed.
 CREATE POLICY edge_read_policy ON edges
     FOR SELECT
     USING (
         EXISTS (SELECT 1 FROM nodes WHERE id = edges.source_id)
         AND EXISTS (SELECT 1 FROM nodes WHERE id = edges.target_id)
+        AND (
+            attrs->>'classification' IS NULL
+            OR attrs->>'classification' = 'public'
+            OR attrs->'teams' ?| coalesce(
+                   string_to_array(current_setting('app.current_teams', true), ','),
+                   ARRAY[]::text[])
+            OR EXISTS (
+                SELECT 1 FROM access_grants ag
+                WHERE ag.active = true
+                  AND ag.resource_type = 'edge'
+                  AND (ag.grantee = current_setting('app.current_user_id', true)
+                       OR ag.grantee = current_setting('app.current_role', true)
+                       OR ag.grantee = ANY(coalesce(
+                              string_to_array(current_setting('app.current_teams', true), ','),
+                              ARRAY[]::text[])))
+                  AND (ag.scope->>'edge_id' = edges.id::text
+                       OR ag.scope->>'edge_type' = edges.edge_type
+                       OR ag.scope->>'classification' = edges.attrs->>'classification')
+            )
+        )
     );
 
 -- Assertions: must see the subject node
@@ -133,6 +154,31 @@ CREATE POLICY artifact_read_policy ON artifacts
         OR EXISTS (SELECT 1 FROM nodes WHERE id = artifacts.source_node_id)
     );
 ```
+
+**An edge carries its own classification (0037).** Before it, an edge's
+`attrs.classification` and `attrs.teams` had no effect: an edge marked
+confidential between two public nodes was readable by a `viewer` and by a
+session with no role (issue 38). Endpoint visibility is unchanged and still
+necessary; the edge's own mark is ANDed with it. Three consequences worth
+stating:
+
+- **Teams on an edge require a classification**, refused by
+  `enforce_edge_classification_with_teams()` on trigger
+  `trg_edges_classification_check`, exactly as `nodes` have been refused since
+  `0001`. Without it a team-marked edge takes the `classification IS NULL`
+  branch and is world-readable.
+- **There is no admin exemption**, because `node_read_policy` has none. An
+  `admin` session reads a marked edge through `app.current_teams` or an
+  `access_grants` row, and not otherwise. An `UPDATE`'s new row is checked
+  against the SELECT policy too, so a session cannot mark a row out of its own
+  sight: hold the team you are about to require.
+- **Assertions and traversal inherit it for free.** `assertion_read_policy`
+  already requires the subject edge to be visible, and `find_paths()` and
+  `neighborhood()` are `security_invoker`. `event_participants` does not
+  cascade and needs nothing: it references nodes only.
+
+The trigger judges writes, not history, so an edge already carrying teams and
+no classification stays readable until a write sets one.
 
 ### 2.4 Assertion-Type Gating
 
@@ -372,6 +418,22 @@ basis of a role, because any caller can claim one. There is no admin exemption.
 | `trg_assertions_insert_review` (0025) | BEFORE INSERT | A direct `INSERT` of an accepted row is demoted where `record_assertion()` demotes. |
 | `trg_assertions_immutable` (0025 function, 0002 trigger) | BEFORE UPDATE | The per-column rules for `status`, `superseded_at`, `superseded_by`, `effective_to`, `attrs` and `classification`. |
 | `trg_assertions_transition_complete` (0025) | AFTER INSERT OR UPDATE, deferred | The acceptance event, the replacement's type and key, and the successor of a narrowed window. Refuses at `COMMIT`. |
+| `trg_assertion_authorship_stamp` (0037) | BEFORE INSERT | Writes `attrs.recorded_by` from `app.current_role` and `attrs.recorded_by_label` from `app.current_user_id`, overwriting whatever the caller supplied. Never raises, which is why it may sort first. |
+| `trg_assertions_reject_authority` (0037) | BEFORE UPDATE | Who may close a live candidate with no replacement. Sorts after the settle gate, the may-write gate and the immutability guard. |
+
+**Who may reject a suggestion (0037).** Accepting a candidate was gated and
+closing one was not, so an agent closed another agent's suggestion, a person's
+suggestion, and a configuration suggestion. An `admin` closes any; a named role
+with `may_write` closes any except an assertion type carrying a `settle` row;
+an agent-shaped session closes only a candidate whose `attrs.recorded_by` is its
+own role. Closing a configuration suggestion is deciding it, so the settle roles
+gate it on the stored spelling and on the canonical one. Authorship is not a
+column: the stamp above is the only place it is written, a row that pre-dates
+`0037` carries none, and unknown authorship is not own authorship. The rule is
+the trigger, on the rejection shape — a live candidate ending with
+`superseded_by` null — so a forged `app.write_path` buys nothing;
+`reject_candidate()` refuses first only so that a caller gets a sentence.
+`rye_settlers()` is not consulted and stays advisory.
 
 **What this protects and what it does not.** Rye's authorization is session
 variables. A caller holding a raw connection can set `app.current_role` to
