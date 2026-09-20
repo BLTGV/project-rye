@@ -191,7 +191,7 @@ produced by the same `set_config()` this section closes.
 |---|---|
 | `status` | `candidate` to `accepted` only. Never back. The row must be a live candidate; no accepted, unsuperseded assertion on the same subject, type, and key may cover the instant the promoted row takes effect, which is `greatest(coalesce(effective_at, now()), now())`; and the acceptance must be accompanied by an `assertion_accepted` event naming the row. An `agent:*` caller under `candidates_only` or `strict`, or on a `pattern_claim`, additionally needs `rye.authoritative.promote` for the governing scope, which is the rule `accept_assertion()` already applied. |
 | `superseded_at` | Null to non-null once, and never back. On a row that was `accepted`, only when `superseded_by` is set in the same statement. **An accepted assertion never ends with nothing replacing it.** A candidate may still be closed with `superseded_by` null, which is how `reject_candidate()` records a rejection. |
-| `superseded_by` | Null to non-null once, together with `superseded_at`, never to the row itself. The replacement must carry the same `assertion_type` and `assertion_key`. The subject may differ, because `merge_nodes()` replaces a duplicate's assertion with the canonical node's. |
+| `superseded_by` | Null to non-null once, together with `superseded_at`, never to the row itself. The replacement must carry the same `assertion_type` and `assertion_key`, and when the ended row was `accepted` it must be a row this caller can read at commit. The subject may differ, because `merge_nodes()` replaces a duplicate's assertion with the canonical node's. |
 | `effective_to` | Narrowing only, to a non-null instant after `effective_at`, before the previous `effective_to`, and in the future. A successor accepted assertion on the same subject, type, and key must start where the window now ends. |
 | `attrs` | Only as an outcome label: the result must name an `outcome` in the recorded set, and no existing key may be dropped or have its value changed except the keys an outcome labelling writes. |
 | `classification` | Only on a row that has derivation evidence, and only to the value `derived_assertion_classification()` computes for that evidence. Nothing else, for anyone. Propagation is the only writer, and it runs when derivation evidence is recorded. |
@@ -232,6 +232,21 @@ that wraps several writes in one transaction may therefore see a refusal at
 commit that names a statement it ran earlier. `superseded_by` already behaves
 this way: its foreign key is `DEFERRABLE INITIALLY DEFERRED` so a helper can
 point an incumbent at a replacement it has not inserted yet.
+
+**Blindness is restrictive here too.** The commit-time checks run under the
+caller's own visibility. A replacement or a successor the caller cannot read is
+not one: the write is refused, exactly as if the row were absent. A caller
+cannot end an accepted assertion by pointing it at something RLS hides, and it
+cannot narrow a window by pointing at a successor nobody can see. The cost is
+a caller that writes a row it cannot read back — an assertion classified above
+its own level — and then supersedes with it. That is refused, and the fix is to
+write at a level the caller can read, or to record the statement as a
+suggestion. Every helper survives this, because each takes the replacement's
+classification from the row it replaces or from evidence the caller can already
+see. The conflict searches are the other way round and stay that way: an
+invisible accepted rival does not block a promotion, because there invisibility
+already withholds nothing from the caller, and inverting it would refuse every
+promotion.
 
 **What this protects and what it does not.** Rye's authorization is session
 variables. A caller holding a raw connection can set `app.current_role` to
