@@ -76,12 +76,17 @@ design/
   layers/
     crm.md                  — CRM conventions (contacts, opportunities, pipelines)
     pm.md                   — PM conventions (tasks, projects, sprints)
-  cookbooks/
+  getting-started/
+    installation.md
     quickstart.md           — Connect your data in 5 minutes (overlay-first walkthrough)
+  cookbooks/
     saas-customer-operations.md
     recruiting-pipeline.md
     product-development.md
+    small-product-team.md   — Two developers, GitHub issues and PRs, feedback from calls, chat, and email
     mineral-rights.md
+  proposals/
+    human-agent-scaling.md  — How people and agents interact as Rye scales (v0.4 reasoning)
 skills/
   rye-installer/            — Install and migrate Rye
   rye-agent-ops/            — Safe agent read/write patterns

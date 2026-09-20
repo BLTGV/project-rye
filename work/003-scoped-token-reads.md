@@ -1,6 +1,6 @@
 # 003 scoped-token-reads
 
-- status: open
+- status: done
 - opened: 2026-09-19
 - areas: admin
 - contracts: contracts/admin-api.md
@@ -20,14 +20,14 @@ authenticates an agent and then maps to session variables. It never widens
 what RLS would allow."
 
 ## Acceptance criteria
-- [ ] With auth required, an agent token that lacks the matching grant gets a `403` with a `reason` naming the policy that refused, on every route listed in issue 16: `/api/catalog`, `/api/dashboard`, `/api/nodes/:id`, `/api/nodes/:id/graph`, `/api/nodes/:id/knowledge`, `/api/events`, `/api/knowledge-map`, `/api/workspace/crm`, `/api/workspace/pm`, `/api/gaps`, `/api/stale-digests`.
-- [ ] A route that declares no capability is refused for agent tokens by default. A new route cannot become readable to agents by omission.
-- [ ] The domains listing returns only the areas the token holds a grant for. Authorities and channel subscriptions of other areas are not returned.
-- [ ] The review queue listing returns only rows in areas the token holds a grant for.
-- [ ] A token with the matching grant still succeeds on the routes it is meant to use. The MCP adapter's existing tools keep working.
-- [ ] Missing token, revoked token, and expired token each get `401`. A valid token used against another area gets `403`.
-- [ ] `tests/conformance/21_api_security.sh` covers each case above and passes. `cd admin && npm run build` passes.
-- [ ] The reviewer's screen is unaffected when auth mode is off.
+- [x] With auth required, an agent token that lacks the matching grant gets a `403` with a `reason` naming the policy that refused, on every route listed in issue 16: `/api/catalog`, `/api/dashboard`, `/api/nodes/:id`, `/api/nodes/:id/graph`, `/api/nodes/:id/knowledge`, `/api/events`, `/api/knowledge-map`, `/api/workspace/crm`, `/api/workspace/pm`, `/api/gaps`, `/api/stale-digests`.
+- [x] A route that declares no capability is refused for agent tokens by default. A new route cannot become readable to agents by omission.
+- [x] The domains listing returns only the areas the token holds a grant for. Authorities and channel subscriptions of other areas are not returned.
+- [x] The review queue listing returns only rows in areas the token holds a grant for.
+- [x] A token with the matching grant still succeeds on the routes it is meant to use. The MCP adapter's existing tools keep working.
+- [x] Missing token, revoked token, and expired token each get `401`. A valid token used against another area gets `403`.
+- [x] `tests/conformance/21_api_security.sh` covers each case above and passes. `cd admin && npm run build` passes.
+- [x] The reviewer's screen is unaffected when auth mode is off.
 
 ## Constraints
 - Reimplement fresh against current `admin/src/server/worker.ts`. Do not rebase the stale draft PRs named in the issue.
@@ -45,7 +45,11 @@ what RLS would allow."
 - Human access to the reviewer's screen is not changed here; putting a login in front of it is a separate item. Overturn: Casey.
 
 ## Verified
-- filled in at close
+- Combined test command `./scripts/test-all.sh` passed on the final merged tree 4701e1a, run by Lead 2026-09-19: Docker flow (install, conformance, security, concurrency, scenarios, host-run 21_api_security.sh, 22_secure_mcp_simulation.sh, 23_cli_agent_security.sh), admin build plus check:routes (31 declared routes), site build. Log: scratchpad suite-4701e1a.log.
+- All eight acceptance criteria verified by execution in 21_api_security.sh and check:routes. The Verifier named the assertion covering each (final pass, below) and audited 41 presence and absence assertions: every marker is paired, none was weakened.
+- Deny by default additionally verified by the Verifier's independent sweep: 53 registry entries by 10 methods, 0 holes.
+- The HEAD bypass and the junk-area-key leak were found by the Verifier before merge, fixed, and rechecked. Three early assertions were vacuous (compared against unslugged stored keys) and one expectation was wrong (promotion archives the suggestion); all corrected before the passing run.
+- Not verified here, by design: human login in front of the reviewer's screen; domain-gating reads of individual nodes; grant expiry on the rye.domain.admin gate for the domains `properties` field (pre-existing).
 
 ## Reports
 Paste each role's report here as it arrives.
@@ -178,4 +182,44 @@ checks), docs/decisions/0006 ("Amendments after implementation"),
 docs/areas.md (admin test is now `cd admin && npm run build && npm run
 check:routes`). Lead reran scripts/gen-agents after the areas edit.
 
+### Lead, 2026-09-19, first execution of 21_api_security.sh: FAIL
+Docker access restored by Casey. From tree 1749342 the conformance suite
+passed; the host-run 21_api_security.sh then failed at line 452:
+"reviewer sees its own area's candidate": GET /api/review-queue?
+include_closed=1&q=Brightline with the reviewer token returned zero
+candidates, stats total 1 filtered 0, only facet proposed count 1, right
+after the reviewer promoted that candidate with a 200. Cause unknown:
+product filter or test expectation. Sent to the builder with sole use of
+the Docker port, to find the cause by execution and run the script to the
+end. This is a newly observed problem, not a repeat of an earlier finding.
+
+### Builder admin, 2026-09-19, first executed run (commit ee6aaeb)
+Result: done. Only tests/conformance/21_api_security.sh changed; no
+production code change. Cause of the failure: wrong test expectation,
+product correct. promote_candidate_node_to_assertion (0017) ends by
+setting archived_at on the candidate node, and the queue lists only
+archived_at IS NULL, so a promoted suggestion leaves every caller's queue.
+Shown by execution: the promoted candidate had archived = t. stats.total
+counts area-visible rows and stats.filtered counts those surviving status,
+kind, and q, so total 1 / filtered 0 was the filter working. Lead confirmed
+the archive step at 0017 line 1103 and that ee6aaeb touches only the
+script. Fix: the two assertions moved ahead of the promotion; later checks
+use never-promoted markers. Tested: `./scripts/docker-test.sh test --reset
+--profiles crm,pm` passes end to end including 21, 22, and 23 from the
+host; build and check:routes pass; database torn down. Builder reports
+every acceptance criterion now verified by execution.
+
+### Verifier, 2026-09-19, final pass on b4e8b9b and ee6aaeb: PASS, conditional on the suite (which passed)
+Diagnosis confirmed against 0017 lines 1102-1104: promotion archives the
+candidate, so moving the assertions ahead of the promotion is the right
+fix, not a weakening. No assertion weakened; every absence paired with a
+presence on the same marker; mixed-key cases assert both directions from
+both agents; both commits test-only. Assertion named for each of the eight
+criteria. Findings, both low: (1) the contract does not define stats.total
+versus stats.filtered; the code counts area-visible live rows and rows
+surviving status, kind, and q. For the Architect. (2) The title agent's
+`stats.total == candidates.length` check holds only while its visible rows
+fit one page of 80; true today, backed by four paired absence checks.
+
 ## Close
+done 2026-09-19. Merged to agent-roles at 4701e1a; combined suite passed. GitHub issue 16 can be closed when this branch reaches main. Follow-ups raised separately: define stats.total and stats.filtered in the admin API contract (Architect); make the page-size-dependent total check robust; grant expiry on the domains `properties` gate; a schema helper for "holds an instance-wide grant"; a login in front of the reviewer's screen, since one Worker cannot serve the console and agents with auth required.

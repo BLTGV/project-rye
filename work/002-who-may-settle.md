@@ -1,6 +1,6 @@
 # 002 who-may-settle
 
-- status: open
+- status: done
 - opened: 2026-09-19
 - areas: schema, agent-kit
 - contracts: contracts/sql-surface.md, contracts/plugin-manifest.md
@@ -22,17 +22,17 @@ lost. If they cannot settle it, it is recorded as a suggestion and their
 agent checks with someone who can."
 
 ## Acceptance criteria
-- [ ] Given a speaker, a subject, a kind of claim, and an area, one request returns the people who may settle it and which step of the lookup produced the answer (grant, relationship, area owner).
-- [ ] A person is returned as a settler for claims about themselves with no setup.
-- [ ] With a reporting line recorded from John to Bob, Bob is returned as the settler of an expectation on John, and John is not. With the reporting line ended, Bob is no longer returned.
-- [ ] With an ownership relationship recorded, the owner is returned as the settler of claims about the thing they own.
-- [ ] A recorded grant for a kind of claim wins over the relationship. A grant naming a system or a source identity is returned as such.
-- [ ] A kind of claim with no grant and no relationship returns the area owner. An area with no owner returns no settler and says so; it is not an error.
-- [ ] An agent identity is never returned as a settler.
-- [ ] Reporting lines and ownership are relationships declared by the `rye-org` plugin as `reports_to` and `owns`, visible through the category discovery request from work/001.
-- [ ] The answer is reconstructible for a past date: asking "as of" a date uses the relationships and grants in effect then.
-- [ ] The request is reachable from the CLI, and the agent-operations skill tells an agent to make it before recording a statement as accepted.
-- [ ] A conformance test covers each case above. A replay scenario covers the manager and report case end to end with no Rye vocabulary in what the person sees.
+- [x] Given a speaker, a subject, a kind of claim, and an area, one request returns the people who may settle it and which step of the lookup produced the answer (grant, relationship, area owner).
+- [x] A person is returned as a settler for claims about themselves with no setup.
+- [x] With a reporting line recorded from John to Bob, Bob is returned as the settler of an expectation on John, and John is not. With the reporting line ended, Bob is no longer returned.
+- [x] With an ownership relationship recorded, the owner is returned as the settler of claims about the thing they own.
+- [x] A recorded grant for a kind of claim wins over the relationship. A grant naming a system or a source identity is returned as such.
+- [x] A kind of claim with no grant and no relationship returns the area owner. An area with no owner returns no settler and says so; it is not an error.
+- [x] An agent identity is never returned as a settler.
+- [x] Reporting lines and ownership are relationships declared by the `rye-org` plugin as `reports_to` and `owns`, visible through the category discovery request from work/001.
+- [x] The answer is reconstructible for a past date: asking "as of" a date uses the relationships and grants in effect then.
+- [x] The request is reachable from the CLI, and the agent-operations skill tells an agent to make it before recording a statement as accepted.
+- [x] A conformance test covers each case above. A replay scenario covers the manager and report case end to end with no Rye vocabulary in what the person sees.
 
 ## Constraints
 - SQL and bash only in schema. Additive: a new numbered migration; applied migrations are not edited; existing functions keep their signatures.
@@ -59,10 +59,16 @@ agent checks with someone who can."
 - When the owner of an area is the person a reporting line is about, the Rye admin is asked instead, since nobody settles a claim about their own authority. Raised by Product. Overturn: Casey.
 - A person's asking preferences bind only their own agents. Raised by Product. Overturn: Casey.
 - An unsettled objection never expires; it stays visible as unsettled. Raised by Product. Overturn: Casey.
+- A person settles a claim about themselves only when its type is positively known to be a self type (commitment, self_commitment, self_report, plus any the organization declares). A type nobody has declared goes to the area owner, even with a self speech act. Chosen by the Lead after three fail-open variants traced to "unrecognized means the person". Cost: in a team, the area owner is asked about undeclared self types until they are declared. Overturn: Casey.
+- A lone person's decisions, agreements, and unclassified statements settle through area ownership, so the first area must exist with that person as owner. "No setup" means none the person does: the agent creates the first area in its first conversation. That onboarding step is a later work item. Overturn: Casey.
 - The v0.3 non-goal "tokens" means the forecasting-era stake concept, not the credential an agent presents to the API. Raised by Product. Overturn: Casey.
 
 ## Verified
-- filled in at close
+- Combined test command `./scripts/test-all.sh` passed on the final merged tree e90bbbe, run by Lead 2026-09-19: Docker flow (install through migration 0021, conformance including 29_settlement_lookup.sql under the non-superuser conformance role, security, concurrency, scenarios, host-run 21, 22, 23), admin build plus check:routes, site build. Log: scratchpad suite-e90bbbe.log. Earlier passing runs on 4701e1a, 716692f, 858eae2.
+- All eleven acceptance criteria verified by execution. Criterion 8 (reports_to and owns visible through category discovery) executed by Lead on a full install. Criterion 11's scenario lookup rows L1 to L4 executed by Lead on a full install with the scenario's own fixture; row L5 is per contract and matches the schema builder's executed area-owner cases.
+- Verifier, seven passes, final verdict PASS on a live Docker install under non-superuser roles: hidden alias, classified registry node, candidate-only alias all give blind roles the area owner, never the subject; self-set visibility is restrictive; 25 combinations of claim type and speech act never return the subject for something set on them; agent exclusion holds under every rule (agent: prefix in any case or whitespace, slug match, inactive identity, agent manager, agent owner, agent area owner, agent speaking about itself); grants win; alias chains resolve and a cycle raises; zero setup holds with no area; the skill's standing-claim query, run verbatim, finds the manager's row for an incoming synonym.
+- Defects found and fixed inside this item, each with a test that fails before the fix: a fixture writing an area with a hyphenated key the lookup could not see; agent refs compared verbatim instead of on the slug; the prefix check trimming spaces only; a null speech act returning the union of self, owner, and manager; aliased claim types skipping the expectation rule; a hidden alias giving blind roles the permissive answer. The last three shared one root, removed by the rule that the subject settles only positively known self types.
+- Not verified here, by design: the replay scenario end to end (no replay runner exists); enforcement (the lookup is advisory and nothing in an acceptance path calls it yet); the objection path.
 
 ## Reports
 Paste each role's report here as it arrives.
@@ -224,4 +230,352 @@ Lead reproduced it on the stand-in: agent stored as `my_agent`, grant ref
 `agent:my-agent`, result step grant, excluded_agents 0, one settler.
 Sent to the schema builder as fix attempt 1.
 
+### Lead, 2026-09-19, first full suite run under Docker (tree 1749342)
+`./scripts/docker-test.sh test --reset --profiles crm,pm`: the whole
+conformance suite passed in a real install, including
+29_settlement_lookup.sql, migration ordering through 0021, RLS-enabled
+tables, security, concurrency, and scenarios. The run then failed in the
+host-run 21_api_security.sh, which belongs to work/003. This tree predates
+the agent-exclusion fix.
+
+### Builder schema, 2026-09-19, fix attempt 1 (commit 54dcde4)
+Result: done. Changed: 0021 (rye_settler_is_agent() fails closed on an
+`agent:` prefix, case-insensitive and trimmed, and otherwise compares
+rye_slugify_key(ref) to the stored agent_key; the check now also receives
+the ref of node-derived settlers; authority_kind 'agent' guarded),
+29_settlement_lookup.sql (six new cases), docs/data-dictionary.md. Tested
+on the stand-in: before the fix all five agent refs returned step grant,
+excluded_agents 0, one agent settler; after, step relationship,
+excluded_agents 1, settler Bob; area-owner-is-agent answers step none,
+area_owner_is_agent, setup_gap true; test 29 fails on the pre-fix migration
+and passes on the fixed one. Questions: the amended contract paragraph
+documented the bug as behavior (Lead: sent back to Architect to correct);
+authority_kind has a CHECK that already forbids 'agent', guard kept without
+a test (Lead: accepted). Lead: sent to Verifier for an adversarial recheck.
+
+### Architect, 2026-09-19, contract correction (commit 2144f23)
+The earlier amendment had recorded the verbatim-match defect as behavior.
+contracts/sql-surface.md now states: an `agent:` prefix excludes whether
+or not an identity row exists; otherwise a ref is an agent when its slug
+equals a stored agent_key; an inactive identity is still an agent; the
+test covers grant and node-derived settlers alike and authority_kind
+`agent`; exclusions are counted and the lookup continues. Decision 0005
+records the defect as found at contract review and fixed inside work/002.
+Acknowledged cost: `agent:` is now a reserved ref prefix.
+
+### Verifier, 2026-09-19, third pass on 54dcde4 (schema): PASS-STATIC
+Criterion 7 verified by execution, including the hyphenated-key case. Test
+29 passes on the fixed 0021 and fails at the first new case on the pre-fix
+0021, so the new cases are not vacuous. Ten hostile refs tried: excluded
+were AGENT:my-agent, `agent:`, agent:no-such-identity, an inactive
+identity, and bare "My Agent". Node-derived paths with actor_kind agent
+(manager, owner, self-commitment, area owner) all excluded correctly.
+`person:my-agent` is correctly NOT excluded, so a real person is never
+excluded for sharing a slug with an agent. Finding, LOW: trim() strips
+spaces only, so a tab or non-breaking-space prefix, or `agent :x`, dodges
+the prefix rule and survives as an unbound settler; no agent is returned as
+itself. Lead: sent to the builder to harden and pin with tests; lookalike
+unicode letters declared out of scope.
+
+### Builder schema, 2026-09-19, whitespace hardening (commit ecea31a)
+Result: done. rye_settler_is_agent() btrims space, tab, CR, LF, form feed,
+vertical tab, U+00A0 and tests the prefix with a case-insensitive regex
+that ignores whitespace before the colon. Four new cases in test 29. Five
+malformed refs that returned an agent settler before now return step
+relationship, excluded_agents 1. person:probe-bot stays a person. Test 29
+fails at bot_claim_tab on 54dcde4 and passes on ecea31a.
+
+### Verifier, 2026-09-19, fourth pass on ecea31a: PASS, conditional on the suite
+Criterion 7 verified by execution across every whitespace and case
+spelling. No over-exclusion: agents:team-x, agent-smith, management:ops,
+"Agent Smith", agentic:team all return as ordinary settlers. No
+backtracking: 200k whitespace characters answered in 4 ms. Functions still
+SECURITY INVOKER with own search_path, no dynamic SQL. One low finding for
+the Architect: the contract's "after trimming" under-specifies what the
+code now does.
+
+### Lead, 2026-09-19, combined suite on the final tree 4701e1a: PASSED
+Base 8d8342c plus merge of worktree-agent-ae27942de1b4935c1 (54dcde4,
+ecea31a). `./scripts/test-all.sh`: Docker flow passed (install,
+conformance including 29_settlement_lookup.sql, security, concurrency,
+scenarios, host-run 21, 22, 23), admin build and check:routes passed, site
+build passed. Criterion 8 then verified by execution on a fresh full
+install: with the fixture loaded and an `owns` edge added,
+rye_categories() lists `reports_to` and `owns` under person as_source and
+`owns` under org as_target.
+
+### Lead, 2026-09-19, FOUND BY EXECUTION: a fail-open path. Item stays open.
+On the same full install, `./scripts/rye settlers --claim expectation
+--subject <John> --speaker <John> --domain sales-operations` WITHOUT
+--speech-act returns settlers John (self) and Bob (manager) with
+speaker.is_settler true. With --speech-act expectation it returns Bob only,
+is_settler false. The contract says a null or unrecognized speech act gives
+the union of self, owner, and manager, so the code matches the contract and
+the contract is wrong: an agent that omits one optional flag is told John
+may settle the expectation set on him. That contradicts acceptance
+criterion 3 and is the first failure the model must prevent. Test 29 and
+the replay fixture always pass the speech act, so they never saw it. Routed
+to the Architect to decide the rule (Lead's recommendation: the claim type
+selects the default where it can; a null or unrecognized speech act never
+widens who may settle; zero-setup self statements must survive; the
+objection path for other claim types is named as not covered). Then the
+schema builder implements, the agent-kit builder updates the skill, and the
+Verifier rechecks.
+
+### Architect, 2026-09-19, rule for the relationship step (fail-open path closed in the contract)
+contracts/sql-surface.md step 2 is now five ordered rules, first match
+wins: (0) claim type reports_to or owns: no default, fall through; (1)
+claim type in the set-on-a-person set (`expectation`) OR speech act
+`expectation`: manager only, self never returned; (2) recognized speech
+act: self_commitment and self_report give self; statement_about_other
+gives the subject then the subject's manager; statement_about_thing gives
+the owner; agreement, decision, outside_report, agent_inference fall
+through; (3) claim type in the self set (commitment, self_commitment,
+self_report): self only; (4) otherwise fall through to the area owner. The
+union is deleted. Sets are literal strings in the function, additive.
+Consumers must not accept while speech_act_recognized is false. New
+section "What the lookup does not answer" names the objection path for
+other claim types as not covered. The `agent:` prefix rule is now precise
+enough to reimplement. Expected fixture answers given for five calls.
+Learned: an unclassified statement now needs an area owner or returns step
+none. Lead: accepted. Assumption added below.
+
+### Builder agent-kit, 2026-09-19, claim-type-first skill text (commit 35e5b47)
+Result: done. SKILL.md, agent-ops-guide, conventions-catalog: union wording
+replaced with the claim-type-first rule; set-on-a-person and self claim
+type lists; the nine recognized speech acts; always pass both;
+speech_act_recognized false blocks an accepted write; new "What the lookup
+does not tell you" with a standing-claim check. Scenario ground truth now
+has four lookup rows; speech act omitted and unrecognized both give Bob
+only, marked "per contract, not yet executed". Rubric fails an agent that
+forgot the speech act and then accepted John's objection. Tested: intake
+check passes; 19 of 19 manifests valid. Learned: rye_settlers() reads no
+assertion, so is_settler true is not permission to replace a standing
+claim; the guard is skill discipline, not enforcement. Questions: the two
+new rows stand on the contract until executed (Lead: will execute after the
+schema merge); the guard could not fire on rows with no recorded
+authorizer (Lead: NOT accepted, sent back to fail closed: replace only when
+the recorded authorizer is the speaker).
+
+### Builder agent-kit, 2026-09-19, standing-claim guard fails closed (commit 320d361)
+Result: done. The guard is now four cases in SKILL.md, the guide, and the
+catalog: no accepted row, accept; authorizer is the speaker, accept with
+the one-line echo; authorizer is someone else, suggestion; no authorizer
+recorded, suggestion, run the lookup, confirm with a settler other than the
+speaker or the area owner. An unrecorded authorizer reads as unknown, never
+as unauthorized and never as open. Rubric P3e: John's agent must not accept
+or supersede the standing expectation Bob authorized even if the lookup had
+returned John. Tested: intake check passes; 19 of 19 manifests valid.
+Learned: phrase the guard as "the authorizer is the speaker" and let
+everything else fall to a suggestion; "someone other than the speaker"
+fails open on every row written before the convention.
+
+### Builder schema, 2026-09-19, five-rule relationship step (commit dc91cc1)
+Result: done. 0021 rewritten to the five ordered rules with literal
+c_other_set and c_self_set arrays; union deleted; COMMENT rewritten; three
+raw VT and NBSP bytes in E'' literals converted to explicit escapes. Test
+29 extended; CLI help, docs/cli.md, docs/data-dictionary.md updated.
+Tested: `./scripts/docker-test.sh test --reset --profiles crm,pm` passed
+end to end; database torn down. Test 29 fails on 71908a1 at the first new
+case with exactly the reported answer and passes after. Five calls executed
+through `./scripts/rye --json settlers` on a live install (John reports_to
+Bob, area owned by Dana): John/expectation/no act: [Bob], is_settler false;
+John/expectation/self_commitment: [Bob], false, recognized true;
+John/commitment/no act: [John], true; Bob/expectation/no act: [Bob], true;
+John/expectation/banana: [Bob], false, recognized false. All match the
+Architect's expected answers.
+
+### Lead, 2026-09-19, integration of the corrected lookup
+Base revision 01758a1. Merged worktree-agent-ae27942de1b4935c1 (dc91cc1)
+and worktree-agent-a7f18ff71cb202bfc (35e5b47, 320d361) with no conflicts.
+Final tree 716692f. Combined suite and Verifier pass in progress.
+
+### Lead, 2026-09-19, combined suite on 716692f: PASSED. Scenario rows executed.
+`./scripts/test-all.sh` on the merged tree 716692f: Docker flow OK
+(including 29_settlement_lookup.sql with the new cases, and host-run 21,
+22, 23), admin build plus check:routes OK, site build OK. Then on a fresh
+full install with the scenario's own setup.sql, through `./scripts/rye
+--json settlers --claim expectation --subject <John> --domain
+sales-operations`: speaker Bob, act expectation: [Bob Ferris], is_settler
+true, recognized true. Speaker John, act expectation: [Bob Ferris], false,
+true. Speaker John, act omitted: [Bob Ferris], false, recognized false.
+Speaker John, act banana: [Bob Ferris], false, recognized false. The
+agent-kit builder marked all four rows executed (commit ef3cff2, merged at
+52eda43, docs only).
+
+### Verifier, 2026-09-19, fifth pass on dc91cc1, 35e5b47, 320d361: PASS, conditional on the suite (which passed)
+The fail-open path is closed; criterion 3 verified by execution and now
+independent of the speech act; criterion 7 re-verified under the new rule
+order; test 29 fails at the first new case on ecea31a. Rule-order attacks
+all held: a grant beats rule 1; reports_to and owns fall through;
+unclassified with no act goes to the area owner, never self; no owner gives
+step none without error; zero setup survives; statement_about_other
+returns the subject then the manager, never the speaker. Skill sets, the
+nine acts, function literals, COMMENT, CLI help, and docs agree. The guard
+is a positive truth table. Finding, LOW: claim-type matching is
+case-sensitive and the contract does not say so; `Expectation` with
+self_commitment returns the subject, judged safe as a different stored
+type.
+
+### Lead, 2026-09-19: the low finding is wider than case. Item stays open one more round.
+Rye does not fold case, so `Expectation` is a different type. But Rye has
+type aliases: canonical_type('assertion_type', v) follows registry entries
+type_alias:assertion_type:<v>, and governing_scope(), the salience views,
+and 0019 match on the canonical type. rye_settlers() compares the raw
+string, and so does the skill's standing-claim guard. Where an organization
+aliases `requirement` to `expectation`, a call with claim type
+`requirement` and speech act self_commitment skips rule 1 and returns the
+subject as settler, and the guard would not see the manager's accepted
+`expectation`. Same fail-open shape, reachable through a documented
+feature. Sent to: schema builder (canonicalize the claim type and grants'
+claim_types before matching; report the canonical type additively; tests
+with a registered alias), agent-kit builder (guard compares canonical
+types), Architect (contract states alias resolution, case sensitivity, and
+the consumer obligation).
+
+### Alias round, 2026-09-19: Architect (4caea84), agent-kit 002b4e4, schema 247365e
+Architect: contract states p_claim_type and grants' claim_types are
+resolved with canonical_type('assertion_type', ...) before any rule or
+grant is tested; matching is case-sensitive after resolution; an alias
+cycle raises; claim.canonical_claim_type is an additive key; consumers
+compare canonical types before replacing a standing claim. Rejected
+alternative recorded: folding case in the lookup. Learned: resolution
+follows the DEFAULT_SCOPE registry value, so it is scope-dependent.
+Agent-kit: the standing-claim query wraps both sides in canonical_type();
+agents write the canonical type the lookup reports; type names are
+case-sensitive. Chose the function over a view because the only view with
+canonical types aggregates by type and cannot answer per subject and key.
+Schema: rye_settlers() resolves the claim type and grant claim_types
+through canonical_type(); chose it over the scoped variant because the
+contracted signature has no onboarding-scope argument. Test 29 fails on
+52eda43 at the first alias case with exactly the reported answer and passes
+after. Full Docker flow passed on the builder's branch. Executed through
+the CLI with requirement->expectation and promise->commitment aliases and
+Mara granted `promise`: John/requirement/self_commitment: [Bob], false;
+John/requirement/no act: [Bob], false; John/promise/no act: step grant,
+[Mara], false; Mara/commitment/no act: step grant, [Mara], true;
+John/Expectation/self_commitment: [John], true (pinned as documented:
+case-sensitive, a different type). Learned: canonical_type() reads
+current_valid_assertions, so an alias hidden by RLS or still a candidate
+does not apply. Lead: asked the Verifier to check whether an agent role can
+fail to see an alias and so get the raw, more permissive answer.
+
+### Lead, 2026-09-19, integration of the alias round
+Base revision 4caea84. Merged worktree-agent-ae27942de1b4935c1 (247365e)
+and worktree-agent-a7f18ff71cb202bfc (002b4e4), no conflicts. Final tree
+858eae2. Combined suite running.
+
+### Lead, 2026-09-19, combined suite on 858eae2: PASSED
+`./scripts/test-all.sh`: Docker flow OK, admin build plus check:routes OK,
+site build OK.
+
+### Verifier, 2026-09-19, sixth pass on the alias round, live Docker install: FAIL
+HIGH: alias resolution runs under the caller's RLS, and being blind to an
+alias yields the more permissive answer. Executed with a purpose-made
+non-superuser login: with `requirement`->`expectation` public, every role
+gets [Bob], is_settler false. With the alias assertion classified
+confidential, viewer, team_member, and agent:some-agent all get
+[John/self], is_settler TRUE where admin gets [Bob], false. Gate:
+assertion_read_policy on rye.assertions via role_classification_access;
+classifying the Rye Core Registry node hides every alias the same way. Same
+direction for a candidate-only alias and an alias outside DEFAULT_SCOPE.
+Everything else passed by execution: test 29 on the live install; alias
+cases; grant on alias matches canonical and the reverse; chains resolve; a
+cycle raises with no fallback; the five speech-act calls; three
+agent-exclusion cases; the skill's standing-claim query run verbatim found
+Bob's row for an incoming `requirement`. Note: the `rye` login in the test
+database is a superuser and bypasses RLS, so ad hoc role probes on it are
+meaningless; scripts/conformance.sh already detects this and SET ROLEs to a
+non-superuser test role, so the suite itself is sound (Lead checked).
+
+### Lead, 2026-09-19: third fail-open variant, one root. Fixing the root, not a third path.
+(1) null speech act gave the union; (2) an aliased claim type skipped rule
+1; (3) a hidden alias does the same. All end at the documented limit the
+Lead had accepted: an unrecognized claim type plus a self speech act
+returns the subject. Every way of making an expectation look unrecognized
+reopens it. New direction sent to the Architect: the subject is returned as
+a settler only when the canonical claim type is positively in the self set;
+unknown means restrictive; the self set is extensible as registry data with
+literal core members so zero setup survives; a caller blind to an alias or
+a self-set entry gets the more restrictive answer. Rejected: a SECURITY
+DEFINER alias resolver and refusing classified aliases, since both fix
+visibility only. This changes behavior for claim types nobody has declared:
+they go to the area owner instead of the person. Listed for Casey below.
+
+### Architect, 2026-09-19, root fix (commit 9b587b8)
+Step 2 rewritten: the subject is returned as a settler only when the
+canonical claim type is positively in the self set (literals commitment,
+self_commitment, self_report, plus registry entries
+self_settled_type:<canonical type> with value true, read via
+registry_value()). Self speech acts fall through for any other type;
+statement_about_other always returns the subject's manager and the subject
+only for self-set types. Blindness is always restrictive. Rejected: a
+SECURITY DEFINER alias resolver; refusing classified aliases. Expected
+answers given for seven calls. Learned: plugin manifests cannot contribute
+self types without a manifest schema change (contributes is
+additionalProperties false); deferred as its own item.
+
+### Builder agent-kit, 2026-09-19, skill text for the self-set rule (commit 593b635)
+Result: done. SKILL.md, guide, catalog: governing sentence in all three;
+unknown and blindness both restrictive; an undeclared claim type about the
+speaker goes to the area owner and the agent says it will check, with no
+mention of types or registries; prefer a declared type from category
+discovery; a declaration procedure; canonical standing-claim guard kept.
+Scenario row L5 added (mislabelled `requirement` with self_commitment goes
+to the area owner), marked per contract; since Bob owns the fixture's area
+the name does not distinguish it, `step` and `via` do, and the rubric says
+to read those. Tested: intake check passes; 19 of 19 manifests valid.
+Learned: Rye has no registry write helper; registry entries are written
+with record_assertion() as accepted `registry_entry` assertions, the path
+0017 uses for its seeds. Lead: no role gate on registry_entry writes is
+visible in the migrations; the Verifier will test whether an agent role
+can write an accepted alias or self_settled_type entry, since an alias
+expectation -> commitment would hand a person their own expectation.
+
+### Builder schema, 2026-09-19, root fix (commit cb49986)
+Result: done. New rye_settler_self_settled(), SECURITY INVOKER; rules 2 and
+3 gate on it; the literal c_self_set removed as a second source of truth.
+Test 29 runs under SET ROLE rye_conformance as conformance.sh does, fails
+on 9b587b8 at the first changed case, passes after, and raises if a
+confidential alias is visible to viewer so the visibility cases cannot pass
+vacuously. Full Docker flow passed on the builder's branch. Executed (John
+reports_to Bob, Dana reports_to Priya, area owner Dana, alias
+requirement->expectation confidential, self_settled_type:private_note
+confidential, self_settled_type:preference public): admin
+john/requirement/self_commitment: relationship, Bob, false; viewer,
+team_member, agent:some-agent same call: area_owner, Dana, false; admin
+john/Expectation/self_commitment: area_owner, Dana, false; admin and viewer
+john/preference/self_report: relationship, John, true; admin
+john/private_note/self_report: John, true; viewer same: area_owner, Dana,
+false; admin john/commitment/no act: John, true; Marcus about Dana,
+commitment, statement_about_other: Dana and Priya, false; Marcus about
+John, requirement: Bob, false; viewer john/commitment with no area
+argument: John, true.
+
+### Lead, 2026-09-19, integration and combined suite on e90bbbe: PASSED
+Base revision f649d00. Merged worktree-agent-ae27942de1b4935c1 (cb49986)
+and worktree-agent-a7f18ff71cb202bfc (593b635), no conflicts.
+`./scripts/test-all.sh` on e90bbbe: Docker flow OK, admin build plus
+check:routes OK, site build OK. Verifier given the live database for a
+final pass, including an attempt to change who may settle an expectation
+by writing registry configuration as an agent role.
+
+### Verifier, 2026-09-19, seventh pass on e90bbbe, live Docker install: PASS
+PASS for work/002 as scoped; the root fix closes the fail-open class. One
+HIGH finding, pre-existing and outside this item's criteria: there is no
+assertion_type_access write row for `registry_entry`, so under review
+policy `open`, which is also what scope_review_policy() returns on a fresh
+install with no policy row, a caller under agent:some-agent (and viewer,
+team_member) wrote ACCEPTED registry entries on the Rye Core Registry node:
+type_alias:assertion_type:expectation = "commitment", and
+self_settled_type rows. Afterwards rye_settlers(John, expectation, John,
+self_commitment) returned canonical commitment, [John/self], is_settler
+true, for admin too. Under candidates_only and strict every such write
+lands as a candidate and has no effect. Rule 1 itself is sound:
+self_settled_type:expectation alone leaves expectation with the manager.
+Smallest fix named: an assertion_type_access write row limiting
+registry_entry to admin, and the same for the lifecycle helpers. Lead:
+opened as work/005 (work/004 is the separate RLS item).
+
 ## Close
+done 2026-09-19. Merged to agent-roles at e90bbbe; combined suite passed. rye_settlers() is read-only and advisory. Follow-ups: work/005 registry write gate (HIGH, pre-existing, found here); let plugin manifests contribute self-settled types so rye-org can ship a starter list (needs a manifest schema change); a replay runner so manager-expectation runs end to end; the agent creates the first area with the person as owner, so zero setup covers decisions as well as self statements; then the next v0.4 items in order: write echo, the questions a person owes, objections, and calling the lookup from the acceptance path for API callers.

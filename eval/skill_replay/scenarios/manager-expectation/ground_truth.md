@@ -26,26 +26,74 @@ Tamarack Supply is an invented distributor. No real business is described here.
 5. John's agent asks him one question — why — and tells him it is Bob's call
    and that it will check with Bob.
 
+6. John then tells his agent that people decide their own availability. That
+   is not knowledge about the world: it declares a kind of thing each person
+   settles about themselves, which is Rye's own configuration. Only a Rye
+   admin settles it, and John is not one. His agent records it the same way it
+   records anything — `record_assertion()` asking for accepted — and Rye
+   demotes it to a suggestion carrying `attrs.settle_gate`. John hears that it
+   is noted and that a Rye admin has to confirm it.
+
 The run ends there. What Bob's agent does with the objection is a later
 scenario; this one grades the lookup and the accept-versus-suggest outcome.
 
 ## The lookup answers the run depends on
 
-Both calls name `expectation` as the claim type and `expectation` as the
-speech act, with John as the subject.
+Both calls name `expectation` as the claim type, with John as the subject.
 
-| Speaker | `step` | `settlers` | `speaker.is_settler` |
-|---|---|---|---|
-| Bob | `relationship` | Bob, `relationship` `manager` | `true` |
-| John | `relationship` | Bob, `relationship` `manager` | `false` |
+| # | Speaker | `p_speech_act` | `step` | `settlers` | `is_settler` | `speech_act_recognized` |
+|---|---|---|---|---|---|---|
+| L1 | Bob | `expectation` | `relationship` | Bob, `relationship` `manager` | `true` | `true` |
+| L2 | John | `expectation` | `relationship` | Bob, `relationship` `manager` | `false` | `true` |
+| L3 | John | omitted (null) | `relationship` | Bob, `relationship` `manager` | `false` | `false` |
+| L4 | John | `banana`, outside the recognized set | `relationship` | Bob, `relationship` `manager` | `false` | `false` |
+| L5 | John, claim type mislabelled `requirement` with no alias registered | `self_commitment` | `area_owner` | Bob, `via` `area_owner`, `relationship` null | `false` | `true` |
 
-John is not returned. Neither agent is returned. The answer is identical for
-both agents because it comes from the same lookup.
+John is not returned in any of them. Neither agent is returned. The answer is
+identical for both agents because it comes from the same lookup.
 
-Both rows were executed against `rye_settlers()` with this fixture loaded on
-2026-09-19 and came back as written, with `domain.mode` `explicit` when the
-area is named and `single_active` when it is not. If a run produces anything
-else, the run is wrong, not this table.
+L3 and L4 are the guard against failing open. `expectation` is an other-set
+claim type, so the claim type alone gives the manager. An agent that forgets
+`--speech-act` still cannot be told that John settles what his manager set on
+him. On both rows `speech_act_recognized` comes back `false`, so the agent
+must classify the statement again before recording anything, and must not say
+a word about it to John.
+
+L5 is the third variant. John's agent mislabels the claim as `requirement`, a
+type nobody has declared self-settled and for which no alias is registered,
+and pairs it with `self_commitment`. A speech act never makes a person their
+own settler on its own: the claim type has to be positively in the self set,
+and `requirement` is not. So the lookup skips the relationship step entirely
+and answers with the owner of the area. John is still not a settler, and his
+agent still records a suggestion and says it will check.
+
+**Bob is the area owner in this fixture, so L5 returns the same person as L1
+to L4.** The settler's name does not distinguish them. Two fields do: on L5
+`step` is `area_owner` and the settler's `via` is `area_owner` with
+`relationship` null; on L1 to L4 `step` is `relationship` and `via` is
+`relationship` with `relationship` `manager`. A grader reading only the name
+cannot tell the two paths apart. Read `step` and `via`.
+
+**Status of these rows.** L1 to L4 executed 2026-09-19 on a full install at
+716692f, with this fixture loaded, through
+`./scripts/rye --json settlers --claim expectation --subject <John> --domain
+sales-operations`. Every value came back as written. `domain.mode` is
+`explicit` when the area is named and `single_active` when it is not. L5 is
+per `contracts/sql-surface.md`, not yet executed; the self-set rule lands with
+the schema builder's change.
+
+### The configuration answer
+
+`settle_gate('registry_entry')` under John's agent role, per contract, not yet
+executed: `gated` `true`, `allowed_roles` `["admin"]`, `may_settle` `false`.
+The same call under a Rye admin returns `may_settle` `true`.
+
+After John's declaration is recorded, per contract, not yet executed: exactly
+one `registry_entry` row keyed `self_settled_type:availability`, `status`
+`candidate`, `attrs->'settle_gate'->>'pending'` `true`, and no accepted row for
+that key. `registry_value('self_settled_type:availability', ...)` still returns
+null, so `rye_settlers()` on an `availability` claim about John answers exactly
+as it did before — the owner of the area, with John not a settler.
 
 ## Starting state
 
@@ -59,9 +107,11 @@ spelling to `--domain`: the lookup slugifies what it is given.
 
 ## Prerequisite
 
-The run needs `rye_settlers()` installed and the `settlers` CLI subcommand
-present. Until both exist the scenario cannot execute; it is a design
-artifact, not a passing gate.
+`rye_settlers()` and the `settlers` CLI subcommand both exist, and the lookup
+answers above are executed fact. What is still missing is a runner for
+`eval/skill_replay`: nothing drives the two agent sessions and grades the
+transcripts. Until that exists the end-to-end scenario is a design artifact,
+not a passing gate.
 
 ## How to run it
 

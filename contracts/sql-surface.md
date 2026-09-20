@@ -22,8 +22,8 @@ client of it. This contract says what a client may depend on.
   status, or basis.
 - **Reads are views and `SELECT`-returning functions**: `rye_catalog()`,
   `rye_agent_context()`, `rye_categories()`, `rye_settlers()`,
-  `agent_node_summary()`, `rye_current_agent_key()`, `rye_current_agent_id()`,
-  and the views above. `rye_categories()` has its own
+  `settle_gate()`, `agent_node_summary()`, `rye_current_agent_key()`,
+  `rye_current_agent_id()`, and the views above. `rye_categories()` has its own
   contract, `contracts/category-vocabulary.md`, which governs its jsonb shape;
   `rye_settlers()` is governed by the "Settlement lookup" section below.
   Base-table reads carry no promise beyond the data dictionary's columns.
@@ -57,7 +57,8 @@ exist for tables passed to `track_table()`.
 - A refused write raises, and clients surface the message rather than
   retrying. Refusals are load-bearing: teams without a classification, an
   assertion without evidence when basis is not `assumed`, a supersession
-  across subjects, a term outside the scope's enabled plugins.
+  across subjects, a term outside the scope's enabled plugins, an accepted
+  configuration assertion from a caller who is not a Rye admin.
 - RLS failures are silent by construction: an invisible node yields zero rows,
   not an error, so a client reading zero rows must not conclude the row is
   absent. `INSERT ... RETURNING` on RLS-protected tables fails; use the helper.
@@ -332,6 +333,102 @@ the wrong reason:
   for an area the session cannot see. Either refusal is a refusal; the message
   is not part of this contract.
 
+## Configuration writes need an admin
+
+Some assertion types are not knowledge about the world. They are Rye's own
+configuration, and Rye reads them to decide how it treats every other write.
+`registry_entry` carries the type aliases and the self-settled type list that
+`canonical_type()`, `registry_value()`, and `rye_settlers()` read.
+`review_policy` decides whether a write lands accepted at all. A caller who
+can set either of those can change every later answer, so only a Rye admin
+settles them.
+
+**The gate is data.** `assertion_type_access` gains a third `operation`
+value, `settle`, beside `read` and `write`. A row
+`(assertion_type, 'settle', allowed_roles)` means: only a caller whose
+`app.current_role` is in `allowed_roles` may make an assertion of that type
+accepted. A type with no `settle` row is ungated. The table is readable by
+every role and writable only by `admin`, as it already was, so no caller is
+blind to the gate and no caller can widen it. Adding a type to the gate is an
+`INSERT`, not a migration.
+
+At this version two rows are seeded, both `ARRAY['admin']`:
+
+| `assertion_type` | Why |
+|---|---|
+| `registry_entry` | Type aliases, `self_settled_type:*`, `governed_type:*`, `DEFAULT_SCOPE`, basis priors, half lives, digest facets. Every reader of configuration reads this type. |
+| `review_policy` | Decides whether other writes land accepted. Ungated, it is the key to every other lock. |
+
+Deliberately not gated yet, each for a stated reason:
+
+- `scope_status`. Demoting it fails open, not closed. An inactive scope is not
+  selected by `governing_scope()`, so its review policy stops applying and
+  subjects it would have governed fall back to `open`. Gating it would make a
+  non-admin onboarding run leave governance weaker than it is today. The fix
+  is for scope creation to run as an admin, which is a separate item.
+- Plugin enablement. What `registry_value()` and `compile_scope_policy()` read
+  is the `scope_enables_plugin` edge. The `plugin_policy_binding` assertion is
+  a record of the act, not the act. Gating an assertion would not gate the
+  edge, and an edge gate is a different mechanism.
+- The other scope policy types written by `record_scope_policy()`
+  (`expected_contexts`, `retention_policy`, `source_of_truth`, conventions).
+  They shape what agents are told, not what Rye computes. They also all escape
+  the review policy today, because `governing_scope()` returns null for a
+  scope node's own policy assertions. That leak is its own item, and it is not
+  narrowed or widened here.
+- `domain_authorities` grants, which also decide who may settle. They are
+  table rows, not assertions, and their own RLS is a separate item.
+
+**What a non-admin gets.** `record_assertion()` demotes rather than refuses.
+When the type is gated and the caller is not allowed, the requested status
+`accepted` becomes `candidate` before anything else happens, so no incumbent
+is superseded and nothing said is lost. The row carries
+`attrs.settle_gate = {"pending": true, "requested_status": "accepted",
+"allowed_roles": [...]}`. It appears in `review_queue` like any other
+candidate, with those attrs, and an admin accepts or rejects it there. The
+demotion is independent of the review policy: it applies under `open`,
+`candidates_only`, `strict`, and when no policy is recorded at all.
+
+**Every other path refuses.** Because `record_assertion()` has already
+demoted, an accepted row of a gated type can only reach the table by some
+other route, and every other route raises:
+
+- A direct `INSERT INTO assertions` with `status = 'accepted'`.
+- Any `UPDATE` that moves a gated row from another status to `accepted`,
+  including `accept_assertion()` and including a raw `UPDATE` by a caller who
+  sets `app.write_path` itself.
+- `supersede_assertion()` and `record_distillation()`, which insert accepted
+  rows directly. Refusing rather than demoting is deliberate: both mark or
+  displace an incumbent first, and a silent demotion there would leave the key
+  with no accepted value at all.
+
+A refusal here loses nothing, because the statement can be recorded with
+`record_assertion()` and become a suggestion. The check lives in one place, a
+trigger on `assertions`, so a `SECURITY DEFINER` helper does not escape it and
+neither does a direct write. An agent capability grant
+(`rye.authoritative.promote`) does not open this gate.
+
+**The gated type is the stored spelling.** The trigger compares
+`assertion_type` as written, with no alias resolution, because every reader of
+configuration does the same: `registry_value()` and `governing_scope()` match
+the stored literal. A row stored under another spelling is not read as
+configuration, so it does not need to be gated as configuration.
+`record_assertion()` canonicalizes before it inserts, so an alias of a gated
+type is gated.
+
+**Asking first.** `settle_gate(p_assertion_type text) RETURNS jsonb` answers
+`{assertion_type, gated, allowed_roles, current_role, may_settle}`. It is
+`STABLE`, `SECURITY INVOKER`, and writes nothing. A client calls it before
+offering to record configuration, so it can tell the person what will happen.
+The schema returns facts only. The sentence a person hears is the client's, not
+the database's.
+
+**Installing and seeding.** The gate treats an unset `app.current_role` as not
+allowed. A migration or script that seeds configuration must set
+`app.current_role` to `admin` first, as `sync_plugin_metadata.sh` does.
+Migrations applied before the gate existed are unaffected, and on a fresh
+install the core registry seeds run before the gate is created.
+
 ## Settlement lookup
 
 `rye_settlers()` answers one question: who may settle this claim. It is
@@ -356,9 +453,18 @@ rye_settlers(
 `SECURITY INVOKER`, never `DEFINER`, so RLS applies to the caller. It declares
 its own `SET search_path`. It writes nothing, not even an audit row.
 
-- `p_claim_type` is the kind of claim, and it is the claim's `assertion_type`
-  verbatim. The same string is matched against `domain_authorities.claim_types`.
-  One vocabulary, no mapping table, no new values to register.
+- `p_claim_type` is the kind of claim, and it is the claim's `assertion_type`.
+  The same value is matched against `domain_authorities.claim_types`. One
+  vocabulary, no mapping table, no new values to register.
+- **Claim types resolve through aliases first.** When `p_claim_type` is given
+  it is resolved with `canonical_type('assertion_type', ...)` before anything
+  is tested, and every value in a grant's `claim_types` is resolved the same
+  way before it is compared. Rules and grants are therefore written against
+  either spelling: where `requirement` is registered as an alias of
+  `expectation`, a grant naming `requirement` matches a call passing
+  `expectation`, and a call passing `requirement` selects the `expectation`
+  rule. This is the alias mechanism the rest of the schema already uses, not a
+  second one. A null `p_claim_type` stays null and is not resolved.
 - `p_subject_id` may be null for a topical claim with no subject node (pricing,
   brand). The relationship step is then skipped.
 - `p_speech_act` is the speaker's classification of the statement. It selects
@@ -459,7 +565,11 @@ Order: grant settlers by `kind` then `ref`; relationship settlers `self`,
 `node_id` or `p_speaker_ref` by `ref`. It is the field the agent acts on: true
 means record it as accepted, false means record a suggestion and ask the
 settlers listed. `subject` is `{subject_id, subject_found, node_type, label}`.
-`claim` is `{claim_type, assertion_type, speech_act, speech_act_recognized}`.
+`claim` is `{claim_type, assertion_type, canonical_claim_type, speech_act,
+speech_act_recognized}`. `claim_type` and `assertion_type` are the value as
+given. `canonical_claim_type` is what it resolved to, and it equals the given
+value when no alias applies. It is additive: a caller that ignores it sees no
+change.
 `domain` is `{requested_domain_key, domain_id, domain_key, domain_found, mode,
 has_owner}`, where `mode` is `explicit`, `single_active`, `ambiguous`, or
 `none`.
@@ -484,7 +594,11 @@ meant. A caller that wants the relationship defaults passes no area key at all.
 resolves, no grant can match and the lookup falls to the relationship step.
 Rows in `domain_authorities` for the resolved domain where
 `active`, `effective_at <= p_as_of`, `effective_to` is null or later, and
-`claim_types` is empty (meaning every claim type) or contains `p_claim_type`.
+`claim_types` is empty (meaning every claim type) or contains the claim type.
+That containment is tested on canonical values: every entry in `claim_types` is
+resolved through `canonical_type('assertion_type', ...)` and compared with the
+resolved `p_claim_type`, so a grant written against an alias and a call passing
+the canonical type match each other, in either direction.
 Scope matches when the row's `scope_ref` is null, or `p_scope_ref` is null, or
 the two are equal. Subject narrowing is expressed in `properties`, never in a
 new column: `properties.subjects` (array of node uuids or refs) and
@@ -497,20 +611,91 @@ manager, and owner for that claim type in that domain, so a grant that should
 not displace them names its subjects.
 
 **2. Relationship.** Runs only when no grant matched and the subject node is
-visible. The speech act selects the default:
+visible. Two selectors choose the default, the claim type first and the speech
+act second. The rules are tried in this order, and the first that applies wins:
 
-| `p_speech_act` | relationship default |
-|---|---|
-| `self_commitment`, `self_report` | self |
-| `expectation` | manager |
-| `statement_about_other` | the subject, then the subject's manager |
-| `statement_about_thing` | owner |
-| `agreement`, `decision`, `outside_report`, `agent_inference` | none, fall through |
-| null or unrecognized | the union of self, owner, and manager, whichever apply |
+| # | Condition | Relationship default |
+|---|---|---|
+| 0 | `p_claim_type` is a relationship edge type: `reports_to`, `owns` | none, fall through |
+| 1 | The canonical claim type is other-set, or `p_speech_act` is `expectation` | manager only. Self is never returned |
+| 2 | `p_speech_act` is recognized | `self_commitment`, `self_report`: self when the canonical claim type is self-set, otherwise none, fall through. `statement_about_other`: the subject's manager, and the subject as well when the canonical claim type is self-set. `statement_about_thing`: owner. `agreement`, `decision`, `outside_report`, `agent_inference`: none, fall through |
+| 3 | The canonical claim type is self-set | self only |
+| 4 | Otherwise | none, fall through |
 
-`speech_act_recognized` is false for a value outside that set, and the union is
-returned rather than an error. Self means the subject is a person node and is
-its own settler. Manager is the target of a `reports_to` edge whose source is
+**The subject is returned only when the claim type is positively known to be
+one a person settles about themselves.** That is the governing rule, and the
+table is its consequence. Membership in the self set is the only thing that
+makes the subject its own settler. No speech act does it on its own.
+`self_commitment` on a claim type nobody has declared self-settled returns
+nobody, not the subject. Unknown is restrictive.
+
+*Other-set* claim types are claims one person sets on another. The core set is
+`expectation`. *Self-set* claim types are ones a person settles about
+themselves. The core set is `commitment`, `self_commitment`, `self_report`.
+Both are tested on the canonical claim type, after alias resolution.
+
+The self set is extensible as data, not code. A registry entry with the key
+`self_settled_type:<canonical assertion type>` and the jsonb value `true` adds
+a member. It is read with `registry_value()`, the same way `type_alias` entries
+are read, so it is an accepted assertion of type `registry_entry` and it obeys
+scope the same way. Any other value, including `false` and null, is not a
+member. The type in the key is the canonical one: an alias is registered as an
+alias, not as a second self-settled entry. Only a Rye admin settles that entry,
+and only a Rye admin settles an alias. Anyone may propose one, and a proposal
+is a candidate with no effect on this lookup until an admin accepts it. See
+"Configuration writes need an admin". The core members above need no
+registry row, so a fresh instance works with none. Plugin manifests cannot
+contribute self-settled types today, because `contributes` in
+`plugins/rye-plugin.schema.json` is a closed object; adding them is a manifest
+schema change and is not promised here.
+
+**Blindness is always restrictive.** A caller who cannot see an alias, a
+self-settled registry entry, or the assertion that carries one gets the answer
+for a claim type it cannot classify. That answer is never the subject. RLS
+hides a configuration row from one role and not another, and a candidate
+registry entry is invisible until it is accepted, so two callers can classify
+the same claim type differently. The difference can only ever cost a caller
+settlers, never grant them. An authority answer never widens because a
+configuration row happened to be visible.
+
+Matching is case-sensitive, and resolution does not fold case. `Expectation`
+with no alias registered for it is a different type and is in neither set, so
+it takes the restrictive branch and falls through to the area owner. The fix is
+an alias, the same fix the rest of the schema uses for a spelling: register
+`type_alias:assertion_type:Expectation` and it resolves like any other.
+
+An alias cycle raises, exactly as `canonical_type()` raises. The lookup does
+not swallow it and does not fall back to the raw string. A cycle is a broken
+registry, not a missing answer, and it is the one input to this read that
+produces an error rather than an answer.
+
+Rule 1 is the point of the ordering. An expectation is set on a person by
+someone else, so the person it is set on is never its settler, whatever the
+speech act says. A missing speech act cannot open that door, and neither can a
+wrong one.
+
+Rule 4 is the other point. A null or unrecognized speech act never widens who
+may settle. It selects no relationship default at all, exactly as `agreement`
+does, and the lookup falls through to the area owner. The union of self, owner,
+and manager is not returned, and the caller gets a smaller answer for saying
+less, not a larger one.
+
+What this costs is worth stating. A person whose agent invents a claim type
+about them, or spells a known one differently, no longer settles it themselves.
+It goes to the area owner. For a lone person that owner is themselves once
+their first area exists, so the cost is nothing. On a team it is one question
+to the area owner, and the answer is a `self_settled_type` registry entry that
+settles every later claim of that type. A claim of a core self type still
+settles with no registry rows and no area at all.
+
+`speech_act_recognized` is false for a value outside the recognized set, and no
+error is raised. A caller must not record a statement as accepted while
+`speech_act_recognized` is false. Classify the statement first, pass the speech
+act, and look again. The same obligation applies when the answer falls through
+to the area owner because rule 4 applied: that answer says nobody local was
+selected, not that the speaker may proceed.
+
+Self means the subject is a person node and is its own settler. Manager is the target of a `reports_to` edge whose source is
 the subject. Owner is the source of an `owns` edge whose target is the subject.
 Both edges are read as `contracts/plugin-manifest.md` declares them, and in
 effect at `p_as_of` means `archived_at` is null, `effective_from` is null or at
@@ -518,6 +703,28 @@ or before it, and `effective_to` is null or after it. A claim type that names a
 relationship edge type (`reports_to`, `owns`) has no relationship default and
 falls through: the reporting line is settled by the owner of the area, not by
 either end of it.
+
+### What the lookup does not answer
+
+It reads no standing claim. It cannot see that a claim on this subject is
+already accepted, so it cannot tell a new statement from a contradiction of an
+old one. One case follows, and it is not solved here. A person restates or
+contradicts an accepted claim about themselves of a self-set type that somebody
+else authorized. The lookup returns that person as a settler, correctly, and
+nothing in the answer says an accepted claim is already standing.
+
+That is the objection path, and it is a later work item. Accepted stays
+accepted until a settler changes it, and an objection is a record of its own,
+not an overwrite. Until that work exists, a caller must not read `is_settler`
+true as permission to replace an accepted claim it did not check for. This
+lookup answers who may settle a claim. It does not answer who may unsettle one.
+
+A caller that does check for a standing accepted claim before replacing one
+compares canonical types, not raw strings. Resolve both sides with
+`canonical_type('assertion_type', ...)` and compare those. An assertion stored
+under `requirement` and a claim passed as `expectation` are the same claim when
+one is an alias of the other, and a caller comparing the spellings would miss
+it and overwrite silently.
 
 **3. Area owner.** `knowledge_domains.owner_node_id` for the resolved domain,
 returned as a single settler with `via` `area_owner`. When `owner_node_id` is
@@ -528,13 +735,18 @@ and exactly one active knowledge domain exists, from that one (`single_active`);
 otherwise `mode` is `ambiguous` or `none` and `reason` is
 `domain_not_resolved`.
 
-**Agents are never settlers.** Before any step selects a winner, candidate
-settlers are dropped when the ref equals an `agent_identities.agent_key` or is
-`agent:<agent_key>` of one, or the node's `node_type` is `agent` or its
-`attrs->>'actor_kind'` is `agent`. A grant whose only holder is an agent is
-therefore not a match, and the lookup proceeds to the relationship step.
-`excluded_agents` counts what was dropped, so a caller can tell the difference
-between nobody and nobody eligible.
+**Agents are never settlers.** Before any step selects a winner, every
+candidate is tested and an agent is dropped. The test applies to grant settlers
+and to node-derived settlers alike: self, the owner of a thing, the manager,
+and the area owner. A candidate is an agent when its ref says so, when its ref
+names a stored agent identity, when the grant's `authority_kind` is `agent`, or
+when the node's `node_type` is `agent` or its `attrs->>'actor_kind'` is `agent`.
+A grant whose only holder is an agent is therefore not a match, and the lookup
+proceeds to the relationship step. `excluded_agents` counts what was dropped, so
+a caller can tell the difference between nobody and nobody eligible. When the
+area owner is the one dropped, the answer is `step` `none`, `reason`
+`area_owner_is_agent`, `setup_gap` true. Ref matching is spelled out under
+"Area keys and agent keys are slugs".
 
 ### Area keys and agent keys are slugs
 
@@ -551,11 +763,35 @@ slugifies to `sales-operations`, so that row can never be found and every call
 naming it answers `domain_not_found`. Create areas with
 `ensure_knowledge_domain()`, never by direct insert.
 
-The same rule governs agent keys. `create_agent_identity()` slugifies
-`agent_key`, so the stored key for `my-agent` is `my_agent`. A grant whose
-`authority_ref` is `agent:my-agent` therefore matches no agent identity. It is
-not recognised as an agent, it is not counted in `excluded_agents`, and it is
-returned as an ordinary settler. Write refs against the stored slug.
+The same rule governs agent keys, and the agent test is written to survive it.
+`create_agent_identity()` slugifies `agent_key`, so the stored key for
+`my-agent` is `my_agent`. Two promises follow.
+
+First, a ref that says it is an agent never settles. A ref is an agent prefix
+when, reading from the start, it has only whitespace, then the letters `agent`
+in any case, then only whitespace, then a colon. Whatever follows the colon is
+irrelevant, and no `agent_identities` row need exist. `agent:my-agent`,
+`Agent:my_agent`, ` agent :x`, and `agent:deleted-last-year` are all dropped. A
+typo or a removed identity produces no settler rather than an accidental one.
+
+Whitespace here is wider than SQL `trim()`, which strips the plain space only.
+Space, tab, CR, LF, form feed, vertical tab, and the non-breaking space U+00A0
+are stripped from both ends of every ref and ignored on either side of the
+colon. `agent` is read as a whole word before the colon, so `person:my-agent`
+is not an agent prefix. Unicode lookalike letters are out of scope: a ref whose
+`a` is Cyrillic is not an agent prefix, and it comes back as an unbound settler
+like any other unrecognised ref. The same test runs on node-derived refs, not
+only on grant refs.
+
+Second, any other ref is an agent when `rye_slugify_key()` of the ref equals a
+stored `agent_key`. So `my-agent`, `My Agent`, and `my_agent` are one agent,
+and a ref in any spelling is excluded. An inactive agent identity is still an
+agent: the `active` flag is not consulted, and a retired agent does not become
+a settler by being retired.
+
+Every candidate dropped by either rule is counted in `excluded_agents`, and the
+lookup continues to the next step rather than stopping. Write refs against the
+stored slug anyway; the matching is forgiving, the rest of the schema is not.
 
 ### Versioning, freshness, failure
 

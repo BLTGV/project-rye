@@ -142,10 +142,38 @@ of the area. `step` names the step that produced the answer, and
 `speaker.is_settler` is the field to act on: true means record the statement as
 accepted, false means record a suggestion and ask the people listed.
 
-`--claim` is the assertion type, verbatim. `--subject` is optional: omit it for a
-topical claim with no subject node. `--speaker-ref` carries a source identity
-such as `chat:U0123` for a speaker with no person node. `--as-of` reconstructs a
-past answer from the relationships and grants in effect then:
+`--claim` is the assertion type, and it is the first selector of the
+relationship step. The person a claim is about is returned only when the claim
+type is known to be one a person settles about themselves — `commitment`,
+`self_commitment`, `self_report`, or a type declared with a
+`self_settled_type` registry entry. `--speech-act self_commitment` on an
+undeclared type returns the area owner, not the person: unknown is restrictive,
+and that includes a type whose alias your role cannot read.
+
+It is resolved through the organization's type aliases
+before anything is matched against it, so if this organization calls an
+expectation a `requirement`, `--claim requirement` gets the expectation rules
+and a grant on either name covers a call using the other. The answer reports
+what you asked as `claim.claim_type` and what it resolved to as
+`claim.canonical_claim_type`. Resolution is case-sensitive: `Expectation` with
+no alias of its own is a different claim type. A claim one person sets on another — `expectation` today — is
+settled by the manager and never by the person it is set on, whatever
+`--speech-act` says. A claim a person makes about themselves — `commitment`,
+`self_commitment`, `self_report` — is settled by that person, with no setup and
+no flag. Any other claim type needs a recognized `--speech-act` to select a
+relationship; without one the answer falls through to the area owner. Omitting
+the flag narrows the answer, it never widens it, and `speech_act_recognized`
+false means classify the statement and ask again rather than record it as
+accepted.
+
+The lookup reads no assertion, so it cannot tell a new statement from a
+contradiction of one already accepted. `is_settler` true is not permission to
+replace an accepted claim you did not check for.
+
+`--subject` is optional: omit it for a topical claim with no subject node.
+`--speaker-ref` carries a source identity such as `chat:U0123` for a speaker
+with no person node. `--as-of` reconstructs a past answer from the relationships
+and grants in effect then:
 
 ```bash
 ./scripts/rye settlers --subject 8f2a... --claim expectation \

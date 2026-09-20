@@ -1,7 +1,17 @@
 # Scaling human-agent interaction
 
-Status: proposal. Nothing here is implemented or contracted. It follows the
-critique of `docs/agent-authorization-strategy.md` and extends it from one
+Status: proposal, partly built. As of 2026-09-19 the lookup for who may
+settle a claim exists as `rye_settlers()` (migration 0021, work/002), with
+the `reports_to` and `owns` conventions in the `rye-org` plugin and the
+agent procedure in the `rye-agent-ops` skill. It is read-only and advisory.
+Scoped agent tokens are deny by default on the admin API (work/003).
+Everything else here is still a proposal. Where the built rule is stricter
+than this text, the contract in `contracts/sql-surface.md` wins: a person
+settles a claim about themselves only when its type is positively known to
+be a self type, and anything unknown goes to the area owner.
+
+Nothing here was implemented or contracted when first written. It follows
+the critique of `docs/agent-authorization-strategy.md` and extends it from one
 person with one agent to an organization with many of each. It is v0.4
 material. The v0.3 brief covers discover, classify, and resolve; this
 document assumes those exist.
@@ -78,7 +88,11 @@ five defaults. They come from relationships in the graph, not from
 configuration, so nobody fills in a form to get started.
 
 1. You settle things about yourself: your commitments, your preferences,
-   what you saw or heard.
+   what you saw or heard. As built, this holds for kinds of claim that are
+   positively known to be a person's own call. The core ones are built in
+   and an organization declares more. A kind nobody has declared goes to
+   the area owner, so an unrecognized or mislabeled claim can never make
+   someone the settler of something set on them.
 2. Your manager settles what is expected of you. This follows the
    reporting line.
 3. The owner of a thing settles facts about it: the account owner, the
@@ -486,6 +500,71 @@ candidate pending review."
 The Rye admin is the exception. They see the mechanism. Even so, their
 setup conversation should be in business terms: who decides what, which
 places to watch, who is on the team. The agent translates.
+
+## More than one Rye
+
+Two questions come up once Rye is in use in more than one place. Can an
+agent work with several Rye databases? Can Rye databases work together?
+Yes to both, and only one of the server-side shapes fits the model.
+
+**What exists.** Each Rye is one schema in one PostgreSQL database.
+Nothing federates. The admin Worker takes a list of instances, but as a
+picker, not a combined view. Two things make cross-instance work feasible:
+every id is a random UUID, so references never collide, and assertions and
+events are append-only, so they can be copied without conflict semantics.
+Two things get in the way: provenance has no notion of which instance a
+fact came from, and the schema name is fixed, so two Ryes cannot share one
+database.
+
+**An agent across several Ryes** works today with conventions and no
+schema change. The agent holds one identity and token per instance, reads
+from each, and merges in its own context. Rye stays an overlay with no
+runtime; the agent is the integration point. This is Stage 4 with areas
+that happen to be separate databases. Realistic cases:
+
+- A consultancy with one Rye per client plus its own. The consultant's
+  agent reads client instances and writes to the house instance. Isolation
+  per client is the feature.
+- An organization with a Rye per subsidiary. A person's question crosses
+  them and their agent does the join.
+- Two partner organizations sharing a slice of accepted knowledge.
+
+The hard parts are agent-side. The same person exists in two graphs and
+must be resolved. Two instances can hold contradicting accepted facts.
+And the agent is a bridge that can leak across boundaries, because
+sensitivity labels and session-variable access rules are per instance and
+do not travel.
+
+**Ryes working together directly** has three shapes.
+
+- Foreign data wrappers or dblink reading a remote `rye` schema. The
+  wrapper connects as one fixed database user, so session-variable
+  authorization does not propagate. The security contract breaks. Ruled
+  out.
+- Replicating assertions and events between instances. Mechanically clean
+  because the log is append-only. But authority, review policy, and
+  visibility differ per instance, so a fact accepted there is not accepted
+  here. It answers the wrong question.
+- **Another Rye is a source.** Its accepted facts arrive here as claims
+  with basis `reported`, evidence pointing at the remote instance and
+  assertion id, settled by this instance's own authorities under its own
+  policy. This is how Rye already treats a chat tool or a CRM, and the
+  glossary already has "which source is authoritative". No new trust
+  model and no new tables.
+
+**Minimum to make the third shape real.**
+
+- A stable instance identity recorded in the graph, so provenance can name
+  where a fact originated.
+- An evidence convention for remote origin: instance, assertion id, as-of
+  time.
+- Cross-instance identity resolution through the existing resolve step,
+  matching people and organizations by external identifiers.
+- Eventually a configurable schema name, which `design/model/deployment.md`
+  already defers.
+
+The rule from the rest of this document holds across instances: authority
+never crosses a boundary. Only evidence does.
 
 ## Objectives and importance, briefly
 

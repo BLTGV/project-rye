@@ -13,12 +13,18 @@ Rye uses **session variables** as the single authorization mechanism. No mixing 
 At the start of each transaction, the application sets:
 
 ```sql
+BEGIN;
+
 SET LOCAL "app.current_user_id" = 'user-456';
 SET LOCAL "app.current_teams" = 'engineering,sales';
 SET LOCAL "app.current_role" = 'team_lead';
+
+-- ... the application's queries ...
+
+COMMIT;
 ```
 
-`SET LOCAL` scopes variables to the current transaction, which is safe for connection pooling (PgBouncer in transaction mode).
+`SET LOCAL` scopes variables to the current transaction, which is safe for connection pooling (PgBouncer in transaction mode). It requires an open transaction: run outside one it warns and sets nothing, leaving every query unauthorized. In a session walk with no transaction, use plain `SET`; with a pooled or per-call SQL tool, use `set_config()` in the same call as the query.
 
 All RLS policies, write checks, and field redaction reference these session variables — never `pg_has_role()` or `current_user`.
 

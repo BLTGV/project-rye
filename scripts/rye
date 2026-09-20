@@ -885,6 +885,22 @@ Usage:
 Who may settle this claim, and which step of the lookup said so: a recorded
 grant, then the relationship, then the owner of the area. Advisory only.
 Omit --subject for a topical claim with no subject node.
+
+The claim type selects the relationship default first, the speech act second.
+--claim is resolved through the organization's type aliases before anything is
+matched against it, so an aliased name classifies as the type it resolves to;
+the answer reports both as claim.claim_type and claim.canonical_claim_type.
+Resolution is case-sensitive: a differently-cased name is a different type.
+An expectation is settled by the manager and never by the person it is set on.
+The subject is returned only for a claim type known to be one a person settles
+about themselves: commitment, self_commitment, self_report, or any type with a
+self_settled_type registry entry. No --speech-act does it on its own, so
+self_commitment on an undeclared type returns the area owner, not the person.
+Anything else with no recognized --speech-act falls through to the area owner:
+omitting the flag narrows the answer, it never widens it. A claim type you
+cannot classify, including one whose alias your role cannot read, takes the
+restrictive branch.
+Do not record a statement as accepted while speech_act_recognized is false.
 EOF
         return
         ;;

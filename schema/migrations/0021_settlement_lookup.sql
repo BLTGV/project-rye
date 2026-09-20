@@ -4,14 +4,19 @@
 -- docs/decisions/0005-who-may-settle-lookup.md. rye_settlers() answers who may
 -- settle a claim and which of three steps said so: a recorded grant for that
 -- kind of claim, then the relationship between speaker and subject, then the
--- owner of the area. It is read-only and advisory. It writes nothing, refuses
+-- owner of the area. The relationship step is selected by the claim type
+-- first and the speech act second, so omitting the optional speech act
+-- narrows the answer and never widens it. It is read-only and advisory. It writes nothing, refuses
 -- nothing, and raises nothing for a missing answer. No new table and no new
 -- core-table column: grants stay in domain_authorities, relationships stay in
 -- edges, the area owner stays on knowledge_domains.
 --
 -- Agents are never settlers. An agent carries the authority of the person it
 -- acts for and none of its own, so an agent ref is dropped before any step
--- picks a winner and counted in excluded_agents.
+-- picks a winner and counted in excluded_agents. The check fails closed on the
+-- `agent:` prefix and matches identities on their stored slug, because
+-- create_agent_identity() slugifies agent_key and a ref spelled `agent:my-agent`
+-- would otherwise match the stored `my_agent` not at all.
 
 SET search_path = rye, pg_catalog, public;
 
@@ -79,23 +84,60 @@ $$ LANGUAGE plpgsql STABLE;
 COMMENT ON FUNCTION rye_settler_resolve_ref(text) IS
     'Resolve a settler ref to a visible node id, or NULL. A uuid matches by id; an <external_source>:<external_id> pair matches both columns; anything else matches external_id alone. Used by rye_settlers(); a ref that resolves to nothing yields an unbound settler, never an error.';
 
--- An agent identity is never a settler. A ref is an agent when it names an
--- agent_identities row directly or as `agent:<agent_key>`, or when the node it
--- resolves to is an agent by node_type or attrs->>'actor_kind'.
+-- An agent identity is never a settler, and this is the one place that rule
+-- lives. Two rules, in this order:
+--
+-- 1. Fail closed on the prefix. Any ref whose first non-whitespace characters
+--    are `agent` followed by a colon is an agent, whatever the case and
+--    whatever whitespace sits at the front or around the colon, and whether or
+--    not an agent_identities row backs it. A ref that says it is an agent
+--    never settles. The alternative — treating an unmatched `agent:` ref as an
+--    ordinary person — turns a typo or a deleted identity into authority.
+--    Whitespace here means more than PostgreSQL's trim(), which strips plain
+--    spaces only: tab, CR, LF, form feed, vertical tab, and the non-breaking
+--    space U+00A0 are all stripped and all ignored around the colon.
+-- 2. Match on the slug, not the spelling. create_agent_identity() stores
+--    rye_slugify_key(agent_key), so `my-agent`, `My Agent`, and `my_agent`
+--    are one key and a ref in any of those spellings is the same agent.
+--
+-- Unicode lookalike letters are out of scope. A ref whose `a` is a Cyrillic
+-- а is not an agent prefix here; it slugifies to a key no identity has and
+-- resolves to no node, so it comes back as an unbound settler with no node
+-- behind it, which is what any other unrecognised ref does.
+--
+-- The prefix rule reads `agent` as a whole word before a colon, so
+-- `person:my-agent` is not an agent. A person never loses authority for
+-- sharing a slug with an agent: only the whole ref is slugified for rule 2,
+-- and `person:my-agent` slugifies to `person_my_agent`.
+--
+-- A node is an agent when its node_type is 'agent' or its attrs->>'actor_kind'
+-- is 'agent', whatever its ref says. An inactive agent identity is still an
+-- agent: the active flag is not consulted.
 CREATE OR REPLACE FUNCTION rye_settler_is_agent(p_ref text, p_node_id uuid)
 RETURNS boolean
 SET search_path = rye, pg_catalog
 AS $$
 DECLARE
-    v_ref text := nullif(trim(p_ref), '');
+    -- Everything trim() misses, spelled out: space, tab, CR, LF, form feed,
+    -- vertical tab, non-breaking space.
+    c_space constant text := E' \t\r\n\f\u000B\u00A0';
+    v_ref text := nullif(btrim(coalesce(p_ref, ''), c_space), '');
+    v_key text;
 BEGIN
-    IF v_ref IS NOT NULL AND EXISTS (
-        SELECT 1
-        FROM agent_identities ai
-        WHERE ai.agent_key = v_ref
-           OR 'agent:' || ai.agent_key = v_ref
-    ) THEN
-        RETURN true;
+    IF v_ref IS NOT NULL THEN
+        IF v_ref ~* E'^[[:space:]\u00A0]*agent[[:space:]\u00A0]*:' THEN
+            RETURN true;
+        END IF;
+
+        v_key := rye_slugify_key(v_ref);
+
+        IF v_key IS NOT NULL AND EXISTS (
+            SELECT 1
+            FROM agent_identities ai
+            WHERE ai.agent_key = v_key
+        ) THEN
+            RETURN true;
+        END IF;
     END IF;
 
     IF p_node_id IS NOT NULL AND EXISTS (
@@ -112,7 +154,63 @@ END;
 $$ LANGUAGE plpgsql STABLE;
 
 COMMENT ON FUNCTION rye_settler_is_agent(text, uuid) IS
-    'True when a candidate settler is an agent identity: the ref is an agent_key or agent:<agent_key>, or the node is node_type ''agent'' or attrs->>''actor_kind'' = ''agent''. rye_settlers() drops these before choosing a step and counts them in excluded_agents.';
+    'True when a candidate settler is an agent. Fails closed on the prefix: a ref whose first non-whitespace characters are ''agent'' followed by a colon is an agent whether or not an agent_identities row backs it, in any case and with any whitespace at the front or around the colon — space, tab, CR, LF, form feed, vertical tab, and the non-breaking space U+00A0, which PostgreSQL''s trim() does not strip. Otherwise the ref is matched on its slug, because create_agent_identity() stores rye_slugify_key(agent_key) — so ''my-agent'', ''My Agent'', and ''my_agent'' are one key, while ''person:my-agent'' slugifies to ''person_my_agent'' and is not an agent. An inactive agent identity is still an agent; the active flag is not consulted. A node is an agent when its node_type is ''agent'' or its attrs->>''actor_kind'' is ''agent''. Unicode lookalike letters are out of scope: such a ref matches no identity and no node and comes back unbound. rye_settlers() drops agents before choosing a step and counts them in excluded_agents.';
+
+-- Is this canonical claim type one a person settles about themselves?
+--
+-- The core members need no configuration, so a fresh instance works with none.
+-- Beyond them the set is data: a registry entry keyed
+-- `self_settled_type:<canonical assertion type>` whose jsonb value is exactly
+-- true. Any other value, including false and null, is not a member. Write one
+-- with record_assertion('registry_entry', '{"value": true}', <core registry
+-- node>, p_assertion_key := 'self_settled_type:<type>').
+--
+-- Read with registry_value() and the DEFAULT_SCOPE, the same way type_alias
+-- entries are read, so a scope's entry wins over the organization's.
+--
+-- Blindness is restrictive by construction. registry_value() reads
+-- current_valid_assertions under the caller's RLS, so an entry this caller
+-- cannot see, or one still waiting as a candidate, simply is not a member and
+-- the subject is not returned. That is the point: an authority answer must
+-- never widen because a configuration row happened to be visible. There is
+-- deliberately no SECURITY DEFINER resolver here.
+CREATE OR REPLACE FUNCTION rye_settler_self_settled(p_canonical_type text)
+RETURNS boolean
+SET search_path = rye, pg_catalog
+AS $$
+DECLARE
+    v_type    text := nullif(trim(p_canonical_type), '');
+    v_default jsonb;
+    v_scope   uuid;
+    v_value   jsonb;
+BEGIN
+    IF v_type IS NULL THEN
+        RETURN false;
+    END IF;
+
+    IF v_type IN ('commitment', 'self_commitment', 'self_report') THEN
+        RETURN true;
+    END IF;
+
+    v_default := registry_value('DEFAULT_SCOPE', NULL);
+    IF v_default IS NOT NULL AND jsonb_typeof(v_default) <> 'null' THEN
+        BEGIN
+            v_scope := (v_default #>> '{}')::uuid;
+        EXCEPTION WHEN invalid_text_representation THEN
+            RAISE EXCEPTION 'DEFAULT_SCOPE registry value must be a scope UUID';
+        END;
+    END IF;
+
+    v_value := registry_value('self_settled_type:' || v_type, v_scope);
+
+    RETURN v_value IS NOT NULL
+       AND jsonb_typeof(v_value) = 'boolean'
+       AND v_value = 'true'::jsonb;
+END;
+$$ LANGUAGE plpgsql STABLE;
+
+COMMENT ON FUNCTION rye_settler_self_settled(text) IS
+    'True when a canonical assertion type is one a person settles about themselves. The core members commitment, self_commitment and self_report need no configuration. Beyond them the set is data: a registry entry keyed self_settled_type:<canonical type> whose jsonb value is exactly true, read with registry_value() under the DEFAULT_SCOPE, the same way type_alias entries are read. Any other value, including false and null, is not a member. Reads run under the caller''s RLS, so an entry a caller cannot see is not a member for that caller: blindness is restrictive, never permissive, and there is no SECURITY DEFINER resolver.';
 
 -- node_type to the settler `kind` vocabulary in contracts/sql-surface.md.
 CREATE OR REPLACE FUNCTION rye_settler_node_kind(p_node_type text)
@@ -149,13 +247,21 @@ CREATE OR REPLACE FUNCTION rye_settlers(
 SET search_path = rye, pg_catalog
 AS $$
 DECLARE
+    -- Claim types one person sets on another. Exact string match on the
+    -- canonical type, additive, stated in contracts/sql-surface.md and here.
+    -- The other-set is closed and literal. The self set is core members plus
+    -- registry entries, so it lives in rye_settler_self_settled().
+    c_other_set constant text[] := ARRAY['expectation'];
+
     v_as_of        timestamptz := coalesce(p_as_of, now());
     v_claim_type   text := nullif(trim(p_claim_type), '');
+    v_canonical    text;
     v_speech_act   text := nullif(trim(p_speech_act), '');
     v_speaker_ref  text := nullif(trim(p_speaker_ref), '');
     v_domain_key_in text := nullif(trim(p_domain_key), '');
 
     v_recognized   boolean := false;
+    v_self_settled boolean := false;
     v_want_self    boolean := false;
     v_want_manager boolean := false;
     v_want_owner   boolean := false;
@@ -188,9 +294,39 @@ DECLARE
     v_halt         boolean := false;
     v_matches      boolean;
     v_node_id      uuid;
+    v_ref          text;
 
     r              record;
 BEGIN
+    -- ----------------------------------------------------------------------
+    -- Resolve the claim type through the organization's type aliases, so this
+    -- lookup classifies a claim the same way the rest of the schema stores it.
+    -- An organization that aliases `requirement` to `expectation` has
+    -- record_assertion() writing `expectation`, governing_scope() and the
+    -- salience views reading `expectation`, and now this lookup applying the
+    -- rules for `expectation` too. Without it, asking about `requirement`
+    -- skipped rule 1 and the person an expectation was set on came back as its
+    -- settler.
+    --
+    -- canonical_type() and not canonical_type_in_scope(): rye_settlers() has no
+    -- onboarding-scope argument. p_scope_ref is free text for matching a
+    -- grant's scope_ref and is not a scope node. canonical_type() resolves the
+    -- scope from the DEFAULT_SCOPE registry entry, which is what the salience
+    -- views and 0019 do, so the same alias resolves the same way here as there.
+    -- Adding a scope argument would change the contracted signature.
+    --
+    -- Matching stays case-sensitive afterwards. `Expectation` with no alias is
+    -- a different claim type, unclassified, and falls through like any other.
+    -- Alias resolution reads current_valid_assertions, so an alias hidden from
+    -- this caller by RLS does not apply, as everywhere else.
+    -- canonical_type() raises on a null value and on an alias cycle: a null or
+    -- empty claim type is not resolved at all and behaves as it always did, and
+    -- a cycle is a misconfiguration that raises rather than answering wrongly.
+    -- ----------------------------------------------------------------------
+    IF v_claim_type IS NOT NULL THEN
+        v_canonical := canonical_type('assertion_type', v_claim_type);
+    END IF;
+
     -- ----------------------------------------------------------------------
     -- Resolve the area. Step 1 needs it to find grants and step 3 is the
     -- owner of it, so it resolves before anything else runs.
@@ -274,17 +410,31 @@ BEGIN
               AND da.effective_at <= v_as_of
               AND (da.effective_to IS NULL OR da.effective_to > v_as_of)
               AND (
-                  cardinality(da.claim_types) = 0
-                  OR (v_claim_type IS NOT NULL AND v_claim_type = ANY (da.claim_types))
-              )
-              AND (
                   da.scope_ref IS NULL
                   OR p_scope_ref IS NULL
                   OR da.scope_ref = p_scope_ref
               )
             ORDER BY da.authority_kind, da.authority_ref, da.id
         LOOP
-            v_matches := true;
+            -- Claim type, both sides canonicalized. A grant that names the
+            -- alias covers a call that names the canonical type and the other
+            -- way round; an empty claim_types still means every claim type.
+            IF cardinality(r.claim_types) = 0 THEN
+                v_matches := true;
+            ELSIF v_canonical IS NULL THEN
+                v_matches := false;
+            ELSE
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM unnest(r.claim_types) AS ct(value)
+                    WHERE CASE
+                              WHEN nullif(trim(ct.value), '') IS NULL THEN NULL
+                              ELSE canonical_type('assertion_type', ct.value)
+                          END = v_canonical
+                ) INTO v_matches;
+            END IF;
+
+            CONTINUE WHEN NOT v_matches;
 
             -- Subject narrowing lives in properties, never in a new column.
             -- An absent key means the grant covers every subject in the area.
@@ -309,7 +459,8 @@ BEGIN
 
             v_node_id := rye_settler_resolve_ref(r.authority_ref);
 
-            IF rye_settler_is_agent(r.authority_ref, v_node_id) THEN
+            IF lower(coalesce(r.authority_kind, '')) = 'agent'
+               OR rye_settler_is_agent(r.authority_ref, v_node_id) THEN
                 v_excluded := v_excluded + 1;
                 CONTINUE;
             END IF;
@@ -340,9 +491,31 @@ BEGIN
     -- ----------------------------------------------------------------------
     -- Step 2: the relationship between the speaker and the subject.
     --
-    -- Which default applies is selected by the speech act, not by the claim
-    -- type. A claim about a relationship edge type has no default and falls
-    -- through: the reporting line is settled by the area, not by either end.
+    -- Two selectors, the claim type first and the speech act second. Five
+    -- ordered rules, first match wins. The claim type carries the safety on
+    -- its own, so omitting the optional speech act and mistyping it both land
+    -- in the same place as classifying it correctly would.
+    --
+    -- The claim type read here is the canonical one, so an alias classifies
+    -- exactly as the type it resolves to.
+    --
+    --   0. relationship edge type        -> fall through
+    --   1. other-set, or act expectation -> manager only, never self
+    --   2. recognized speech act         -> its documented default
+    --   3. self-set claim type           -> self only
+    --   4. anything else                 -> fall through to the area owner
+    --
+    -- The governing rule the table is a consequence of: the subject is
+    -- returned only when the claim type is positively known to be one a person
+    -- settles about themselves. Membership in the self set is the only thing
+    -- that makes the subject its own settler; no speech act does it alone.
+    -- self_commitment on a claim type nobody has declared self-settled returns
+    -- nobody, not the subject. Unknown is restrictive, and every way of making
+    -- a claim type look unrecognised -- a typo, a different case, an alias this
+    -- caller cannot see -- therefore costs settlers rather than granting them.
+    --
+    -- There is no union. A null or unrecognized speech act never widens who
+    -- may settle: saying less buys a smaller answer, never a larger one.
     -- ----------------------------------------------------------------------
     v_recognized := coalesce(v_speech_act IN (
         'self_commitment', 'self_report', 'expectation',
@@ -350,32 +523,52 @@ BEGIN
         'agreement', 'decision', 'outside_report', 'agent_inference'
     ), false);
 
-    IF v_speech_act IN ('self_commitment', 'self_report') THEN
-        v_want_self := true;
-    ELSIF v_speech_act = 'expectation' THEN
+    v_self_settled := rye_settler_self_settled(v_canonical);
+
+    IF coalesce(v_canonical, '') IN ('reports_to', 'owns') THEN
+        -- Rule 0. Neither end of a relationship settles that it exists.
+        NULL;
+
+    ELSIF v_canonical = ANY (c_other_set)
+       OR v_speech_act = 'expectation' THEN
+        -- Rule 1, and the point of the ordering. An expectation is set on a
+        -- person by someone else, so the person it is set on is never its
+        -- settler, whatever the speech act says.
         v_want_manager := true;
-    ELSIF v_speech_act = 'statement_about_other' THEN
+
+    ELSIF v_recognized THEN
+        -- Rule 2. A self speech act reaches the subject only on a claim type
+        -- known to be self-settled; otherwise it selects nobody.
+        IF v_speech_act IN ('self_commitment', 'self_report') THEN
+            v_want_self := v_self_settled;
+        ELSIF v_speech_act = 'statement_about_other' THEN
+            v_want_manager := true;
+            v_want_self := v_self_settled;
+        ELSIF v_speech_act = 'statement_about_thing' THEN
+            v_want_owner := true;
+        ELSE
+            -- agreement, decision, outside_report, agent_inference.
+            NULL;
+        END IF;
+
+    ELSIF v_self_settled THEN
+        -- Rule 3. A person's own commitment or report about themselves still
+        -- settles with no speech act, no registry row, and no area at all.
         v_want_self := true;
-        v_want_manager := true;
-    ELSIF v_speech_act = 'statement_about_thing' THEN
-        v_want_owner := true;
-    ELSIF v_speech_act IN ('agreement', 'decision', 'outside_report', 'agent_inference') THEN
-        NULL;  -- no relationship default; fall through to the area owner
+
     ELSE
-        -- Null or unrecognized: the union of whichever defaults apply.
-        v_want_self := true;
-        v_want_owner := true;
-        v_want_manager := true;
+        -- Rule 4. No claim type class, and the speech act is null or
+        -- unrecognized. Nothing local is selected; the area owner answers.
+        NULL;
     END IF;
 
     IF NOT v_halt
        AND v_step = 'none'
-       AND v_subject_found
-       AND coalesce(v_claim_type, '') NOT IN ('reports_to', 'owns') THEN
+       AND v_subject_found THEN
 
         -- Self: a person settles claims about themselves, with no setup.
         IF v_want_self AND v_subject.node_type = 'person' THEN
-            IF rye_settler_is_agent(NULL::text, v_subject.id) THEN
+            IF rye_settler_is_agent(v_subject_ref, v_subject.id) THEN
                 v_excluded := v_excluded + 1;
             ELSE
                 v_self := v_self || jsonb_build_object(
@@ -406,7 +599,12 @@ BEGIN
                   AND (e.effective_to IS NULL OR e.effective_to > v_as_of)
                 ORDER BY n.label NULLS LAST, n.id
             LOOP
-                IF rye_settler_is_agent(NULL::text, r.node_id) THEN
+                v_ref := CASE
+                             WHEN r.external_source IS NOT NULL AND r.external_id IS NOT NULL
+                             THEN r.external_source || ':' || r.external_id
+                         END;
+
+                IF rye_settler_is_agent(v_ref, r.node_id) THEN
                     v_excluded := v_excluded + 1;
                     CONTINUE;
                 END IF;
@@ -414,10 +612,7 @@ BEGIN
                 v_owners := v_owners || jsonb_build_object(
                     'kind',         rye_settler_node_kind(r.node_type),
                     'node_id',      r.node_id,
-                    'ref',          CASE
-                                        WHEN r.external_source IS NOT NULL AND r.external_id IS NOT NULL
-                                        THEN r.external_source || ':' || r.external_id
-                                    END,
+                    'ref',          v_ref,
                     'label',        r.label,
                     'via',          'relationship',
                     'relationship', 'owner',
@@ -442,7 +637,12 @@ BEGIN
                   AND (e.effective_to IS NULL OR e.effective_to > v_as_of)
                 ORDER BY n.label NULLS LAST, n.id
             LOOP
-                IF rye_settler_is_agent(NULL::text, r.node_id) THEN
+                v_ref := CASE
+                             WHEN r.external_source IS NOT NULL AND r.external_id IS NOT NULL
+                             THEN r.external_source || ':' || r.external_id
+                         END;
+
+                IF rye_settler_is_agent(v_ref, r.node_id) THEN
                     v_excluded := v_excluded + 1;
                     CONTINUE;
                 END IF;
@@ -450,10 +650,7 @@ BEGIN
                 v_managers := v_managers || jsonb_build_object(
                     'kind',         rye_settler_node_kind(r.node_type),
                     'node_id',      r.node_id,
-                    'ref',          CASE
-                                        WHEN r.external_source IS NOT NULL AND r.external_id IS NOT NULL
-                                        THEN r.external_source || ':' || r.external_id
-                                    END,
+                    'ref',          v_ref,
                     'label',        r.label,
                     'via',          'relationship',
                     'relationship', 'manager',
@@ -487,11 +684,17 @@ BEGIN
             WHERE n.id = v_owner_id
               AND n.archived_at IS NULL;
 
+            v_ref := CASE
+                         WHEN v_owner_node.external_source IS NOT NULL
+                          AND v_owner_node.external_id IS NOT NULL
+                         THEN v_owner_node.external_source || ':' || v_owner_node.external_id
+                     END;
+
             IF v_owner_node.id IS NULL THEN
                 -- Archived, or hidden by RLS. Either way the caller gets the
                 -- same empty answer and must read the reason.
                 v_reason := 'area_owner_not_visible';
-            ELSIF rye_settler_is_agent(NULL::text, v_owner_node.id) THEN
+            ELSIF rye_settler_is_agent(v_ref, v_owner_node.id) THEN
                 v_excluded := v_excluded + 1;
                 v_reason := 'area_owner_is_agent';
                 v_setup_gap := true;
@@ -499,11 +702,7 @@ BEGIN
                 v_settlers := jsonb_build_array(jsonb_build_object(
                     'kind',         rye_settler_node_kind(v_owner_node.node_type),
                     'node_id',      v_owner_node.id,
-                    'ref',          CASE
-                                        WHEN v_owner_node.external_source IS NOT NULL
-                                         AND v_owner_node.external_id IS NOT NULL
-                                        THEN v_owner_node.external_source || ':' || v_owner_node.external_id
-                                    END,
+                    'ref',          v_ref,
                     'label',        v_owner_node.label,
                     'via',          'area_owner',
                     'relationship', NULL::text,
@@ -551,6 +750,7 @@ BEGIN
         'claim', jsonb_build_object(
             'claim_type',             v_claim_type,
             'assertion_type',         v_claim_type,
+            'canonical_claim_type',   v_canonical,
             'speech_act',             v_speech_act,
             'speech_act_recognized',  v_recognized
         ),
@@ -572,4 +772,4 @@ END;
 $$ LANGUAGE plpgsql STABLE;
 
 COMMENT ON FUNCTION rye_settlers(uuid, text, uuid, text, text, text, timestamptz, text) IS
-    'Who may settle this claim, and which of three steps said so. One lookup: a recorded grant in domain_authorities for this claim type, then the relationship between speaker and subject (self, manager via reports_to, owner via owns), then knowledge_domains.owner_node_id for the area. Contract: contracts/sql-surface.md, section "Settlement lookup" (contract_version 1). SECURITY INVOKER and read-only: it writes nothing, refuses nothing, and raises nothing for a missing answer. p_claim_type is the assertion type verbatim. p_speech_act selects which relationship default applies. p_as_of filters effective windows only. An agent identity is never returned; dropped candidates are counted in excluded_agents. step ''none'' with settlers [] and a reason is an answer, not an error, and an empty list never means nobody is authorized, only nobody authorized and visible to this caller.';
+    'Who may settle this claim, and which of three steps said so. One lookup: a recorded grant in domain_authorities for this claim type, then the relationship between speaker and subject (self, manager via reports_to, owner via owns), then knowledge_domains.owner_node_id for the area. Contract: contracts/sql-surface.md, section "Settlement lookup" (contract_version 1). SECURITY INVOKER and read-only: it writes nothing, refuses nothing, and raises nothing for a missing answer. p_claim_type is the assertion type, resolved through canonical_type(''assertion_type'', ...) first so the organization''s type aliases classify a claim the same way the rest of the schema stores it; claim.claim_type echoes what was asked and claim.canonical_claim_type reports what it resolved to. Grants match on the canonical type on both sides, so a grant naming an alias covers a call naming the canonical type and the other way round. Matching is case-sensitive after resolution, and a null or empty claim type is not resolved at all. The canonical claim type is the first selector: the relationship step tries five ordered rules and the first that applies wins. 0, a relationship edge type (reports_to, owns) falls through. 1, an other-set claim type (expectation) or a speech act of ''expectation'' gives the manager only and never self, so a missing or wrong speech act cannot make a person the settler of an expectation set on them. 2, a recognized p_speech_act gives its documented default, except that self_commitment and self_report reach the subject only when the canonical claim type is self-set, and statement_about_other returns the subject''s manager always and the subject only when it is. 3, a self-set claim type gives self only. 4, anything else falls through to the area owner. There is no union: a null or unrecognized speech act never widens who may settle. The subject is returned only when the claim type is positively known to be one a person settles about themselves; no speech act does it alone, and unknown is restrictive. The self set is commitment, self_commitment and self_report plus any canonical type with a registry entry self_settled_type:<type> whose value is true, read under the caller''s RLS, so a caller who cannot see the entry or an alias gets the more restrictive answer and never the subject. The other-set is literal here and in the contract; the self set is those literals plus registry entries. The lookup reads no assertion, so is_settler true is not permission to replace an accepted claim the caller did not check for. p_as_of filters effective windows only. An agent identity is never returned: any ref beginning with ''agent:'' is excluded whether or not an identity backs it, other refs are matched on the slug create_agent_identity() stores, an inactive identity is still an agent, and a node that is an agent by node_type or attrs->>''actor_kind'' is excluded wherever it stands. Dropped candidates are counted in excluded_agents. step ''none'' with settlers [] and a reason is an answer, not an error, and an empty list never means nobody is authorized, only nobody authorized and visible to this caller.';
