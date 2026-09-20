@@ -124,8 +124,35 @@ same way `scripts/conformance.sh` does it.
 `node_modules` in `admin/`, `site/`, or `skills/rye-source-context-intake/`.
 Without them, `test-all.sh` dies partway through (`tsx: command not found`
 at conformance test 21, then `astro: command not found` in the site build),
-and a plain `npm ci` in `admin/` tries to build `sharp` from source, which is
-slow and can fail outright.
+and a plain `npm ci` in `admin/` (and in `site/`, which also depends on
+`sharp` via Astro's image tooling) tries to build `sharp` from source, which
+is slow and can fail outright.
+
+**Why the `sharp` build-from-source failure happens on this machine (and
+why it is not fixed in the repo):** `admin/package-lock.json` and
+`site/package-lock.json` already carry every `@img/sharp-*` prebuilt
+platform package, including `@img/sharp-linux-x64` (glibc) — confirmed by
+installing with `--ignore-scripts` and finding a valid
+`sharp-linux-x64.node` binary present and loadable. The failure is not a
+missing lock entry. It is that this machine (Arch Linux) has a system-wide
+`libvips` package installed (`pacman -Qo /usr/lib/pkgconfig/vips-cpp.pc` →
+`libvips 8.18.6-1`, pulled in by some other installed application, not by
+this project). `sharp`'s own `install/check.js` runs
+`pkg-config --modversion vips-cpp` before every install; when a version at
+or above its minimum is found, `useGlobalLibvips()` in
+`node_modules/sharp/lib/libvips.js` returns true and `sharp` deliberately
+skips its bundled prebuilt binary in favor of building from source against
+that global libvips via `node-gyp` — which then fails here with `Please add
+node-addon-api to your dependencies` (a build-from-source-only requirement
+`sharp` does not otherwise install). Setting `SHARP_IGNORE_GLOBAL_LIBVIPS=1`
+in the environment before `npm ci` reproduces success and confirms this
+diagnosis (verified for both `admin/` and `site/`); `npm run build`,
+`check:routes`, and `check:db` all pass against that install. This is a
+property of the machine (which other packages happen to be installed), not
+of the lock file or a repo config, so it is not worked around in the
+repo — no `.npmrc`, no env var baked into `package.json` scripts. Any
+machine without a global `vips-cpp` pkg-config entry (most CI runners, most
+fresh installs) never hits this path.
 
 **Run it in worktrees only** (`git worktree add`, e.g. `.claude/worktrees/...`
 or `.codex/worktrees/...`) — never in the main checkout. Run it once per
