@@ -21,6 +21,11 @@ One executable, `./scripts/rye`, with verb-first subcommands:
   `--speaker-ref <source-identity>`, `--domain <key>`, `--speech-act <act>`,
   `--as-of <timestamp>`, `--scope <ref>`. See the settlement lookup section of
   `contracts/sql-surface.md`. Advisory: it reports, it never refuses.
+- `settle-gate <assertion-type>` — whether this type is Rye's own
+  configuration, which roles may make it accepted, and whether this session
+  may. See the "Configuration writes need an admin" section of
+  `contracts/sql-surface.md`. Advisory: it reports, it never refuses, and it
+  writes nothing.
 - `sources inventory|pending-context` — what has been seen, what awaits a
   person.
 - `agents create|grant|issue-token|revoke-token|list|audit` — agent identity
@@ -34,7 +39,7 @@ never has to author it. Human output goes to stdout, diagnostics to stderr.
 (`rye_agent_context()`, `rye_plugin_catalog()`, `rye_skill_catalog()`,
 `rye_capability_catalog()`, `rye_source_inventory()`,
 `rye_pending_context_confirmations()`, `rye_categories()`,
-`rye_settlers()`). The CLI adds no
+`rye_settlers()`, `settle_gate()`). The CLI adds no
 fields of its own, so the shape of `--json` output is governed by
 `contracts/sql-surface.md` and, for `categories`,
 `contracts/category-vocabulary.md`.
