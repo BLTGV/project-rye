@@ -79,7 +79,10 @@ npx wrangler deployments list
 npx wrangler rollback <deployment-id>
 ```
 
-## CI: non-superuser owner check
+## Non-superuser owner check
+
+There is no hosted CI. `./scripts/test-all.sh`, run locally before a merge, is
+the gate, and this check is one of its steps.
 
 **What it is:** `scripts/test-nonsuperuser-owner.sh`, run as a named step
 ("sql (nonsuperuser owner)") inside `scripts/test-all.sh`, alongside the
@@ -90,7 +93,7 @@ by the superuser first, then handed to the owner — mirrors Supabase), and
 runs `install.sh` + `conformance.sh` as that role from the host. It exists
 because a superuser database owner bypasses row-level security for itself
 and every `SECURITY DEFINER` function it owns; Supabase's owner is not a
-superuser, and five bugs on 2026-09-19 were invisible to CI without this.
+superuser, and five bugs on 2026-09-19 were invisible to the suite without this.
 
 `docker-compose.yml` sets no project name, and both this step and the
 existing superuser-owner step run `docker-test.sh` from the same
