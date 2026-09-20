@@ -81,11 +81,34 @@ foreign key is already `DEFERRABLE INITIALLY DEFERRED`.
 The deferred checks run at commit as the caller, under RLS, outside any
 `SECURITY DEFINER` frame. The acceptance event is visible because
 `accept_assertion()` records the subject (or the edge's endpoints) as
-participants, and a caller who can see the assertion can see those nodes. The
-replacement and the successor are rows the caller just wrote; if the caller
-classified one above its own read level it cannot see it, so those two checks
-refuse only when the row is visible and wrong, and pass when it is invisible.
-That is the one place this design fails open, and it is stated in the contract.
+participants, and a caller who can see the assertion can see those nodes.
+
+**Corrected 2026-09-19, third verification pass. These checks fail closed.** As
+first written they passed when the named row was invisible, and the Verifier
+committed the consequence as `viewer`: end an accepted row, name a fresh id,
+insert that id as a candidate of another type and key classified `restricted`,
+and the incumbent is gone with nothing standing. That broke the first role-free
+claim in section I, which is the strongest thing this decision promises, so the
+fail-open is removed rather than disclosed. A replacement or a successor the
+caller cannot read is not one, and the write is refused as if the row were
+absent.
+
+The `BEFORE` decoy check is the exception, and for a reason that is not
+visibility: at that moment the helper's replacement genuinely does not exist
+yet. It stays as it is, refusing only a row that is visible and wrong, and the
+commit-time check is what closes the case.
+
+**The rule for every check in these triggers.** They are `SECURITY INVOKER` and
+they run under the caller's RLS, so each one has to say which way blindness
+cuts. A check that validates a row this write points at — the replacement, the
+successor, the acceptance event — treats "not visible" as failure, because the
+caller is claiming the row makes its write legitimate and an unreadable row
+proves nothing. A check that searches for a conflicting row — the accepted
+rival on a promotion, the superseded incumbent that earns the insert exemption
+— must not, because there invisibility withholds nothing from the caller and
+inverting it would refuse every promotion and demote every replacement. Both
+directions are already restrictive in the sense the settlement contract means:
+a caller that sees less gets less.
 
 **Cost to `SECURITY INVOKER` versus `SECURITY DEFINER` helpers: none, and that
 is the point.** No helper changes. All five functions that update `assertions`
@@ -107,7 +130,8 @@ such a node, so with none the policy is `open` and there is nothing to decide.
 
 **What a caller who forges every setting except `app.current_role` can and
 cannot do.** Cannot: end an accepted assertion without a replacement of the
-same type and key; narrow a window with no successor; rewrite `claim`,
+same type and key that the caller itself can read; narrow a window with no
+readable successor; rewrite `claim`,
 `basis`, `confidence`, `asserted_at`, `effective_at`, or the subject; delete
 `attrs` keys; set `classification` to anything but the derived value; un-set
 `superseded_at`; move an accepted row back to candidate; promote a candidate
@@ -233,8 +257,35 @@ demote a raw insert. Both are in the contract.
   named row must carry the same `assertion_type` and `assertion_key`; the
   subject may differ, because `merge_nodes()` points a duplicate's assertion at
   the canonical node's. Checked in the `BEFORE` guard when the row already
-  exists, which is the decoy case, and again at commit when it is visible,
-  which is the forward-reference case the helpers use.
+  exists, which is the decoy case, and again at commit, where the row must be
+  one this caller can read: **not visible is refused**, and a replacement named
+  for a row that is absent, unreadable, or of another type or key ends nothing.
+  The commit-time check applies when the ended row was `accepted`; a candidate
+  closed with a replacement is not holding a value anyone can lose.
+
+  Every helper path was walked for a case where the caller cannot read its own
+  replacement, and none breaks. `supersede_assertion()` copies the incumbent's
+  `classification` onto the replacement, so it is exactly as readable as the row
+  it replaces, on the same subject and type. `merge_nodes()` copies the
+  duplicate's row, which the caller read from `current_valid_assertions`, onto
+  the canonical node, which the caller must see to merge into.
+  `record_distillation()` inserts with no classification and lets propagation
+  derive it from sources it has already checked the caller can see, so the
+  derived value is never above the caller's level. `accept_assertion()` names
+  the candidate it was handed, which in any deployment it had to read to accept.
+  The one refusal is deliberate: `record_assertion()` with a `p_classification`
+  above the caller's own read level, superseding a lower-classified incumbent,
+  now raises at commit instead of quietly ending the incumbent with a row the
+  caller cannot see. Writing a fact you cannot read back and retiring a visible
+  one with it is not a case worth keeping.
+
+  One environment hazard for the builder, not a rule: in the Docker test
+  database the owner is a superuser, so `accept_assertion()`, being
+  `SECURITY DEFINER`, bypasses RLS and can accept a candidate the `SET ROLE`
+  test role cannot read, while the commit-time check runs as that role and
+  refuses. A deployment where the owner is not a superuser cannot reach that
+  state, because the helper's own `SELECT` would not find the candidate either.
+  Do not write a test that accepts a candidate classified above the test role.
 
 ## D. Every function that updates an assertion
 
@@ -419,6 +470,16 @@ with the matching `app.*_assertion_id` set to the target row.
     accepted unsuperseded row may cover `F`. Assert the count, not the error
     alone. Then show `accept_assertion()` still promotes a candidate covering
     now while the scheduled row stands.
+17. The invisible replacement. As `viewer`, with every supersede setting
+    forged: end an accepted row naming a fresh id, then insert that id as a
+    candidate of another type and key classified `restricted`, and `COMMIT`.
+    The transaction must fail, and afterwards `current_valid_assertions` must
+    still hold the incumbent. Run the same attack with the replacement
+    classified `public` and the type and key wrong, which the `BEFORE` check
+    catches at the statement, so both halves are covered. Then prove the
+    fail-closed rule did not catch a helper: `supersede_assertion()` on an
+    `internal` assertion as a `team_member` still commits, and the replacement
+    is readable by that role.
 
 ## I. The protection boundary
 
