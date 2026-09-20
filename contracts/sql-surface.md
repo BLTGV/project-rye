@@ -1400,6 +1400,19 @@ loops you will read — failures, a sample, an eval week — not every read.
 `node_salience` is unaffected and improves as a side effect: it reads
 `properties->>'agent_id'` and the participants, which tracing does not touch.
 
+**A miss is an admin's read.** `agent_query_trace` is security invoker, and an
+event is readable only through a participant the reader can see. A step that
+found nothing names no nodes, so in production it is visible to an admin session
+and to nobody else, the agent that wrote it included. Pass the nodes a step
+considered, rejected ones too, and the step is readable by whoever can read
+them. Analysis of the zero-result steps, which is the `entry_missed` case, is an
+admin's job. The eval harness is unaffected: it reads recorded trace files, not
+the database.
+
+**`seq` is an int4.** The helper refuses a `seq` above 2147483647, and the view
+degrades any stored value it cannot read as one to null rather than raising, so
+no single event can make the view unreadable.
+
 ## Settlement lookup
 
 `rye_settlers()` answers one question: who may settle this claim. It is
