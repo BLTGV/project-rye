@@ -61,6 +61,8 @@ exist for tables passed to `track_table()`.
   absent. `INSERT ... RETURNING` on RLS-protected tables fails; use the helper.
 - No path in this contract deletes an event or mutates an accepted assertion
   in place.
+- Some refusals arrive at `COMMIT` rather than at the statement. See "The row
+  is the gate, not the route".
 
 ## Configuration writes need an admin
 
@@ -157,6 +159,98 @@ allowed. A migration or script that seeds configuration must set
 `app.current_role` to `admin` first, as `sync_plugin_metadata.sh` does.
 Migrations applied before the gate existed are unaffected, and on a fresh
 install the core registry seeds run before the gate is created.
+
+## The row is the gate, not the route
+
+An assertion becomes accepted, ends, narrows, gains an outcome label, or
+changes classification only in a shape Rye's rules allow. This section says
+what those shapes are.
+
+**The session settings promise nothing.** `app.write_path` and the per-path
+row id settings (`app.accept_assertion_id`, `app.supersede_assertion_id`,
+`app.effective_window_assertion_id`, `app.classification_assertion_id`,
+`app.outcome_assertion_id`) are set by the helpers and read by
+`assertion_update_policy`. They are a pre-filter that stops a stray `UPDATE`,
+and nothing more. Any caller can set them with `set_config()`, so no rule that
+matters may depend on them. A client never sets them and never reads them as a
+permission. Every rule below is enforced by triggers, which fire inside a
+`SECURITY DEFINER` helper, on a raw write, and for a superuser alike, and which
+re-derive their answer from the row, from rows that exist, and from
+`app.current_role`.
+
+**The guard reads `app.current_role` to refuse, never to permit.** A rule that
+lets a caller through because of the role it claims is worth exactly as much as
+the deployment's control of session variables. A rule that refuses regardless
+of role holds against anyone. Both kinds appear below, and the difference is
+stated each time. There is no admin exemption: an exemption keyed on a role is
+produced by the same `set_config()` this section closes.
+
+**Per column, on `UPDATE`.**
+
+| Column | May change |
+|---|---|
+| `status` | `candidate` to `accepted` only. Never back. The row must be a live candidate, no accepted rival may hold an overlapping window on the same subject, type, and key, and the acceptance must be accompanied by an `assertion_accepted` event naming the row. An `agent:*` caller under `candidates_only` or `strict`, or on a `pattern_claim`, additionally needs `rye.authoritative.promote` for the governing scope, which is the rule `accept_assertion()` already applied. |
+| `superseded_at` | Null to non-null once, and never back. On a row that was `accepted`, only when `superseded_by` is set in the same statement. **An accepted assertion never ends with nothing replacing it.** A candidate may still be closed with `superseded_by` null, which is how `reject_candidate()` records a rejection. |
+| `superseded_by` | Null to non-null once, together with `superseded_at`, never to the row itself. The replacement must carry the same `assertion_type` and `assertion_key`. The subject may differ, because `merge_nodes()` replaces a duplicate's assertion with the canonical node's. |
+| `effective_to` | Narrowing only, to a non-null instant after `effective_at`, before the previous `effective_to`, and in the future. A successor accepted assertion on the same subject, type, and key must start where the window now ends. |
+| `attrs` | Only as an outcome label: the result must name an `outcome` in the recorded set, and no existing key may be dropped or have its value changed except the keys an outcome labelling writes. |
+| `classification` | Only to the value `derived_assertion_classification()` computes for the row's current derivation evidence. Nothing else, for anyone. |
+| everything else | Never. `claim`, `assertion_type`, `assertion_key`, the subject columns, `asserted_at`, `effective_at`, `basis`, `confidence`, `created_at` stay as written. |
+
+**A direct `INSERT` lands as a candidate, it is not refused.** A raw insert of
+an `accepted` row is judged by the same review policy `record_assertion()`
+applies: under `strict`, and under `candidates_only` when the basis is not
+`observed`, the row lands `candidate`. Nothing said is lost, which is the same
+answer the settle gate gives, and refusing instead would break `merge_nodes()`
+and every other helper that inserts a row directly. Rye does not tell
+`record_assertion()`'s insert from a raw one and does not try: there is no
+signal a helper can produce that a caller cannot, so the row is judged rather
+than the route. `record_assertion()` has already applied the policy, so the
+check is a no-op on its own writes.
+
+One exemption: a row that an already-superseded assertion names as its
+replacement is left accepted. `supersede_assertion()`, `record_distillation()`
+and `record_assertion()` all mark the incumbent before inserting its
+replacement, and demoting the replacement would leave the key with no accepted
+value at all — the erasure this section exists to prevent. The exemption is a
+fact in the table, not a setting, and it requires an incumbent that was
+accepted before the transaction began.
+
+**Refusals, and when they arrive.** Most arrive at the statement, as a raised
+error a client surfaces. Three arrive at `COMMIT`, because the fact that makes
+the transition true is written after it: the acceptance event, the existence
+and type of a replacement, and the successor of a narrowed window. A client
+that wraps several writes in one transaction may therefore see a refusal at
+commit that names a statement it ran earlier. `superseded_by` already behaves
+this way: its foreign key is `DEFERRABLE INITIALLY DEFERRED` so a helper can
+point an incumbent at a replacement it has not inserted yet.
+
+**What this protects and what it does not.** Rye's authorization is session
+variables. A caller holding a raw connection can set `app.current_role` to
+`admin`, and nothing here changes that. Two things are protected. Deployments
+where a trusted backend sets the session variables and callers cannot. And
+well-behaved agents that state their role honestly and must not be able to skip
+review by accident or by following bad instructions. It is not a defence
+against a hostile caller with a raw connection.
+
+Inside that boundary, three claims hold for every caller, forged role included,
+because they do not read a role at all: an accepted assertion cannot be ended
+without a replacement of the same type and key; a window cannot be narrowed
+without a successor; and `claim`, `basis`, `confidence`, and the subject of an
+assertion cannot be rewritten. Everything else is as strong as the deployment's
+control of the session.
+
+Four limits are stated rather than hidden. An outcome label is
+shape-constrained, not role-constrained, so a caller may still label an outcome
+by hand. `supersede_assertion()` does not consult the review policy, so a
+caller who supersedes and replaces an accepted row still writes an accepted
+row under `strict`; that is unchanged here and is its own item. The insert
+check resolves the governing scope without a witness, because evidence is
+written after the assertion, so a scope reached only through
+`scope_governs_source` does not demote a raw insert. And a caller who may
+accept through `accept_assertion()` under an `open` policy is a caller whose
+raw promotion is refused only by the missing acceptance event, which is a
+record, not a lock.
 
 ## Settlement lookup
 
