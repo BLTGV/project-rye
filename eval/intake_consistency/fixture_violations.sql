@@ -29,7 +29,9 @@ VALUES
   ('a0000000-0000-4000-8000-000000000001', 'org',     'Lumen Fabrication', '{}'::jsonb),
   ('a0000000-0000-4000-8000-000000000002', 'person',  'Rosa Delgado',      '{}'::jsonb),
   ('a0000000-0000-4000-8000-000000000003', 'person',  'Tomas Vance',       '{}'::jsonb),
-  ('a0000000-0000-4000-8000-000000000004', 'project', 'Line 3 Retool',     '{}'::jsonb);
+  ('a0000000-0000-4000-8000-000000000004', 'project', 'Line 3 Retool',     '{}'::jsonb),
+  ('a0000000-0000-4000-8000-000000000005', 'pipeline', 'Retool Vendor Pipeline', '{}'::jsonb),
+  ('a0000000-0000-4000-8000-000000000006', 'system',   'Traveler Packet Tool',   '{}'::jsonb);
 
 INSERT INTO edges (id, edge_type, source_id, target_id, properties, effective_from, effective_to)
 VALUES
@@ -44,7 +46,23 @@ VALUES
   -- Tomas takes the line on September 1.
   ('b0000000-0000-4000-8000-000000000003', 'assigned_to',
    'a0000000-0000-4000-8000-000000000003', 'a0000000-0000-4000-8000-000000000004',
-   '{"role":"line owner"}'::jsonb, '2026-09-01T00:00:00Z', NULL);
+   '{"role":"line owner"}'::jsonb, '2026-09-01T00:00:00Z', NULL),
+  -- Rule 1 violation on a plugin edge type the first draft of check 1 missed:
+  -- pipeline_member is contributed by rye-crm, not by core.
+  ('b0000000-0000-4000-8000-000000000004', 'pipeline_member',
+   'a0000000-0000-4000-8000-000000000002', 'a0000000-0000-4000-8000-000000000005',
+   '{"role":"vendor liaison"}'::jsonb, '2025-06-01T00:00:00Z', NULL),
+  -- Rule 1, handoff disposition: an owned thing does not close on a departure.
+  -- Somebody has to take it, and who that is, is a person's decision.
+  ('b0000000-0000-4000-8000-000000000005', 'owns',
+   'a0000000-0000-4000-8000-000000000002', 'a0000000-0000-4000-8000-000000000006',
+   '{}'::jsonb, '2025-06-01T00:00:00Z', NULL),
+  -- Check 3's stated blind spot, here on purpose: an edge with no window at
+  -- all. The 2020-dated claim on it below is never flagged, before or after
+  -- repair, because there is no window to disagree with.
+  ('b0000000-0000-4000-8000-000000000006', 'affiliated_with',
+   'a0000000-0000-4000-8000-000000000003', 'a0000000-0000-4000-8000-000000000001',
+   '{"note":"no window on this edge"}'::jsonb, NULL, NULL);
 
 -- ---------------------------------------------------------------------------
 -- Source material. Events are the evidence the claims below rest on.
@@ -122,6 +140,10 @@ SELECT record_assertion(
     p_evidence := ARRAY[jsonb_build_object('kind', 'source', 'event_id', :'ev_blocked')]
 ) AS a_status \gset
 
+-- Rule 4 violation, third shape, and the one an earlier draft of check 4a
+-- filtered out: a count over a week, recorded with basis `observed` because
+-- the agent read it off an export, and no source window at all. Basis says
+-- nothing about whether a number was computed over a period.
 SELECT record_assertion(
     p_assertion_type := 'message_volume',
     p_claim := '{"message_count":214,"peak_hour_utc":10}'::jsonb,
@@ -132,6 +154,20 @@ SELECT record_assertion(
     p_basis := 'observed',
     p_evidence := ARRAY[jsonb_build_object('kind', 'source', 'event_id', :'ev_volume')]
 ) AS a_volume \gset
+
+-- Check 3's blind spot, stated and demonstrated: a claim dated 2020 on an edge
+-- with no window. Not flagged, by design. Its claim carries no number, so it
+-- does not appear in check 4a either.
+SELECT record_assertion(
+    p_assertion_type := 'affiliation_status',
+    p_claim := '{"status":"staff"}'::jsonb,
+    p_subject_edge_id := 'b0000000-0000-4000-8000-000000000006',
+    p_assertion_key := 'default',
+    p_effective_at := '2020-01-01T00:00:00Z',
+    p_status := 'accepted',
+    p_basis := 'reported',
+    p_evidence := ARRAY[jsonb_build_object('kind', 'source', 'event_id', :'ev_departure')]
+) AS a_nowindow \gset
 
 -- ---------------------------------------------------------------------------
 -- Rule 2 violation: the digest rests on the task status alone, and claims a

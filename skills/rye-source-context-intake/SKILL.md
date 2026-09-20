@@ -89,6 +89,15 @@ and role edges to a person. You cannot close an edge: an agent-shaped session's
 `UPDATE` on `edges` reports `UPDATE 0` and changes nothing. Say so plainly —
 the relationship still reads as current until someone ends it.
 
+Two things decide whether a repair is possible at all. **Get the date**: the
+repair closes each edge on the departure's `effective_at`, so a departure with
+no date is reported forever and nothing can clear it — ask the person for a
+last day before recording it. **Close and handoff are different**: membership
+and assignment end when the person leaves, but closing an `owns` or
+`responsible_for` edge leaves the thing unowned. Those need a successor named
+by a person. The list below is the `close` set, derived from
+`plugins/*/rye-plugin.json`.
+
 ```sql
 -- As team_member, not as an agent.
 SELECT set_config('app.current_role', 'team_member', false);
@@ -104,13 +113,15 @@ FROM (
       AND a.effective_at IS NOT NULL
 ) d
 WHERE (e.source_id = d.person_id OR e.target_id = d.person_id)
-  AND e.edge_type IN ('employs', 'reports_to', 'assigned_to',
-                      'member_of', 'project_member', 'affiliated_with')
+  AND e.edge_type IN ('employs', 'affiliated_with', 'reports_to', 'member_of',
+                      'assigned_to', 'project_member', 'sprint_member',
+                      'pipeline_member', 'territory_member',
+                      'primary_contact', 'secondary_contact')
   AND e.archived_at IS NULL
   AND e.effective_to IS NULL;
 ```
 
-**2. A digest asserts nothing its sources establish.** Record the claims the
+**2. A digest asserts nothing its sources do not establish.** Record the claims the
 messages support first, then distil over those claims. A detail that lives only
 in a thread does not belong in a digest claim.
 
@@ -139,9 +150,21 @@ SELECT record_distillation(
 
 **3. An effective date and an edge window tell one story.** A message dated
 September about a June handoff dates the claim June and the edge June. Put the
-claim on the edge (`subject_edge_id`) or name it in `attrs.edge_id`. Correcting
-a date already recorded takes `supersede_assertion()`; `record_assertion()`
-returns the incumbent unchanged when the claim, basis and confidence match.
+claim on the edge (`subject_edge_id`) or name it in `attrs.edge_id`. Correcting one already recorded depends on what the incumbent is now.
+
+- **Against an accepted assertion**, a date-only or attrs-only correction
+  through `record_assertion()` writes nothing: when claim, basis and confidence
+  match, it appends your evidence, returns the incumbent's id and inserts no
+  row. Use `supersede_assertion()`.
+- **Against your own suggestion** — what a demoting review policy leaves you —
+  `supersede_assertion()` raises `Only accepted assertions may be superseded;
+  reject candidates instead`, and `record_assertion()` with a different date
+  writes a *second* suggestion instead of replacing the first. Close the wrong
+  one with `reject_candidate()` and file the corrected one.
+
+An agent may call `reject_candidate()`: verified as `agent:<key>` on a full
+install, it closed the agent's own suggestion. Rejecting your own suggestion is
+housekeeping. Rejecting someone else's is a person's call.
 
 ```sql
 -- As an agent. Replaces the misdated claim with one dated off the edge.
@@ -174,6 +197,10 @@ average response time: put the period in
 `attrs.source_window = {"from": ..., "to": ...}` and make sure it covers the
 items cited as evidence. A number whose window is the whole export while the
 count was over one week is wrong in a way nobody can see later.
+
+The rule binds whatever the basis is. A count read off an export is `observed`
+and still needs its week. Basis says how Rye came to know a number, not
+whether it was computed over a period.
 
 ```sql
 -- As an agent. The replacement cites the window containing its source.

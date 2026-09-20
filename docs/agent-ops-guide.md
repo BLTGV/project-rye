@@ -483,6 +483,21 @@ changes nothing, and raises nothing. Record the departure, then name the open
 edges to a person who can close them. Under a review policy your departure
 write is a suggestion waiting in `review_queue`, so say that too.
 
+**Get the date.** The repair below closes each edge on the departure's
+`effective_at`. A departure recorded without one is reported by the check
+forever and no statement can clear it, because there is no date to close the
+edge on. When the source does not give a last day, ask the person for it before
+recording the departure, and say plainly that you cannot record the end of
+anything until you have it.
+
+**Close and handoff are different.** Membership and assignment end when the
+person leaves. Something they *own* does not: closing an `owns` or
+`responsible_for` edge leaves the thing unowned, which is a worse record than a
+stale one. Those need a successor named by a person first; then the new edge
+opens and the old one ends on the same date. The edge list below is the `close`
+set, derived from `plugins/*/rye-plugin.json`; the check reports both sets with
+a `disposition` column.
+
 ```sql
 -- As team_member. Ends every open employs or role edge on the date the
 -- current accepted departure gives.
@@ -499,8 +514,10 @@ FROM (
       AND a.effective_at IS NOT NULL
 ) d
 WHERE (e.source_id = d.person_id OR e.target_id = d.person_id)
-  AND e.edge_type IN ('employs', 'reports_to', 'assigned_to',
-                      'member_of', 'project_member', 'affiliated_with')
+  AND e.edge_type IN ('employs', 'affiliated_with', 'reports_to', 'member_of',
+                      'assigned_to', 'project_member', 'sprint_member',
+                      'pipeline_member', 'territory_member',
+                      'primary_contact', 'secondary_contact')
   AND e.archived_at IS NULL
   AND e.effective_to IS NULL;
 ```
@@ -553,11 +570,25 @@ when the subject has to be a node. A claim about a relationship that names no
 edge cannot be checked against anything. On the first write, read
 `effective_at` off the edge instead of guessing it.
 
-Correcting one already recorded takes `supersede_assertion()`.
-`record_assertion()` will not do it: when the claim, basis and confidence match
-the incumbent, it appends your evidence, returns the incumbent's id and writes
-no new row, whatever you pass for `p_effective_at` or `p_attrs`. A correction
-that changes only a date is invisible to it.
+Correcting one already recorded depends on what the incumbent is now. Both
+halves matter, and the second is the one under a review policy.
+
+- **Against an accepted assertion**, a date-only or attrs-only correction
+  through `record_assertion()` writes nothing: when claim, basis and confidence
+  match, it appends your evidence, returns the incumbent's id and inserts no
+  row, whatever you pass for `p_effective_at` or `p_attrs`. Use
+  `supersede_assertion()`.
+- **Against your own suggestion** — what a demoting review policy leaves you —
+  `supersede_assertion()` raises `Only accepted assertions may be superseded;
+  reject candidates instead`. `record_assertion()` with a different date does
+  not replace it either: it writes a *second* suggestion and returns a new id,
+  so both dates then sit in `review_queue`. Close the wrong one with
+  `reject_candidate()` and file the corrected one.
+
+An agent may call `reject_candidate()`. Verified as `agent:<key>` on a full
+install: it closed the agent's own suggestion. Rejecting your own suggestion is
+housekeeping, not settling. Rejecting someone else's is a person's call — say
+what you closed and why, and leave a claim you did not write alone.
 
 ```sql
 -- As an agent. Replaces the misdated claim with one dated off the edge.
@@ -599,9 +630,13 @@ the number or tell whether it is stale.
 Write the number as a number. A measurement rendered as text is invisible to
 the check.
 
-Adding a window to a number already recorded takes `supersede_assertion()`, for
-the same reason a date correction does: `record_assertion()` matches on claim,
-basis and confidence and ignores `p_attrs`.
+The rule binds whatever the basis is. A count read off an export is `observed`
+and still needs its week — basis says how Rye came to know a number, not
+whether it was computed over a period.
+
+Adding a window to a number already recorded follows the same two cases as a
+date correction above: `supersede_assertion()` against an accepted assertion,
+`reject_candidate()` plus a new suggestion against your own pending one.
 
 ```sql
 -- As an agent. The replacement cites the window containing its source.

@@ -32,10 +32,30 @@ FROM (
       AND a.effective_at IS NOT NULL
 ) d
 WHERE (e.source_id = d.person_id OR e.target_id = d.person_id)
-  AND e.edge_type IN ('employs', 'reports_to', 'assigned_to',
-                      'member_of', 'project_member', 'affiliated_with')
+  AND e.edge_type IN ('employs', 'affiliated_with', 'reports_to', 'member_of',
+                      'assigned_to', 'project_member', 'sprint_member',
+                      'pipeline_member', 'territory_member',
+                      'primary_contact', 'secondary_contact')
   AND e.archived_at IS NULL
   AND e.effective_to IS NULL;
+
+-- ---------------------------------------------------------------------------
+-- Rule 1, handoff disposition. `owns` and `responsible_for` are not on the
+-- list above. Closing one leaves the thing unowned, which is a worse record
+-- than a stale one. A person names the successor; then the old edge ends on
+-- the same date the new one opens.
+-- ---------------------------------------------------------------------------
+INSERT INTO edges (edge_type, source_id, target_id, properties, effective_from)
+SELECT e.edge_type, 'a0000000-0000-4000-8000-000000000003', e.target_id,
+       e.properties, '2026-08-31T00:00:00Z'
+FROM edges e
+WHERE e.id = 'b0000000-0000-4000-8000-000000000005'
+  AND e.effective_to IS NULL;
+
+UPDATE edges
+SET effective_to = '2026-08-31T00:00:00Z'
+WHERE id = 'b0000000-0000-4000-8000-000000000005'
+  AND effective_to IS NULL;
 
 -- ---------------------------------------------------------------------------
 -- Rule 2 and rule 4. As an agent. Every claim key is established by one of the
@@ -113,6 +133,32 @@ SELECT supersede_assertion(
 )
 FROM assertions a
 WHERE a.assertion_type = 'throughput_estimate'
+  AND a.superseded_at IS NULL;
+
+-- ---------------------------------------------------------------------------
+-- Rule 4, the observed count. A number read off a week's export still needs
+-- the week. The window ends the 9th, not the 8th, because it has to contain
+-- the export event at 2026-09-08T10:00Z that the claim cites.
+-- ---------------------------------------------------------------------------
+SELECT supersede_assertion(
+    p_old_assertion_id := a.id,
+    p_new_assertion_type := a.assertion_type,
+    p_new_subject_node_id := a.subject_node_id,
+    p_new_subject_edge_id := NULL,
+    p_new_claim := a.claim,
+    p_new_assertion_key := a.assertion_key,
+    p_new_effective_at := a.effective_at,
+    p_new_basis := a.basis,
+    p_new_evidence := ARRAY[jsonb_build_object(
+        'kind', 'source',
+        'event_id', (SELECT id FROM events
+                     WHERE summary LIKE 'Line 3 channel export%' LIMIT 1)
+    )],
+    p_new_attrs := '{"source_window":{"from":"2026-09-01T00:00:00Z",
+                                      "to":"2026-09-09T00:00:00Z"}}'::jsonb
+)
+FROM assertions a
+WHERE a.assertion_type = 'message_volume'
   AND a.superseded_at IS NULL;
 
 SELECT 'fixture repaired' AS status;

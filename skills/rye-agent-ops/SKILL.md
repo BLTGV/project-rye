@@ -683,6 +683,15 @@ reports `UPDATE 0`, changes nothing, and raises nothing. Record the departure,
 then name the open edges to a person who can close them. Under a review policy
 your departure write is a suggestion waiting for a person, so say that too.
 
+Two things decide whether a repair is possible at all. **Get the date**: the
+repair closes each edge on the departure's `effective_at`, so a departure with
+no date is reported forever and nothing can clear it — ask the person for a
+last day before recording it. **Close and handoff are different**: membership
+and assignment end when the person leaves, but closing an `owns` or
+`responsible_for` edge leaves the thing unowned. Those need a successor named
+by a person. The list below is the `close` set, derived from
+`plugins/*/rye-plugin.json`.
+
 ```sql
 -- As team_member, not as an agent.
 SELECT set_config('app.current_role', 'team_member', false);
@@ -698,8 +707,10 @@ FROM (
       AND a.effective_at IS NOT NULL
 ) d
 WHERE (e.source_id = d.person_id OR e.target_id = d.person_id)
-  AND e.edge_type IN ('employs', 'reports_to', 'assigned_to',
-                      'member_of', 'project_member', 'affiliated_with')
+  AND e.edge_type IN ('employs', 'affiliated_with', 'reports_to', 'member_of',
+                      'assigned_to', 'project_member', 'sprint_member',
+                      'pipeline_member', 'territory_member',
+                      'primary_contact', 'secondary_contact')
   AND e.archived_at IS NULL
   AND e.effective_to IS NULL;
 ```
@@ -746,10 +757,21 @@ about. Point it at the edge: `subject_edge_id`, or `attrs.edge_id` when the
 subject has to be a node. A relationship claim naming no edge checks against
 nothing.
 
-Correcting one already recorded takes `supersede_assertion()`.
-`record_assertion()` will not do it: when claim, basis and confidence match the
-incumbent it appends your evidence, returns the incumbent's id and writes no
-row, whatever you pass for `p_effective_at` or `p_attrs`.
+Correcting one already recorded depends on what the incumbent is now.
+
+- **Against an accepted assertion**, a date-only or attrs-only correction
+  through `record_assertion()` writes nothing: when claim, basis and confidence
+  match, it appends your evidence, returns the incumbent's id and inserts no
+  row. Use `supersede_assertion()`.
+- **Against your own suggestion** — what a demoting review policy leaves you —
+  `supersede_assertion()` raises `Only accepted assertions may be superseded;
+  reject candidates instead`, and `record_assertion()` with a different date
+  writes a *second* suggestion instead of replacing the first. Close the wrong
+  one with `reject_candidate()` and file the corrected one.
+
+An agent may call `reject_candidate()`: verified as `agent:<key>` on a full
+install, it closed the agent's own suggestion. Rejecting your own suggestion is
+housekeeping. Rejecting someone else's is a person's call.
 
 ```sql
 -- As an agent. Replaces the misdated claim with one dated off the edge.
@@ -786,6 +808,10 @@ A count, a rate, a peak, an average: the period it was computed over goes in
 `attrs.source_window` as `{"from": ..., "to": ...}`, ISO 8601, and that window
 contains the sources cited as evidence. Write the number as a number; a
 measurement rendered as text is invisible to the check.
+
+The rule binds whatever the basis is. A count read off an export is `observed`
+and still needs its week. Basis says how Rye came to know a number, not
+whether it was computed over a period.
 
 ```sql
 -- As an agent. The replacement cites the window containing its source.

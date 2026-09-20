@@ -171,7 +171,7 @@ A spreadsheet carries the same defects a conversation does: a termination date
 column, a start/end date column, a computed column. Three of the four intake
 rules bind a tabular run. The fourth does not: this skill writes source claims
 and never calls `record_distillation()`, so "a digest asserts nothing its
-sources establish" has nothing here to apply to. If a consuming skill distils
+sources do not establish" has nothing here to apply to. If a consuming skill distils
 over what a run wrote, that rule binds the consuming skill.
 
 The reads that find breakage after a run are in
@@ -185,6 +185,15 @@ termination date produces an `employment_status` claim. The `employs` and role
 edges have to end on the same date, or the graph contradicts the column that
 was just imported. The commit role can do this; an agent role cannot touch
 `edges` at all.
+
+Two things decide whether a repair is possible at all. **Get the date**: the
+repair closes each edge on the departure's `effective_at`, so a departure with
+no date is reported forever and nothing can clear it — ask the person for a
+last day before recording it. **Close and handoff are different**: membership
+and assignment end when the person leaves, but closing an `owns` or
+`responsible_for` edge leaves the thing unowned. Those need a successor named
+by a person. The list below is the `close` set, derived from
+`plugins/*/rye-plugin.json`.
 
 ```sql
 -- As the role the run was given. team_member is enough.
@@ -201,8 +210,10 @@ FROM (
       AND a.effective_at IS NOT NULL
 ) d
 WHERE (e.source_id = d.person_id OR e.target_id = d.person_id)
-  AND e.edge_type IN ('employs', 'reports_to', 'assigned_to',
-                      'member_of', 'project_member', 'affiliated_with')
+  AND e.edge_type IN ('employs', 'affiliated_with', 'reports_to', 'member_of',
+                      'assigned_to', 'project_member', 'sprint_member',
+                      'pipeline_member', 'territory_member',
+                      'primary_contact', 'secondary_contact')
   AND e.archived_at IS NULL
   AND e.effective_to IS NULL;
 ```
@@ -210,10 +221,23 @@ WHERE (e.source_id = d.person_id OR e.target_id = d.person_id)
 **A row's effective date and the edge window tell one story.** When a row dates
 a relationship, the claim's `effective_at` and the edge's `effective_from` come
 from the same column. Point the claim at the edge with `subject_edge_id` or
-`attrs.edge_id`. Rerunning a corrected file does not fix a date on its own:
-`record_assertion()` matches on claim, basis and confidence, returns the
-incumbent's id and writes nothing when only the date changed. Use
-`supersede_assertion()`.
+`attrs.edge_id`. Rerunning a corrected file does not fix a date on its own.
+
+Correcting one already recorded depends on what the incumbent is now.
+
+- **Against an accepted assertion**, a date-only or attrs-only correction
+  through `record_assertion()` writes nothing: when claim, basis and confidence
+  match, it appends your evidence, returns the incumbent's id and inserts no
+  row. Use `supersede_assertion()`.
+- **Against your own suggestion** — what a demoting review policy leaves you —
+  `supersede_assertion()` raises `Only accepted assertions may be superseded;
+  reject candidates instead`, and `record_assertion()` with a different date
+  writes a *second* suggestion instead of replacing the first. Close the wrong
+  one with `reject_candidate()` and file the corrected one.
+
+An agent may call `reject_candidate()`: verified as `agent:<key>` on a full
+install, it closed the agent's own suggestion. Rejecting your own suggestion is
+housekeeping. Rejecting someone else's is a person's call.
 
 ```sql
 SELECT set_config('app.current_role', 'team_member', false);
@@ -245,6 +269,10 @@ an average over rows is a derived number. Put the period the rows cover in
 `attrs.source_window = {"from": ..., "to": ...}`, ISO 8601, covering the
 evidence the claim cites. A sum over a file whose rows span March to June and
 whose window says June cannot be recomputed by anyone.
+
+The rule binds whatever the basis is. A count read off an export is `observed`
+and still needs its week. Basis says how Rye came to know a number, not
+whether it was computed over a period.
 
 ```sql
 SELECT set_config('app.current_role', 'team_member', false);
