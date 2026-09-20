@@ -141,6 +141,8 @@ Controls which roles can read, write, or settle specific assertion types. An ass
 
 A non-admin's accepted write of a gated type is **demoted, not refused**, by `record_assertion()`: it lands as a candidate carrying `attrs.settle_gate = {"pending": true, "requested_status": "accepted", "allowed_roles": [...]}` and appears in `review_queue` for an admin to accept or reject, so nothing the person said is lost. Every other route to an accepted gated row raises: a direct `INSERT`, any `UPDATE` that moves a row to `accepted` (including `accept_assertion()` and a raw `UPDATE` by a caller who sets `app.write_path` itself), `supersede_assertion()`, and `record_distillation()`. An agent capability grant (`rye.authoritative.promote`) does not open the gate. Gating a further type is an `INSERT`, not a migration.
 
+**No alias points out of a gated type.** A `registry_entry` whose `assertion_key` is `type_alias:assertion_type:<T>`, where `T` has a `settle` row, is refused for every caller at every status — candidate included, admin included (migration `0028`). `record_assertion()` canonicalizes before it inserts and the gate compares the stored spelling, so such an alias would route every later write under the gated name to a type the gate does not read. An alias *into* a gated type is unaffected: it narrows, because the write then canonicalizes to the gated spelling and is demoted like any other configuration write. The rule is data like the rest of the gate — add a `settle` row for a type and aliases out of it are refused with no further migration.
+
 **Ending an accepted entry is also settling it.** A caller who may not settle a gated type may not change an accepted row of it at all — not `superseded_at`, not `effective_to`, not `status`, not `claim`, not `attrs` — by raw `UPDATE` or through any helper. Leaving supersession open was an escalation, not just a loss: ending a scope's accepted `strict` `review_policy` dropped the scope to `open`, and the next ordinary write landed accepted instead of waiting for review. Candidates of a gated type stay ordinary suggestions, so outcome labels and classification propagation on them are unaffected, and an admin keeps every lifecycle operation. No role deletes an assertion of any type: `assertion_delete_policy` is `USING (false)`.
 
 **Write convention:** A migration or script that seeds configuration must `SET app.current_role = 'admin'` first. An unset role is not an admin.
@@ -1081,6 +1083,9 @@ would either make an assertion of a `settle`-gated type accepted, or change a
 row of a gated type that is already accepted. Candidates are untouched, so
 outcome labels and classification propagation on them still work for every
 role. `DELETE` needs no branch: `assertion_delete_policy` is `USING (false)`.
+It also refuses, for every caller and at every status, a `registry_entry` whose
+`assertion_key` is `type_alias:assertion_type:<gated type>` (migration `0028`),
+because an alias out of a gated name would route later writes past the gate.
 
 **Why it exists:** `record_assertion()` demotes a non-admin's configuration
 write to a candidate, so every remaining route to an accepted gated row is a
