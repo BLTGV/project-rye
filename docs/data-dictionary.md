@@ -106,9 +106,13 @@ Maps graph nodes to records in domain tables.
 
 **Why it exists:** Rye is an overlay. When a graph node represents a row in an existing table (a customer, a product, a ticket), this table records the mapping. This enables joins back to the source table and drives CDC — only rows with a mapping produce change events.
 
-**Key columns:** `node_id`, `source_schema`, `source_table`, `source_id`, `synced_at`. Primary key: `(node_id, source_schema, source_table)`.
+**Key columns:** `node_id`, `source_schema`, `source_table`, `source_id`, `synced_at`. Primary key: `(source_schema, source_table, source_id)` since `0031` — the key is the source row. One source row names one node; one node may hold many source rows, which is what a merge leaves behind. `idx_nsm_node` serves the reverse lookup.
+
+Before `0031` the key was `(node_id, source_schema, source_table)`, one mapping per source table per node. `merge_nodes()` therefore could not re-point the duplicate's mapping when the canonical already mapped a row of the same table — the ordinary dedup case — and deleted it instead. The source row lost its graph identity with no error, and the next `link_record()` for it minted a fresh, empty node: the merged duplicate came back without its edges, assertions, or history. A merge now re-points every mapping and deletes none.
 
 **Write convention:** Use `link_record()` instead of inserting directly — it creates both the node and the source map entry.
+
+**Repair:** `rye_restore_merged_source_maps()` puts back mappings that pre-`0031` merges dropped.
 
 #### `node_merges` — Deduplication Tracking
 
@@ -468,7 +472,7 @@ link_record(p_source_schema, p_source_table, p_source_id, p_node_type, p_label, 
 
 Connects a domain table row to the graph. Creates a node (with `external_id` / `external_source`) and a `node_source_map` entry. Each distinct `source_id` creates a new node. Calling again with the same `(schema, table, source_id)` updates the existing node's properties.
 
-Lookup order: checks `node_source_map` first (canonical path), then falls back to `external_id`/`external_source` on the nodes table. A unique index on `node_source_map(source_schema, source_table, source_id)` prevents duplicate mappings.
+Lookup order: checks `node_source_map` first (canonical path), then falls back to `external_id`/`external_source` on the nodes table. `node_source_map`'s primary key is `(source_schema, source_table, source_id)`, so a source row names one node. After a merge the mapping points at the canonical node, and `link_record()` for that row returns it and creates nothing.
 
 **Why it exists:** The two-step pattern of `INSERT INTO nodes` + `INSERT INTO node_source_map` is error-prone and repetitive. This function makes domain integration a single idempotent call.
 
@@ -1050,6 +1054,18 @@ Merges a duplicate node into a canonical node. Records a `node_merge` event (bef
 
 **Who may call it.** A merge is irreversible, it moves one subject's history onto another, and it crosses review policies, so it is for people. Four refusals, all `42501` and all raised **before the first `FOR UPDATE`**: a role `rye_role_may_write()` is false for (`merge_nodes requires a role that may write`), an agent-shaped role (`merge_nodes is not available to an agent`; record the duplicate and ask a person), `system:cdc` (`merge_nodes is not available to system:cdc, which only records domain changes`), and a non-admin merging a duplicate that is an `onboarding_scope` node or an endpoint of a live governance edge (`Merging a node a scope governs requires a Rye admin`). The ordering matters: `SELECT ... FOR UPDATE` applies the UPDATE policy as a silent filter, so a gate placed after the lock reported `Duplicate node % not found` about a node the caller could see. After `0026` that message means the node is absent or invisible and nothing else.
 
+**Source mappings travel; none is deleted.** Since `0031` every `node_source_map` row the duplicate holds is re-pointed at the canonical node. The key is `(source_schema, source_table, source_id)`, which does not contain `node_id`, so a re-point never collides and the canonical node ends up holding one mapping per merged source row. `link_record()` for any of those rows returns the canonical node, and change capture attaches that row's later events to it.
+
+#### `rye_restore_merged_source_maps()`
+
+```
+rye_restore_merged_source_maps() → jsonb
+```
+
+Puts back source mappings that a pre-`0031` merge deleted, reading `node_merges` and the archived duplicate's `external_id` / `external_source`. `node_merges` is treated as untrusted — its insert policy asks only that the role may write, so a row there may be forged. A row is followed only when its duplicate node is archived; where several rows name one duplicate the earliest by `merged_at` then `id` wins, so a later forged row cannot redirect a real merge; a cycle stops the walk and the duplicate is reported `unresolved`. Admin only, `SECURITY INVOKER`, re-runnable, and a no-op once every mapping is correct — which is every instance installed from `0031` onward. Migration `0031` runs it once.
+
+Returns counts. `restored`: a mapping was put back on the merge's terminal canonical node. `already_mapped`: the source row already maps there. `occupied`: the source row maps to some other node — the resurrected duplicate the old key minted on the next lazy link, which may have accumulated its own history, so nothing is re-pointed silently; the remedy is `merge_nodes(mapped_node, canonical)`. `ambiguous`: two archived duplicates claim the same source row and were merged into different canonicals. `unresolved`: `external_source` matched no surviving `(source_schema, source_table)` pair, or matched several. The last three are left alone and reported.
+
 #### `agent_node_summary()`
 
 ```
@@ -1061,6 +1077,105 @@ first, uncovered raw assertions, and recent activity. Assertions come only from
 `current_valid_assertions`, include basis labels, and share the item budget.
 
 **Why it exists:** Agents need context but have limited context windows. Dumping a node's full history overwhelms the model. This function returns a ranked, bounded summary that fits typical agent consumption.
+
+#### `find_nodes()` / `find_nodes_batch()`
+
+```
+find_nodes(p_query, p_node_types, p_limit, p_threshold, p_scope)
+  → (node_id, node_type, label, score, match_reason)
+
+find_nodes_batch(p_queries[], p_node_types, p_limit_per_query, p_threshold, p_scope)
+  → (query, node_id, node_type, label, score, match_reason)
+```
+
+Ranked entry-point lookup. Matches exact external identity, exact label, then
+trigram similarity and literal substring containment, returning the best
+reason per node. Results carry `score` and `match_reason` so the caller can
+judge rather than trust an opaque rank.
+
+The containment tier is literal, not a pattern language: `%`, `_`, and `\` in
+the query match themselves (`rye_like_literal()` escapes them and the `ILIKE`
+carries an explicit `ESCAPE '\'`). A one-character query is a one-character
+query, not a wildcard.
+
+**Why it exists:** these are primitives for an agent's search loop, not a
+search engine. The agent owns semantic matching — it knows the domain
+vocabulary, and it can reformulate ("the fence company" → "Meridian Fence"),
+decompose, or narrow by type. So the batch form takes many query strings in
+one round trip, and `p_threshold` is a per-call argument with the registry
+value as its default rather than as fixed policy.
+
+Widening the threshold does not solve paraphrase; reformulating does. The
+threshold floors at the `pg_trgm.similarity_threshold` GUC (0.3 by default),
+since the `%` operator is what keeps the GIN index usable.
+
+Property values are deliberately not searched. `field_classifications` redacts
+individual property paths, so a match on a raw property would let a caller
+confirm the contents of a field it cannot read.
+
+#### `find_paths()`
+
+```
+find_paths(p_from_node_id, p_to_node_id, p_max_depth, p_edge_types,
+           p_semantics, p_as_of, p_direction, p_max_paths, p_scope)
+  → (node_path, edge_path, edge_type_path, depth, path_weight)
+```
+
+Bounded multi-hop traversal. Depth is capped by registry key `max_path_depth`
+(core default 3) — a caller may request less, never more. Edges participate
+only while live at `p_as_of`, so a past timestamp reconstructs historical
+connectivity. Paths never revisit a node.
+
+`p_direction` defaults to `out` because an edge asserts something in its
+direction. Use `any` for undirected connectivity questions, never for causal
+reasoning. `p_semantics` filters by `edge_semantics()`.
+
+Both are closed sets, and an unrecognized value raises `22023` naming the
+accepted ones — `out`, `in`, `any` for the direction; `causal`, `structural`,
+`associative`, `temporal` for the semantics. An unknown value must never widen
+the answer, and a misspelled direction used to fall through to the undirected
+walk. `neighborhood()` refuses the same two arguments the same way, with `any`
+as its direction default.
+
+#### `neighborhood()`
+
+```
+neighborhood(p_node_id, p_max_depth, p_edge_types, p_semantics, p_as_of,
+             p_direction, p_max_nodes, p_max_assertions_per_node, p_scope) → jsonb
+```
+
+Bounded subgraph with each node's current accepted assertions attached, under
+explicit node and per-node assertion budgets. Node properties are redacted per
+role. Knowledge comes from `current_valid_assertions`, so a candidate never
+appears — not one written as a candidate, not one a review policy demoted, and
+not one `reject_candidate()` closed, which leaves `status = 'candidate'` with
+`superseded_at` set. A superseded incumbent is excluded for the same reason.
+
+`truncated` reports that the node budget was reached. It is not a visibility
+signal — nodes pruned by RLS are absent and uncounted.
+
+#### `edge_semantics()`
+
+```
+edge_semantics(p_edge_type, p_scope) → text
+```
+
+Resolves `edge_semantics:<edge_type>` to `causal`, `structural`,
+`associative`, or `temporal`. Unregistered types resolve to `associative`, so
+an unclassified vocabulary can never be mistaken for causation. It reads the
+registry under the caller's RLS, so a registry entry a caller cannot see reads
+as `associative` for that caller: blindness narrows a causal traversal, never
+widens it.
+
+**Why it exists:** `caused_by` is a claim; `mentioned_alongside` is not. This
+makes the distinction a filter predicate instead of a prompt instruction.
+
+**Read-only.** All five of these are `STABLE` and `SECURITY INVOKER`, and none
+writes — no event, no salience, no audit row. A caller that wants a read to
+count calls `log_agent_query()` itself. That is what lets a `viewer` and a
+session that sets no role call them at all: after migration 0026 those two
+sessions may not write the core tables, so a function that logged would refuse
+for them.
 
 #### `log_agent_query()`
 

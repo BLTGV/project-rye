@@ -45,6 +45,17 @@ Good outputs include:
 | Record who participated in something | Activity event |
 | Handle contradictory information | Candidate review pattern |
 | Load CSV/XLSX with lineage | Tabular intake boundary |
+| Audit what intake already wrote | [references/intake-consistency-checks.md](references/intake-consistency-checks.md) |
+
+## Intake Consistency
+
+Four read-only checks in
+[references/intake-consistency-checks.md](references/intake-consistency-checks.md)
+find the four intake defects: a departure with the employment edge left open, a
+digest claiming more than its sources, a claim whose effective date fights the
+edge window, and a derived number with no source window. Each one says what it
+decides and what it cannot. Run them when designing a pattern that writes any
+of those shapes, and hand them to the gardener skill for a standing audit.
 
 ## Guardrails
 

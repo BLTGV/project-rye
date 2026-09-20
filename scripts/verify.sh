@@ -482,6 +482,41 @@ BEGIN
     RAISE EXCEPTION 'trg_crm_code_counters_gate or trg_node_merges_gate is missing';
   END IF;
 
+  -- Source-map row identity (0031). The graph points at domain rows through
+  -- node_source_map, so the key has to be the source row: keyed by node_id a
+  -- merge could not re-point the duplicate's mapping and deleted it, and the
+  -- source row lost its graph identity. One node holding several rows of one
+  -- table is the shape a merge leaves behind.
+  IF (
+      SELECT string_agg(a.attname, ',' ORDER BY k.ord)
+      FROM pg_constraint c
+      JOIN pg_class rel ON rel.oid = c.conrelid
+      JOIN pg_namespace n ON n.oid = rel.relnamespace
+      JOIN LATERAL unnest(c.conkey) WITH ORDINALITY AS k(attnum, ord) ON true
+      JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum
+      WHERE n.nspname = v_schema AND rel.relname = 'node_source_map' AND c.contype = 'p'
+  ) IS DISTINCT FROM 'source_schema,source_table,source_id' THEN
+    RAISE EXCEPTION
+      'node_source_map is not keyed by (source_schema, source_table, source_id)';
+  END IF;
+
+  IF NOT EXISTS (
+      SELECT 1
+      FROM pg_index i
+      JOIN pg_class idx ON idx.oid = i.indexrelid
+      JOIN pg_class rel ON rel.oid = i.indrelid
+      JOIN pg_namespace n ON n.oid = rel.relnamespace
+      WHERE n.nspname = v_schema
+        AND rel.relname = 'node_source_map'
+        AND idx.relname = 'idx_nsm_node'
+  ) THEN
+    RAISE EXCEPTION 'idx_nsm_node is missing: node_source_map.node_id has no index';
+  END IF;
+
+  IF to_regprocedure('rye.rye_restore_merged_source_maps()') IS NULL THEN
+    RAISE EXCEPTION 'rye_restore_merged_source_maps function missing';
+  END IF;
+
   -- Who may write: the role list is the write list, and the governance
   -- structure is admin-only. One column, one function, and one conjunct on
   -- every write policy of the seven core tables.
@@ -871,6 +906,32 @@ BEGIN
         )
   ) OR to_regclass('rye.active_disputes') IS NOT NULL THEN
     RAISE EXCEPTION 'removed v1 dispute or fact-promotion surfaces are still installed';
+  END IF;
+
+  -- Graph traversal and entry points (0032). The visibility contract
+  -- (design/proposals/rls-visibility-contract.md, D1) is a hard constraint,
+  -- so it is checked here as well as in the suites: these five read the
+  -- graph as the caller, and a definer or volatile one would be a topology
+  -- disclosure or a write.
+  IF to_regprocedure('rye.edge_semantics(text,uuid)') IS NULL
+     OR to_regprocedure('rye.find_nodes(text,text[],integer,numeric,uuid)') IS NULL
+     OR to_regprocedure('rye.find_nodes_batch(text[],text[],integer,numeric,uuid)') IS NULL
+     OR to_regprocedure('rye.find_paths(uuid,uuid,integer,text[],text[],timestamptz,text,integer,uuid)') IS NULL
+     OR to_regprocedure('rye.neighborhood(uuid,integer,text[],text[],timestamptz,text,integer,integer,uuid)') IS NULL
+  THEN
+    RAISE EXCEPTION 'graph traversal functions are missing';
+  END IF;
+
+  IF EXISTS (
+      SELECT 1
+      FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = v_schema
+        AND p.proname IN ('find_nodes', 'find_nodes_batch', 'find_paths',
+                          'neighborhood', 'edge_semantics')
+        AND (p.prosecdef OR p.provolatile = 'v')
+  ) THEN
+    RAISE EXCEPTION 'a traversal function is SECURITY DEFINER or VOLATILE; it must be neither';
   END IF;
 END
 $$;

@@ -525,6 +525,45 @@ not write, names who can merge, and refuses a non-admin merging a node the
 governance structure touches. An agent records the duplicate and tells a
 person.
 
+## Edge Semantics Convention
+
+Store the semantic class of an edge type as a `registry_entry` assertion with
+key `edge_semantics:<edge_type>` and one of these strings in `claim.value`:
+
+| Value | Meaning |
+|---|---|
+| `causal` | One thing produced, blocked, or changed another |
+| `structural` | Composition, membership, ownership, assignment |
+| `associative` | Mention, reference, topical adjacency |
+| `temporal` | Ordering without a claim of cause |
+
+Unregistered edge types resolve to `associative`. An unclassified vocabulary
+is therefore never mistaken for causation, and `find_paths(p_semantics =>
+ARRAY['causal'])` cannot walk a `references` edge to reach a conclusion. The
+same holds for a caller who cannot read the registry entry: `edge_semantics()`
+is `SECURITY INVOKER`, so blindness narrows a causal traversal rather than
+widening it.
+
+`registry_entry` is settle-gated configuration, so only an admin can make one
+of these accepted. A proposal from any other role lands as a candidate in
+`review_queue`.
+
+Core assignments: `blocks`, `triggered_by`, `affects`, and `impacted` are
+causal; `employs`, `assigned_to`, `project_member`, `depends_on`, `contains`,
+and `owns` are structural; `regarding`, `references`, `applied_to`, `targets`,
+and `adjacent_to` are associative. Plugins declare semantics for the edge types
+they contribute.
+
+## Retrieval Registry Keys
+
+| Key | Default | Effect |
+|---|---|---|
+| `max_path_depth` | `3` | Hard ceiling on traversal depth. Callers may request less, never more. |
+| `node_search_threshold` | `0.35` | Minimum trigram similarity for a `find_nodes` fuzzy match. Floors at the `pg_trgm.similarity_threshold` GUC, since the `%` operator is what keeps the GIN index usable. |
+
+Both follow the usual scope, plugin, then core precedence through
+`registry_value()`.
+
 ## Outcome Label Convention
 
 Reputation uses explicit outcomes, not ordinary supersession:
@@ -603,6 +642,32 @@ When source data arrives as CSV or XLSX files instead of live domain tables:
 The reference implementation for this convention lives in:
 
 - `skills/rye-tabular-intake/SKILL.md`
+
+## Intake Consistency Convention
+
+Four rules for an agent reading source material into the graph, with executable
+examples in `docs/agent-ops-guide.md` under "Intake consistency" and read-only
+checks in `skills/rye-pattern-library/references/intake-consistency-checks.md`.
+
+- Recording `employment_status` with `status = 'departed'` ends that person's
+  `employs` and role edges on the same date. Edges end with `effective_to`;
+  never delete one. An agent-shaped session cannot do this — its `UPDATE` on
+  `edges` reports `UPDATE 0` — so it names the open edges to a person.
+- Every key in a digest claim is carried by a source assertion the digest
+  cites.
+- A claim about a relationship takes its `effective_at` from the edge it is
+  about, and names that edge as `subject_edge_id` or in `attrs.edge_id`.
+- A derived numeric claim carries
+  `attrs.source_window = {"from": <iso8601>, "to": <iso8601>}`, the period it
+  was computed over, and that window contains the sources it cites as
+  evidence. Store a measurement as a JSON number, not as text.
+
+The reference implementations live in:
+
+- `skills/rye-agent-ops/SKILL.md`
+- `skills/rye-source-context-intake/SKILL.md`
+- `skills/rye-tabular-intake/SKILL.md`
+- `skills/rye-gardener/SKILL.md`
 
 ## Event Convention
 
