@@ -202,7 +202,7 @@ Maps graph nodes to source records in domain tables.
 | `source_id_type` | `text DEFAULT 'int'` | Type hint for casting |
 | `synced_at` | `timestamptz DEFAULT now()` | Last sync |
 
-Primary key: `(node_id, source_schema, source_table)`.
+Primary key: `(source_schema, source_table, source_id)` since migration `0031`. The key is the source row: one source row names one node, and one node may hold many source rows, which is what `merge_nodes()` leaves behind. `idx_nsm_node` indexes `node_id` for the reverse lookup.
 
 ### 3.10 `node_merges` — Deduplication Tracking
 
@@ -497,11 +497,10 @@ CREATE TABLE node_source_map (
     source_id       text NOT NULL,
     source_id_type  text DEFAULT 'int',
     synced_at       timestamptz DEFAULT now(),
-    PRIMARY KEY (node_id, source_schema, source_table)
+    PRIMARY KEY (source_schema, source_table, source_id)
 );
 
-CREATE INDEX idx_nsm_source ON node_source_map (source_schema, source_table, source_id);
-CREATE UNIQUE INDEX idx_nsm_source_unique ON node_source_map (source_schema, source_table, source_id);
+CREATE INDEX idx_nsm_node ON node_source_map (node_id);
 
 
 -- ============================================================================
