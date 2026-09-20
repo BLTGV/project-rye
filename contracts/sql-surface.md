@@ -511,7 +511,11 @@ or close it in the next transaction. So at commit, when the ended row was
 and key must still carry a readable assertion that is `accepted` and not
 superseded. The named replacement itself need not be the one: two writes to the
 same key in one transaction leave a chain, and what matters is that the chain
-ends somewhere current.
+ends on a row that is `accepted` and not superseded. The test does not read the
+window: that row may be effective only in the past or only in the future, so
+`current_valid_assertions` can be empty for the key afterwards. That is what
+`supersede_assertion()` with a future effective date already does, and a rule
+promising a current value would have to refuse the helper.
 
 **A merge is the one shape that moves the value to another subject.** When the
 replacement is on a **different** subject, it must be readable, of the same
