@@ -898,7 +898,11 @@ export async function fetchActiveDisputes(sql: Sql, limit = 50) {
 
 // Evidence bundle for one assertion, resolved through assertion_support and
 // decorated with witness/event labels the UI can render without extra lookups.
-const ASSERTION_EVIDENCE_SQL = `COALESCE((
+// The queue's own evidence_count/witness_count columns are a summary; this is
+// the drawer, and contracts/sql-surface.md says a client that wants event
+// summaries and witness labels still joins assertion_support.
+function assertionEvidenceSql(idExpr: string): string {
+  return `COALESCE((
   SELECT json_agg(json_build_object(
     'evidence_id', ev->>'evidence_id',
     'kind', ev->>'kind',
@@ -920,43 +924,96 @@ const ASSERTION_EVIDENCE_SQL = `COALESCE((
   LEFT JOIN rye.events evt ON evt.id = (ev->>'event_id')::uuid
   LEFT JOIN rye.assertions src ON src.id = (ev->>'source_assertion_id')::uuid
   LEFT JOIN rye.nodes witness ON witness.id = (ev->>'witness_node_id')::uuid
-  WHERE support.assertion_id = a.id
+  WHERE support.assertion_id = ${idExpr}
 ), '[]'::json)`;
+}
+
+const ASSERTION_EVIDENCE_SQL = assertionEvidenceSql("a.id");
+
+export type AssertionReviewState = "waiting" | "rejected";
 
 export interface AssertionReviewQueueOptions {
   assertionType?: string | null;
   q?: string | null;
   competingOnly?: boolean;
+  /**
+   * `waiting` (the default) lists tuples from review_queue. `rejected` lists
+   * rejected_candidates rows. Same route, same capability, never mixed:
+   * contracts/admin-api.md, "Review fields and counts".
+   */
+  state?: AssertionReviewState | null;
   limit?: number;
   offset?: number;
 }
 
+const EMPTY_REVIEW_QUEUE = {
+  groups: [],
+  types: [],
+  stats: { tuples: 0, competing_tuples: 0, candidates: 0, total: 0, filtered: 0 },
+  state: "waiting" as AssertionReviewState,
+  rejected: [],
+};
+
+// The counts that describe the live queue itself. They are the screen's header
+// metrics and mean the same thing in both states; `total` and `filtered` below
+// describe the rows the request actually returns.
+const REVIEW_QUEUE_HEADER_STATS_SQL = `'tuples', (SELECT COUNT(*)::int FROM rye.review_queue),
+           'competing_tuples', (SELECT COUNT(*)::int FROM rye.competing_candidates),
+           'candidates', (SELECT COALESCE(SUM(candidate_count), 0)::int FROM rye.review_queue)`;
+
 // review_queue groups every live candidate by (subject, type, key). Tuples with
 // more than one candidate are competing groups and are surfaced together.
+//
+// Migration 0035 moved five compensations out of this file and into the views
+// (docs/decisions/0012-review-surfaces-carry-what-the-screen-needs.md, H):
+// the LEFT JOIN to nodes for the subject label, the correlated incumbent
+// subquery over current_valid_assertions, the newest_candidate_at aggregate
+// over the candidates jsonb, the witness_count subquery over
+// assertion_evidence, and the basis_prior registry lookup. Every one of them
+// is now a column.
+//
+// Columns are named one by one on purpose. `SELECT rq.*` beside a column of
+// the same name is what made `subject_label` ambiguous the day the view
+// started carrying it.
 export async function fetchAssertionReviewQueue(
   sql: Sql,
   opts: AssertionReviewQueueOptions = {}
 ) {
+  if (opts.state === "rejected") return fetchRejectedSuggestions(sql, opts);
+
   const rows = await ryeQuery(
     sql,
-      `, queue AS (
-         SELECT rq.*,
-                subject.label AS subject_label,
-                subject.node_type AS subject_node_type
+      `, filtered AS (
+         SELECT
+           rq.subject_ref,
+           rq.subject_node_id,
+           rq.subject_edge_id,
+           rq.assertion_type,
+           rq.assertion_key,
+           rq.candidate_count,
+           rq.candidates,
+           rq.subject_label,
+           rq.subject_node_type,
+           rq.newest_candidate_at,
+           rq.incumbent_assertion_id,
+           rq.incumbent_claim,
+           rq.incumbent_basis,
+           rq.incumbent_confidence,
+           rq.incumbent_effective_confidence,
+           rq.incumbent_asserted_at,
+           rq.incumbent_attrs,
+           rq.incumbent_is_current,
+           rq.waiting_reason,
+           rq.waiting_detail
          FROM rye.review_queue rq
-         LEFT JOIN rye.nodes subject ON subject.id = rq.subject_node_id
-       ),
-       filtered AS (
-         SELECT *
-         FROM queue q
-         WHERE ($1::text IS NULL OR q.assertion_type = $1::text)
-           AND (NOT $3::boolean OR q.candidate_count > 1)
+         WHERE ($1::text IS NULL OR rq.assertion_type = $1::text)
+           AND (NOT $3::boolean OR rq.candidate_count > 1)
            AND (
              nullif(trim(coalesce($2::text, '')), '') IS NULL
-             OR q.assertion_type ILIKE '%' || $2::text || '%'
-             OR q.assertion_key ILIKE '%' || $2::text || '%'
-             OR coalesce(q.subject_label, '') ILIKE '%' || $2::text || '%'
-             OR q.candidates::text ILIKE '%' || $2::text || '%'
+             OR rq.assertion_type ILIKE '%' || $2::text || '%'
+             OR rq.assertion_key ILIKE '%' || $2::text || '%'
+             OR coalesce(rq.subject_label, '') ILIKE '%' || $2::text || '%'
+             OR rq.candidates::text ILIKE '%' || $2::text || '%'
            )
        ),
        group_rows AS (
@@ -969,60 +1026,70 @@ export async function fetchAssertionReviewQueue(
            f.assertion_type,
            f.assertion_key,
            f.candidate_count::int AS candidate_count,
-           (
-             SELECT max((x->>'asserted_at')::timestamptz)
-             FROM jsonb_array_elements(f.candidates) x
-           ) AS newest_candidate_at,
-           (
-             SELECT json_build_object(
-               'id', incumbent.id::text,
-               'claim', incumbent.claim,
-               'basis', incumbent.basis,
-               'classification', incumbent.classification,
-               'confidence', incumbent.confidence,
-               'effective_confidence', rye.effective_confidence(ROW(incumbent.*)::rye.assertions),
-               'asserted_at', incumbent.asserted_at,
-               'effective_at', incumbent.effective_at,
-               'effective_to', incumbent.effective_to,
-               'attrs', incumbent.attrs
-             )
-             FROM rye.current_valid_assertions incumbent
-             WHERE incumbent.subject_ref = f.subject_ref
-               AND incumbent.assertion_type = f.assertion_type
-               AND incumbent.assertion_key = f.assertion_key
-             LIMIT 1
-           ) AS incumbent,
+           f.newest_candidate_at,
+           CASE WHEN f.incumbent_assertion_id IS NULL THEN NULL ELSE json_build_object(
+             'id', f.incumbent_assertion_id::text,
+             'claim', f.incumbent_claim,
+             'basis', f.incumbent_basis,
+             -- The view carries the incumbent's identity and the fields a
+             -- reviewer decides on. These three are not in it, so they are read
+             -- from the row the view already named, by primary key. No rule is
+             -- reproduced here: which row is the incumbent is the view's answer.
+             'classification', inc.classification,
+             'confidence', f.incumbent_confidence,
+             'effective_confidence', f.incumbent_effective_confidence,
+             'asserted_at', f.incumbent_asserted_at,
+             'effective_at', inc.effective_at,
+             'effective_to', inc.effective_to,
+             'attrs', f.incumbent_attrs,
+             'is_current', f.incumbent_is_current
+           ) END AS incumbent,
            COALESCE((
              SELECT json_agg(candidate ORDER BY candidate.asserted_at, candidate.id)
              FROM (
                SELECT
-                 a.id::text AS id,
+                 a.assertion_id::text AS id,
                  a.claim,
                  a.basis,
                  a.classification,
                  a.confidence,
-                 rye.effective_confidence(ROW(a.*)::rye.assertions) AS effective_confidence,
-                 (rye.registry_value('basis_prior:' || a.basis, NULL) #>> '{}')::numeric AS basis_prior,
+                 -- effective_confidence() answers about the current value, so
+                 -- it is null for every live candidate and stays null
+                 -- (contracts/sql-surface.md, "Review surfaces").
+                 -- projected_effective_confidence below is the number to read.
+                 NULL::numeric AS effective_confidence,
+                 a.basis_prior,
                  a.asserted_at,
                  a.effective_at,
                  a.effective_to,
                  a.attrs,
-                 (
-                   SELECT COUNT(DISTINCT ae.witness_node_id)::int
-                   FROM rye.assertion_evidence ae
-                   WHERE ae.assertion_id = a.id
-                     AND ae.kind IN ('source', 'corroboration')
-                     AND ae.witness_node_id IS NOT NULL
-                 ) AS witness_count,
+                 a.witness_count::int AS witness_count,
                  ` +
-      ASSERTION_EVIDENCE_SQL +
-      ` AS evidence
-               FROM jsonb_array_elements(f.candidates) entry
-               JOIN rye.assertions a ON a.id = (entry->>'assertion_id')::uuid
+      assertionEvidenceSql("a.assertion_id") +
+      ` AS evidence,
+                 a.projected_effective_confidence,
+                 a.evidence_count::int AS evidence_count,
+                 a.evidence_kinds,
+                 a.latest_evidence_at,
+                 a.waiting_reason,
+                 a.waiting_detail,
+                 a.incumbent_assertion_id::text AS incumbent_assertion_id
+               FROM rye.review_queue_candidates a
+               WHERE a.subject_ref = f.subject_ref
+                 AND a.assertion_type = f.assertion_type
+                 AND a.assertion_key = f.assertion_key
              ) candidate
-           ), '[]'::json) AS candidates
+           ), '[]'::json) AS candidates,
+           f.waiting_reason,
+           f.waiting_detail
          FROM filtered f
-         ORDER BY f.candidate_count DESC, newest_candidate_at DESC NULLS LAST, f.assertion_type
+         LEFT JOIN rye.assertions inc ON inc.id = f.incumbent_assertion_id
+         -- assertion_key and subject_ref only break ties. Without them the
+         -- sort is not total -- tuples written in one transaction share
+         -- newest_candidate_at -- and a top-N plan under a small LIMIT paged a
+         -- different tied row than the same query without one.
+         ORDER BY f.candidate_count DESC, f.newest_candidate_at DESC NULLS LAST,
+                  f.assertion_type, f.assertion_key, f.subject_ref
          LIMIT $4::int
          OFFSET $5::int
        ),
@@ -1035,11 +1102,17 @@ export async function fetchAssertionReviewQueue(
          'groups', COALESCE((SELECT json_agg(g) FROM group_rows g), '[]'::json),
          'types', COALESCE((SELECT json_agg(tc ORDER BY tc.count DESC, tc.assertion_type) FROM type_counts tc), '[]'::json),
          'stats', json_build_object(
-           'tuples', (SELECT COUNT(*)::int FROM rye.review_queue),
-           'competing_tuples', (SELECT COUNT(*)::int FROM rye.competing_candidates),
-           'candidates', (SELECT COALESCE(SUM(candidate_count), 0)::int FROM rye.review_queue),
+           ` +
+      REVIEW_QUEUE_HEADER_STATS_SQL +
+      `,
+           -- total counts every tuple this caller may see before the request's
+           -- own filters; filtered counts what survives them. Neither depends
+           -- on limit or offset (contracts/admin-api.md).
+           'total', (SELECT COUNT(*)::int FROM rye.review_queue),
            'filtered', (SELECT COUNT(*)::int FROM filtered)
-         )
+         ),
+         'state', 'waiting',
+         'rejected', '[]'::json
        ) AS payload
        FROM cfg`,
     [
@@ -1050,11 +1123,108 @@ export async function fetchAssertionReviewQueue(
       opts.offset ?? 0,
     ]
   );
-  return rows[0]?.payload ?? {
-    groups: [],
-    types: [],
-    stats: { tuples: 0, competing_tuples: 0, candidates: 0, filtered: 0 },
-  };
+  return rows[0]?.payload ?? EMPTY_REVIEW_QUEUE;
+}
+
+// ?state=rejected on the same route. rejected_candidates is disjoint from
+// review_queue by construction — reject_candidate() sets superseded_at and the
+// queue requires it null — so a declined suggestion can never read as waiting.
+// A null rejected_by or rejected_reason means the candidate was closed without
+// a candidate_rejected event: shown as unexplained rather than hidden.
+async function fetchRejectedSuggestions(
+  sql: Sql,
+  opts: AssertionReviewQueueOptions
+) {
+  const rows = await ryeQuery(
+    sql,
+      `, rejected_filtered AS (
+         SELECT
+           rc.assertion_id,
+           rc.subject_ref,
+           rc.subject_node_id,
+           rc.subject_edge_id,
+           rc.subject_label,
+           rc.assertion_type,
+           rc.stored_assertion_type,
+           rc.assertion_key,
+           rc.claim,
+           rc.basis,
+           rc.confidence,
+           rc.classification,
+           rc.attrs,
+           rc.asserted_at,
+           rc.rejected_at,
+           rc.rejected_by,
+           rc.rejected_reason,
+           rc.rejected_outcome,
+           rc.rejection_event_id
+         FROM rye.rejected_candidates rc
+         WHERE ($1::text IS NULL OR rc.assertion_type = $1::text)
+           AND (
+             nullif(trim(coalesce($2::text, '')), '') IS NULL
+             OR rc.assertion_type ILIKE '%' || $2::text || '%'
+             OR rc.assertion_key ILIKE '%' || $2::text || '%'
+             OR coalesce(rc.subject_label, '') ILIKE '%' || $2::text || '%'
+             OR coalesce(rc.rejected_reason, '') ILIKE '%' || $2::text || '%'
+             OR rc.claim::text ILIKE '%' || $2::text || '%'
+           )
+       ),
+       rejected_rows AS (
+         SELECT
+           r.assertion_id::text AS id,
+           r.subject_ref,
+           r.subject_node_id::text AS subject_node_id,
+           r.subject_edge_id::text AS subject_edge_id,
+           r.subject_label,
+           r.assertion_type,
+           r.stored_assertion_type,
+           r.assertion_key,
+           r.claim,
+           r.basis,
+           r.classification,
+           r.confidence,
+           r.attrs,
+           r.asserted_at,
+           r.rejected_at,
+           r.rejected_by,
+           r.rejected_reason,
+           r.rejected_outcome,
+           r.rejection_event_id::text AS rejection_event_id,
+           ` +
+      assertionEvidenceSql("r.assertion_id") +
+      ` AS evidence
+         FROM rejected_filtered r
+         ORDER BY r.rejected_at DESC NULLS LAST, r.assertion_id
+         LIMIT $3::int
+         OFFSET $4::int
+       ),
+       rejected_type_counts AS (
+         SELECT assertion_type, COUNT(*)::int AS count
+         FROM rye.rejected_candidates
+         GROUP BY assertion_type
+       )
+       SELECT json_build_object(
+         'groups', '[]'::json,
+         'types', COALESCE((SELECT json_agg(tc ORDER BY tc.count DESC, tc.assertion_type) FROM rejected_type_counts tc), '[]'::json),
+         'stats', json_build_object(
+           ` +
+      REVIEW_QUEUE_HEADER_STATS_SQL +
+      `,
+           'total', (SELECT COUNT(*)::int FROM rye.rejected_candidates),
+           'filtered', (SELECT COUNT(*)::int FROM rejected_filtered)
+         ),
+         'state', 'rejected',
+         'rejected', COALESCE((SELECT json_agg(r) FROM rejected_rows r), '[]'::json)
+       ) AS payload
+       FROM cfg`,
+    [
+      opts.assertionType && opts.assertionType !== "all" ? opts.assertionType : null,
+      opts.q ?? null,
+      opts.limit ?? 60,
+      opts.offset ?? 0,
+    ]
+  );
+  return rows[0]?.payload ?? { ...EMPTY_REVIEW_QUEUE, state: "rejected" as AssertionReviewState };
 }
 
 export async function acceptAssertion(
@@ -1136,6 +1306,11 @@ export async function fetchStaleDigests(sql: Sql, limit = 100) {
               s.watermark,
               s.newer_subject_assertion,
               s.overturned_source,
+              -- The culprits, so a stale badge can link to what made it stale.
+              -- Empty, never null, when the matching boolean is false.
+              s.newer_assertion_ids::text[] AS newer_assertion_ids,
+              s.newer_latest_asserted_at,
+              s.overturned_source_assertion_ids::text[] AS overturned_source_assertion_ids,
               a.claim,
               a.asserted_at
        FROM rye.stale_digests s
@@ -2185,6 +2360,20 @@ export async function fetchCrmWorkspace(sql: Sql) {
        )
        SELECT json_build_object(
          'generated_at', now(),
+         -- opportunities_active is a materialized view: it is as fresh as the
+         -- last refresh_materialized_views() and nothing else. An age marker,
+         -- not change detection — stale false does not promise the underlying
+         -- rows are unchanged (contracts/sql-surface.md, "Review surfaces").
+         'freshness', (
+           SELECT json_build_object(
+             'snapshot_at', fr.snapshot_at,
+             'age_seconds', EXTRACT(EPOCH FROM fr.age),
+             'stale_after_seconds', EXTRACT(EPOCH FROM fr.stale_after),
+             'stale', fr.stale,
+             'row_count', fr.row_count::int
+           )
+           FROM rye.opportunities_active_freshness fr
+         ),
          'opportunities', COALESCE((SELECT json_agg(o) FROM opportunities o), '[]'::json),
          'plans', COALESCE((SELECT json_agg(p ORDER BY p.effective_at NULLS LAST, p.created_at DESC) FROM plans p), '[]'::json),
          'source_policies', COALESCE((SELECT json_agg(sp) FROM source_policies sp), '[]'::json),
@@ -2192,7 +2381,13 @@ export async function fetchCrmWorkspace(sql: Sql) {
        ) AS payload
        FROM cfg`
   );
-  return rows[0]?.payload ?? { opportunities: [], plans: [], source_policies: [], candidates: [] };
+  return rows[0]?.payload ?? {
+    freshness: null,
+    opportunities: [],
+    plans: [],
+    source_policies: [],
+    candidates: [],
+  };
 }
 
 export async function fetchPmWorkspace(sql: Sql) {
