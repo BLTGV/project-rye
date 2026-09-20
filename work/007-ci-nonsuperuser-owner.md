@@ -66,3 +66,4 @@ All on 2026-09-19, on this machine. Nothing has run on a GitHub runner, because 
 
 ## Close
 2026-09-19: verified locally on branch claude/funny-tu-65d029, not pushed. Passed verification on the first attempt.
+2026-09-20, Casey: do not use GitHub Actions. `.github/workflows/test.yml` (added by the bootstrap, fdbc18a) is removed from the branch before it reaches main. The gate is `./scripts/test-all.sh` run locally, which includes the non-superuser-owner step. The "first run on a GitHub runner" open item no longer applies.
