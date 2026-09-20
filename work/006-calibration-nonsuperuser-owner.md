@@ -72,6 +72,10 @@ visibility.
 - The Operator item is opened separately, as 007, after this one verifies, so its new CI run starts green. It is scoped to running the existing suite once under a non-superuser owner; no local credential can create or update files under `.github/workflows`, so the Operator delivers the script and the workflow change as a patch for Casey to apply if that is where CI lives. Overturn: Casey.
 - `21_api_security.sh` stays with work/003. Overturn: Lead.
 
+## Found during the item
+- 2026-09-19, builder-schema: the cause of the test 27 failure is `score_due_predictions()` (0019, about line 529). It takes `SELECT ... FOR UPDATE` on due predictions before opening the `assertion_outcome` write-path gate. `FOR UPDATE` applies the UPDATE policy's USING clause as a filter, not an error, so under a non-superuser owner the cursor matches nothing, the function scores 0 predictions, and calibration reporting is silently empty. A superuser owner bypasses the policy and hides it. It is the only `FOR UPDATE` in the schema with this ordering. Fix: migration 0024 opens the gate first, then locks.
+- 2026-09-19, Lead: on the base revision, migration 0022 (work/004) and test 30 (work/005) collide. Test 30 compares every role's `rye_settlers()` answer with an admin baseline; under the work/004 contract a session that cannot see the area (`agent:t`, which names no identity, and the unset role) correctly gets `domain_not_found`. Reproduced in Docker at `30_configuration_gate.sql:995`. Answered from the contract: the policy stands, the test's comparison changes to same-role before and after, with a bound agent that holds the area added so the agent case stays meaningful. No visibility is widened, so the Architect is not needed. In scope here under the criterion that 0022 and 0023 install together and the suite passes.
+
 ## Verified
 - filled in at close
 
