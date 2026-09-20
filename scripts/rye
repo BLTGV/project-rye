@@ -1022,7 +1022,7 @@ SELECT
   j->>'assertion_type' AS assertion_type,
   j->>'gated' AS gated,
   coalesce(j->'allowed_roles' #>> '{}', '') AS allowed_roles,
-  coalesce(j->>'current_role', '') AS session_role,
+  coalesce(j->>'current_role', '') AS \"current_role\",
   j->>'may_settle' AS may_settle
 FROM answer;"
 }

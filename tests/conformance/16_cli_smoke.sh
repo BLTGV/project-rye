@@ -8,6 +8,18 @@ rm -f "$ENV_FILE"
 
 rye_cmd=(./scripts/rye --db-url "$DATABASE_URL" --env-file "$ENV_FILE")
 
+require_not_contains() {
+  local value="$1"
+  local needle="$2"
+  local label="$3"
+
+  if [[ "$value" == *"$needle"* ]]; then
+    echo "Expected $label output not to contain $needle" >&2
+    echo "$value" >&2
+    exit 1
+  fi
+}
+
 require_contains() {
   local value="$1"
   local needle="$2"
@@ -75,6 +87,12 @@ require_contains "$settle_gate_open_json" '"may_settle": true' "settle-gate unga
 settle_gate_table="$("${rye_cmd[@]}" settle-gate registry_entry)"
 require_contains "$settle_gate_table" "registry_entry" "settle-gate"
 require_contains "$settle_gate_table" "admin" "settle-gate"
+# The table headers are the JSON field names, so the two forms cannot drift
+# into two names for one value.
+for field in assertion_type gated allowed_roles current_role may_settle; do
+  require_contains "$settle_gate_table" "$field" "settle-gate header"
+done
+require_not_contains "$settle_gate_table" "session_role" "settle-gate header"
 
 if "${rye_cmd[@]}" settle-gate >/dev/null 2>&1; then
   echo "Expected settle-gate with no assertion type to exit non-zero" >&2
