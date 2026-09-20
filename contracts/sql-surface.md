@@ -189,12 +189,12 @@ produced by the same `set_config()` this section closes.
 
 | Column | May change |
 |---|---|
-| `status` | `candidate` to `accepted` only. Never back. The row must be a live candidate, no accepted rival may hold an overlapping window on the same subject, type, and key, and the acceptance must be accompanied by an `assertion_accepted` event naming the row. An `agent:*` caller under `candidates_only` or `strict`, or on a `pattern_claim`, additionally needs `rye.authoritative.promote` for the governing scope, which is the rule `accept_assertion()` already applied. |
+| `status` | `candidate` to `accepted` only. Never back. The row must be a live candidate; no accepted, unsuperseded assertion on the same subject, type, and key may cover the instant the promoted row takes effect, which is `greatest(coalesce(effective_at, now()), now())`; and the acceptance must be accompanied by an `assertion_accepted` event naming the row. An `agent:*` caller under `candidates_only` or `strict`, or on a `pattern_claim`, additionally needs `rye.authoritative.promote` for the governing scope, which is the rule `accept_assertion()` already applied. |
 | `superseded_at` | Null to non-null once, and never back. On a row that was `accepted`, only when `superseded_by` is set in the same statement. **An accepted assertion never ends with nothing replacing it.** A candidate may still be closed with `superseded_by` null, which is how `reject_candidate()` records a rejection. |
 | `superseded_by` | Null to non-null once, together with `superseded_at`, never to the row itself. The replacement must carry the same `assertion_type` and `assertion_key`. The subject may differ, because `merge_nodes()` replaces a duplicate's assertion with the canonical node's. |
 | `effective_to` | Narrowing only, to a non-null instant after `effective_at`, before the previous `effective_to`, and in the future. A successor accepted assertion on the same subject, type, and key must start where the window now ends. |
 | `attrs` | Only as an outcome label: the result must name an `outcome` in the recorded set, and no existing key may be dropped or have its value changed except the keys an outcome labelling writes. |
-| `classification` | Only to the value `derived_assertion_classification()` computes for the row's current derivation evidence. Nothing else, for anyone. |
+| `classification` | Only on a row that has derivation evidence, and only to the value `derived_assertion_classification()` computes for that evidence. Nothing else, for anyone. Propagation is the only writer, and it runs when derivation evidence is recorded. |
 | everything else | Never. `claim`, `assertion_type`, `assertion_key`, the subject columns, `asserted_at`, `effective_at`, `basis`, `confidence`, `created_at` stay as written. |
 
 **A direct `INSERT` lands as a candidate, it is not refused.** A raw insert of
@@ -208,13 +208,21 @@ signal a helper can produce that a caller cannot, so the row is judged rather
 than the route. `record_assertion()` has already applied the policy, so the
 check is a no-op on its own writes.
 
-One exemption: a row that an already-superseded assertion names as its
-replacement is left accepted. `supersede_assertion()`, `record_distillation()`
-and `record_assertion()` all mark the incumbent before inserting its
-replacement, and demoting the replacement would leave the key with no accepted
-value at all — the erasure this section exists to prevent. The exemption is a
-fact in the table, not a setting, and it requires an incumbent that was
-accepted before the transaction began.
+One exemption: a row is left accepted when an assertion **on the same subject,
+`assertion_type`, and `assertion_key`** is already superseded, was accepted,
+and names this row as its replacement. `supersede_assertion()`,
+`record_distillation()` and `record_assertion()` all mark the incumbent before
+inserting its replacement, and demoting the replacement would leave that key
+with no accepted value at all — the erasure this section exists to prevent. The
+exemption is a fact in the table, not a setting, and it is confined to the
+tuple whose value would otherwise be stranded. It does not carry across
+subjects: a `merge_nodes()` copy is judged by the canonical node's review
+policy, not the duplicate's, and under `strict` the copy lands as a candidate.
+
+What is left open by the exemption is what `supersede_assertion()` already
+lets the same caller do on that same tuple, so it adds nothing. There is no
+"the incumbent pre-dates the transaction" test, because nothing in the row
+records when it was written that a caller could not also write.
 
 **Refusals, and when they arrive.** Most arrive at the statement, as a raised
 error a client surfaces. Three arrive at `COMMIT`, because the fact that makes
@@ -240,7 +248,15 @@ without a successor; and `claim`, `basis`, `confidence`, and the subject of an
 assertion cannot be rewritten. Everything else is as strong as the deployment's
 control of the session.
 
-Four limits are stated rather than hidden. An outcome label is
+**Only `agent:*` callers are policy-gated on promotion.** A `viewer`, a
+`team_member`, and an unset role are tested for the shape of the transition and
+for the settle gate, and not for the review policy. That is not an oversight
+here: `accept_assertion()` applies the review policy to agent roles only, and
+this section re-derives that rule rather than inventing a wider one. Who may
+accept, for every other role, is the settlement question, and `rye_settlers()`
+is advisory by contract.
+
+Five limits are stated rather than hidden. An outcome label is
 shape-constrained, not role-constrained, so a caller may still label an outcome
 by hand. `supersede_assertion()` does not consult the review policy, so a
 caller who supersedes and replaces an accepted row still writes an accepted
@@ -250,7 +266,10 @@ written after the assertion, so a scope reached only through
 `scope_governs_source` does not demote a raw insert. And a caller who may
 accept through `accept_assertion()` under an `open` policy is a caller whose
 raw promotion is refused only by the missing acceptance event, which is a
-record, not a lock.
+record, not a lock. And the rival test for a promotion is taken at one instant,
+the one the promoted row takes effect at, so two accepted rows may still
+overlap earlier in history; `current_valid_assertions` is protected, a
+reconstruction of a past moment is not.
 
 ## Settlement lookup
 
