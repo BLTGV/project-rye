@@ -251,6 +251,10 @@ Direct `UPDATE nodes ...` is intentionally blocked by policy for agents. For nod
 SELECT log_agent_query('triage-bot', 'What changed on Acme?', 'Returned customer summary', ARRAY['<node_uuid>'::uuid]);
 ```
 
+An optional fifth argument, `p_trace`, groups the calls of one search loop —
+see "Tracing a search loop" in `SKILL.md`. Four arguments behave exactly as
+they always have and write no trace.
+
 ## Create a node with proper classification
 
 Team-scoped nodes must have a classification:

@@ -25,8 +25,20 @@ helper exactly as by hand. `admin` is a person's role, not yours. Use
 ## Orient
 
 1. Run `SELECT rye_catalog()` to see what's in the instance — node types, edge types, assertion types, tracked tables, and totals.
-2. Use `agent_node_summary(node_id, max_items)` for compact context on a specific node.
-3. Run the category discovery below before proposing any node.
+2. Find the subject with `find_nodes(query, node_types)`, or send several
+   phrasings in one round trip with `find_nodes_batch(queries, node_types)`
+   and judge the candidates on `score` and `match_reason` yourself. Semantic
+   matching is your job, not the database's; expect to search more than once.
+   Property values are never searched, by design: redaction applies to them,
+   so matching one would confirm a redacted field to someone who may not read
+   it. Search labels and external identity.
+3. Walk from there with `find_paths()` and `neighborhood()`. For cause pass
+   `p_semantics => ARRAY['causal']`, or an `associative` edge comes back as a
+   path and co-occurrence reads as cause.
+4. An empty result may mean not visible to you rather than absent. Do not
+   report it as "there is none".
+5. Use `agent_node_summary(node_id, max_items)` for compact context on a specific node.
+6. Run the category discovery below before proposing any node.
 
 ## Discover Categories Before You Write
 
@@ -907,6 +919,74 @@ policy.
 
 - Log agent queries with `log_agent_query(agent_id, query, summary, node_ids)`.
 - Put assertion provenance in `assertion_evidence`.
+
+### Tracing a search loop
+
+Finding a thing usually takes several tries, and the answer you end up with
+cannot say which try found it. A trace can. It is optional, you decide per
+call, and nothing logs on your behalf: `find_nodes`, `find_nodes_batch`,
+`find_paths`, `neighborhood`, `agent_node_summary()`, and `node_context` write
+nothing at all. Trace the loops someone will read — the ones that went wrong, a
+sample, an eval week — and not every read: events are immutable and there is no
+way to delete one later.
+
+Pass a fifth argument to the call you already know. Four arguments still work
+and write no trace.
+
+- `trace_id` — your own id for this one loop, the same on every step. Required.
+- `seq` — 1, 2, 3 within the loop. Required, and it is what orders the steps:
+  every call inside one transaction carries the same timestamp, so time cannot.
+- `tool`, `intent`, `args` — what you called, why you phrased it that way, and
+  what you passed. `intent` is the one a database log could never record.
+- `results` — the candidates that came back, each with `used` true or false.
+  Record the ones you passed over: the node returned third and ignored is a
+  different problem from the node that never came back. Cap the list at about
+  ten.
+- `selected` — which step's phrasing produced the candidate you used:
+  `{node_id, from_seq, from_phrasing}`.
+
+```sql
+SELECT set_config('app.current_role', 'agent:harbor-analyst', false);
+SELECT rye.log_agent_query(
+    'harbor-analyst',
+    'the fence company',                 -- this step's phrasing
+    '0 candidates',
+    ARRAY[]::uuid[],
+    jsonb_build_object(
+        'trace_id', 'loop-7f3a',
+        'seq',      1,
+        'tool',     'find_nodes_batch',
+        'intent',   'the question names no company, try what it describes',
+        'args',     jsonb_build_object(
+                        'p_queries', jsonb_build_array('the fence company', 'fence company'),
+                        'p_node_types', jsonb_build_array('org')),
+        'results',  jsonb_build_array()));
+```
+
+The next step carries `'seq', 2` under the same `trace_id`, and the step that
+settles it adds `selected`. Read the loop back in order:
+
+```sql
+SELECT seq, tool, intent, query, selected
+FROM rye.agent_query_trace
+WHERE trace_id = 'loop-7f3a'
+ORDER BY seq;
+```
+
+Pass the nodes the step touched as the fourth argument whenever it touched
+any, including the ones you rejected. The event read policy needs a
+participant the reader can see, so a step recorded with an empty array is
+readable only by an admin session — and a step that found nothing has no nodes
+to name, so the steps that explain a miss are exactly the ones you will not be
+able to read back. Analysis of misses is an admin's read. The loop above
+returns `seq` 2 to you and both steps to an admin. Say in `intent` what the
+step was reaching for, and expect a person to be the one who reads it.
+
+A trace with no `trace_id` or no `seq` is refused: it could not be grouped or
+ordered, and an ungroupable trace looks like data. Tracing is a write like any
+other, so a `viewer` and a role-less session are refused `42501` whether they
+pass a trace or not — a read-only agent does not trace, and
+`rye-knowledge-reader` forbids this call outright.
 
 ## Safety
 

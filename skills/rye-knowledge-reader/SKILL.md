@@ -22,7 +22,10 @@ Do not call:
   `promote_candidate_to_edge`
 - `link_record`, `track_table`, `update_node_properties`
 - `INSERT`, `UPDATE`, `DELETE`, `TRUNCATE`, `ALTER`, `CREATE`, `DROP`
-- `log_agent_query`; logging is a write
+- `log_agent_query`; logging is a write, tracing included. A retrieval trace
+  is an ordinary event, so the write gate refuses it from a `viewer` or a
+  role-less session with `42501`. Do not reach for it to record a search
+  loop — that is `rye-agent-ops`, for a session that may write.
 
 If the user asks for a change, stop using this skill and switch to the
 appropriate write/promotion workflow after explicit approval.
@@ -74,7 +77,23 @@ can reset before the read. Use `ROLLBACK`, not `COMMIT`, when wrapping reads.
      `rye.source_inventory`, and `rye.pending_context_confirmations`.
 
 2. **Find the subject**
-   - Search `rye.nodes` by label, type, external id, or properties.
+   - `SELECT * FROM rye.find_nodes('Pier 9 Rebuild', ARRAY['project']);` —
+     ranked by `score`, with `match_reason` saying why: `external_id`,
+     `exact_label`, `label_similarity`, `label_contains`.
+   - Semantic matching is yours, not the database's. Send several phrasings in
+     one round trip and judge the candidates yourself:
+     `SELECT * FROM rye.find_nodes_batch(ARRAY['the fence company', 'Fence', 'Meridian Fence'], ARRAY['org']);`
+   - Property values are never searched, by design: field-level redaction
+     applies to them, and a search that matched them would confirm a redacted
+     field to someone who may not read it. Search labels and external
+     identity; read properties after you have the node.
+   - Walk from there with `rye.find_paths()` and `rye.neighborhood()`. For
+     cause, pass `p_semantics => ARRAY['causal']` — without it an
+     `associative` edge comes back as a path and co-occurrence reads as cause.
+     Both refuse an unrecognized `p_direction` or semantics class rather than
+     widening the answer.
+   - An empty result may mean not visible to you, not absent. Say which you
+     can tell and which you cannot.
    - Prefer exact `id` or `external_source`/`external_id` matches once found.
 
 3. **Read compact node context**

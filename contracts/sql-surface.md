@@ -657,6 +657,103 @@ refuse with its own sentence, and the two helpers named above do. A
 `SECURITY DEFINER` helper is refused by the trigger on both owners; it is not a
 way past this section.
 
+## Who may reject a suggestion
+
+Accepting a candidate is gated. Closing one was not: `reject_candidate()`
+checked a reason, an outcome, and that the target was live, and nothing about
+the caller, so an agent closed another agent's suggestion, a person's
+suggestion, and a configuration suggestion. Migration `0037` closes that.
+Recorded in
+`docs/decisions/0014-who-may-reject-and-edges-carry-their-own-classification.md`.
+
+It narrows what some sessions could do and bumps no version: no object is
+removed or renamed, no signature narrows, no view column changes meaning. A
+client that closed suggestions it did not write will start being refused.
+
+| caller | may close a live candidate |
+|---|---|
+| `admin` | any, configuration included |
+| named role with `may_write` | any **except** an assertion type with a `settle` row |
+| agent-shaped (`agent:<key>`) | only one it **authored**, and never a settle-gated type |
+| `viewer`, unset, unknown, `system:cdc` | none, as "Who may write" already says |
+
+**Closing a configuration suggestion is deciding it.** The settle gate demotes
+a non-admin's configuration write to a candidate so that nothing said is lost
+and an admin decides. A caller who may not settle a type may not end the
+proposal either, or the demotion promises nothing. The gated set is the data in
+`assertion_type_access`, tested on the stored spelling and on the canonical one,
+as `0036` tests the write side. Nothing said is still not lost: a rejected
+candidate is closed, not deleted, and appears in `rejected_candidates` with who,
+when, and why.
+
+**Authorship is `attrs.recorded_by`, and Rye writes it.** A `BEFORE INSERT`
+trigger on `assertions` stamps `attrs.recorded_by` with the session's
+`app.current_role` on every insert, from every route, overwriting anything the
+caller supplied; `attrs.recorded_by_label` carries `app.current_user_id` for the
+audit trail and decides nothing, as everywhere else. Two consequences a client
+meets: a row written before `0037` carries no `recorded_by`, and **unknown
+authorship is not own authorship** — no agent may close such a row, and a person
+must; and authorship cannot be changed afterwards, because `attrs` is immutable
+outside an outcome label.
+
+**An agent's correction route is unchanged.** Closing your own pending
+suggestion and filing a corrected one is the documented way to correct a
+suggestion under a demoting policy, and it keeps working exactly as written.
+Closing someone else's is a person's call.
+
+**The rule holds on the raw route.** A candidate closed with `superseded_by`
+null is the rejection shape, and a trigger applies the table above to it
+whatever route produced it, so a forged `app.write_path` buys nothing.
+`reject_candidate()` refuses first, before it labels an outcome or marks the
+row, so a caller gets a sentence rather than a trigger error. A refused `UPDATE`
+raises where the table owner is a superuser and affects zero rows where the
+owner is bound by RLS: assert the row, not the error.
+
+**`rye_settlers()` is not consulted and stays advisory.** It answers from rows
+the caller can see, so a refusal derived from it would vary with
+classification; who may reject is decided from the row and the session.
+
+**The boundary, and one exception a client must know.** As everywhere, a caller
+with a raw connection can set `app.current_role` to `admin`, and this section
+does not stop it. And the admin API's Worker sets `app.current_role = 'admin'`
+for every query, so an agent rejecting through `POST /api/assertions/:id/reject`
+is judged by that route's `rye.candidate.adjudicate` capability and **not** by
+the authorship rule here. See `contracts/admin-api.md`.
+
+## Edges carry their own classification
+
+An edge's `attrs.classification` and `attrs.teams` used to have no effect: the
+read rule asked only whether both endpoints were visible, so an edge marked
+confidential between two public nodes was readable by a `viewer` and by a
+session with no role. Migration `0037` makes the mark mean what it says.
+Recorded in the same decision.
+
+**The rule is the node rule, ANDed with endpoint visibility.** An edge is
+readable when both endpoints are readable **and** its own `classification` is
+null or `public`, or its `attrs.teams` intersect `app.current_teams`, or an
+active `access_grants` row with `resource_type = 'edge'` matches this session by
+user, role, or team and names the edge by `edge_id`, `edge_type`, or
+`classification`. Endpoint visibility is unchanged and still necessary.
+
+**Teams on an edge require a classification**, refused by a trigger, exactly as
+`nodes` have been refused since `0001`. Without it a team-marked edge with no
+classification takes the `classification IS NULL` branch and is world-readable,
+which is the hole one table over.
+
+**What this changes for existing data: nothing, until someone marks an edge.**
+The trigger judges writes, not history, so an edge already carrying teams and no
+classification stays readable until a write sets its classification. No
+migration, seed, fixture, or skill in this repository writes either key onto an
+edge, so no existing row changes visibility.
+
+**What cascades.** Assertions whose subject is a hidden edge are hidden, because
+`assertion_read_policy` already requires the edge to be visible. Traversal
+(`find_paths()`, `neighborhood()`) is `security_invoker` and inherits it with no
+change. `event_participants` does not cascade and needs nothing: it references
+nodes only, and an edge is never an event participant. RLS silence applies as
+always — a path that returns nothing may be a path through an edge you may not
+see.
+
 ## Configuration writes need an admin
 
 Some assertion types are not knowledge about the world. They are Rye's own
@@ -811,7 +908,7 @@ produced by the same `set_config()` this section closes.
 | Column | May change |
 |---|---|
 | `status` | `candidate` to `accepted` only. Never back. The row must be a live candidate; no accepted, unsuperseded assertion on the same subject, type, and key may cover the instant the promoted row takes effect, which is `greatest(coalesce(effective_at, now()), now())`; and the acceptance must be accompanied by an `assertion_accepted` event naming the row. An `agent:*` caller under `candidates_only` or `strict`, or on a `pattern_claim`, additionally needs `rye.authoritative.promote` for the governing scope, which is the rule `accept_assertion()` already applied. |
-| `superseded_at` | Null to non-null once, and never back. On a row that was `accepted`, only when `superseded_by` is set in the same statement. **An accepted assertion ends only when something readable holds its place.** A candidate may still be closed with `superseded_by` null, which is how `reject_candidate()` records a rejection. |
+| `superseded_at` | Null to non-null once, and never back. On a row that was `accepted`, only when `superseded_by` is set in the same statement. **An accepted assertion ends only when something readable holds its place.** A candidate may still be closed with `superseded_by` null, which is how `reject_candidate()` records a rejection — and since `0037` that shape is an authority, not just a shape: see "Who may reject a suggestion". |
 | `superseded_by` | Null to non-null once, together with `superseded_at`, never to the row itself. The replacement must carry the same `assertion_type` and `assertion_key` and, when the ended row was `accepted`, be a row this caller can read at commit. The subject may differ, because `merge_nodes()` replaces a duplicate's assertion with the canonical node's; a replacement on another subject must also be live at commit, and it may be a candidate. |
 | `effective_to` | Narrowing only, to a non-null instant after `effective_at`, before the previous `effective_to`, and in the future. A successor accepted assertion on the same subject, type, and key must start where the window now ends. |
 | `attrs` | Only as an outcome label: the result must name an `outcome` in the recorded set, and no existing key may be dropped or have its value changed except the keys an outcome labelling writes. |
@@ -1158,6 +1255,16 @@ fatal, and it is closed from both ends. Recorded in
 A client that recorded a policy value Rye does not know was already getting
 nothing it asked for. What changes is that it now finds out at the write.
 
+A `review_policy` row whose claim carries no readable value — a missing or
+wrong key, a JSON null, a non-string — reads `strict` and ranks `0` exactly as
+an unsupported value does, and cannot be recorded. A scope with **no**
+`review_policy` row still reads `open` and ranks `2`: absent is not broken,
+present and unreadable is.
+
+The guard does not refuse an `UPDATE` that leaves the claim alone and does not
+make the row accepted, so a standing broken row can still be superseded, ended,
+or rejected. That is how an instance that already holds one is repaired.
+
 ## Review surfaces
 
 What a reviewer's screen needs comes from the views, not from a client's own
@@ -1292,6 +1399,19 @@ a new migration and an edit here first, as with `agent_action_log`. Trace the
 loops you will read — failures, a sample, an eval week — not every read.
 `node_salience` is unaffected and improves as a side effect: it reads
 `properties->>'agent_id'` and the participants, which tracing does not touch.
+
+**A miss is an admin's read.** `agent_query_trace` is security invoker, and an
+event is readable only through a participant the reader can see. A step that
+found nothing names no nodes, so in production it is visible to an admin session
+and to nobody else, the agent that wrote it included. Pass the nodes a step
+considered, rejected ones too, and the step is readable by whoever can read
+them. Analysis of the zero-result steps, which is the `entry_missed` case, is an
+admin's job. The eval harness is unaffected: it reads recorded trace files, not
+the database.
+
+**`seq` is an int4.** The helper refuses a `seq` above 2147483647, and the view
+degrades any stored value it cannot read as one to null rather than raising, so
+no single event can make the view unreadable.
 
 ## Settlement lookup
 

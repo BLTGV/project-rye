@@ -857,7 +857,17 @@ error. A merge cycle answers too — it stops rather than raising.
   write, and refuses a non-admin editing an `onboarding_scope` node, with a
   sentence rather than a silent miss.
 - Use `record_artifact()` for artifacts and optional content-hash deduplication.
-- Use `log_agent_query()` to audit agent reads.
+- Use `log_agent_query()` to audit agent reads. Its optional fifth argument,
+  `p_trace`, groups the calls of one search loop: a `trace_id` you choose and a
+  `seq` within it are required, and `tool`, `intent`, `args`, `results`, and
+  `selected` are yours to fill in. Opt in per call — nothing traces on your
+  behalf, and a `viewer` or a role-less session is refused `42501` whether it
+  passes a trace or not. Read a loop back from `agent_query_trace` in `seq`
+  order; time cannot order it, because every call in one transaction shares a
+  timestamp. Pass the nodes the step touched: an event is visible through its
+  participants, so a step logged with an empty array is readable only by an
+  admin. The step shape is `eval/retrieval/trace_format.md`, so one reader
+  handles a production loop and an eval trace alike.
 - Use `type_vocabulary_report` and the Rye gardener skill to propose aliases or
   merges. No agent merges: `merge_nodes()` refuses every agent-shaped session
   with `42501` and names who can, a Rye admin or a team member. It also refuses
@@ -884,6 +894,7 @@ All views are security invokers.
 | `competing_candidates` | Tuples with more than one live candidate |
 | `stale_digests` | Digests invalidated by newer knowledge or displaced sources |
 | `node_salience` | Advisory attention from cooperative query logging |
+| `agent_query_trace` | The steps of one agent search loop, grouped by `trace_id` and ordered by `seq` |
 | `type_vocabulary_report` | Historical type vocabulary and canonical aliases |
 | `source_reliability` | Labeled witness outcomes and sample size |
 | `calibration_report` | Resolvable prediction Brier score and hit rate |

@@ -1,0 +1,42 @@
+{
+  "arm": "bucket_probe_misjudged",
+  "scenario": "harbor_point",
+  "run_id": "bucket-probe-2026-09-20",
+  "note": "Recorded from psql on 2026-09-20. Every expected edge of the three-hop chain came back on step 2, and the arm still answered no. Retrieval did its job; the reading of the result is the error. Intended bucket: misjudged.",
+  "results": [
+    {
+      "question_id": "q-causal-02",
+      "steps": [
+        {
+          "seq": 1,
+          "tool": "find_nodes",
+          "intent": "locate the supplier",
+          "args": { "p_query": "Coastal Steel Supply" },
+          "results": [
+            { "node_id": "fa000001-0001-0001-0001-000000000006", "label": "Coastal Steel Supply", "score": 0.95, "match_reason": "exact_label", "used": true }
+          ],
+          "selected": { "node_id": "fa000001-0001-0001-0001-000000000006", "from_seq": 1, "from_phrasing": "Coastal Steel Supply" }
+        },
+        {
+          "seq": 2,
+          "tool": "find_paths",
+          "intent": "causal chain from the supplier to the penalty",
+          "args": { "p_from_node_id": "fa000001-0001-0001-0001-000000000006", "p_to_node_id": "fa000001-0004-0001-0001-000000000002", "p_semantics": ["causal"], "p_max_depth": 3, "p_direction": "out" },
+          "results": [
+            {
+              "node_path": ["fa000001-0001-0001-0001-000000000006", "fa000001-0004-0001-0001-000000000001", "fa000001-0003-0001-0001-000000000001", "fa000001-0004-0001-0001-000000000002"],
+              "edge_path": ["fa000002-0002-0001-0001-000000000001", "fa000002-0002-0001-0001-000000000002", "fa000002-0002-0001-0001-000000000003"],
+              "edge_type_path": ["affects", "affects", "affects"],
+              "depth": 3
+            }
+          ]
+        }
+      ],
+      "answer": {
+        "refused": false,
+        "text": "No. The chain runs through the rebar shortage and the Pier 9 schedule, so the penalty is the project's, not the supplier's.",
+        "node_ids": []
+      }
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "arm": "malformed_probe",
+  "scenario": "harbor_point",
+  "run_id": "malformed-probe",
+  "note": "A plausible trace with one field left out: the second step has no seq, so the loop cannot be ordered. Nothing else is wrong with it.",
+  "results": [
+    {
+      "question_id": "q-causal-01",
+      "steps": [
+        {
+          "seq": 1,
+          "tool": "find_nodes",
+          "intent": "locate the project",
+          "args": { "p_query": "Pier 9 Rebuild", "p_node_types": ["project"] },
+          "results": [
+            { "node_id": "fa000001-0003-0001-0001-000000000001", "score": 0.95, "match_reason": "exact_label", "used": true }
+          ]
+        },
+        {
+          "tool": "find_paths",
+          "intent": "walk upstream for causes",
+          "args": { "p_from_node_id": "fa000001-0003-0001-0001-000000000001", "p_direction": "in", "p_semantics": ["causal"] },
+          "results": []
+        }
+      ],
+      "answer": { "refused": true, "text": "Nothing upstream." }
+    }
+  ]
+}

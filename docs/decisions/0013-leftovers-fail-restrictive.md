@@ -215,9 +215,12 @@ Each runs under a non-superuser role and under
 2. **42.2 Aliasing out of a gated type is still refused.** `0028`'s rule is
    unchanged: recording that alias with the gate in place raises, at candidate
    status too.
-3. **42.3 `settle_gate()` agrees.** For the written name it reports `gated`
-   true with `gated_as` naming the spelling; for an ungated type it reports
-   `gated` false and `gated_as` null.
+3. **42.3 `settle_gate()` agrees.** For a gated type it reports `gated` true;
+   `gated_as` is null when the given spelling is itself the gated one, and
+   names the gated spelling when the given name only reaches a gated type
+   through an alias (the contract's rule; corrected 2026-09-20 after
+   verification, the earlier wording here said the opposite). For an ungated
+   type it reports `gated` false and `gated_as` null.
 4. **42.4 A broken policy value is strict, not an error.** Seed a scope whose
    `review_policy` claim is `'srtict'` by direct insert as `admin` before
    `0036`'s guard exists — or by `ALTER TABLE ... DISABLE TRIGGER` under the

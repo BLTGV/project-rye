@@ -1,0 +1,42 @@
+{
+  "arm": "bucket_probe_cross_subject",
+  "scenario": "harbor_point",
+  "run_id": "bucket-probe-2026-09-20",
+  "note": "Recorded from psql on 2026-09-20. Only one project carries a project_status assertion, so counting delayed projects that way sees one of the two the graph actually records. Traversal answers 'what caused this project', never 'what causes most projects'. The question expects no entry node, so this cannot be an entry miss. Intended bucket: cross_subject.",
+  "results": [
+    {
+      "question_id": "q-crosssubject-01",
+      "steps": [
+        {
+          "seq": 1,
+          "tool": "find_nodes_batch",
+          "intent": "try to search the question the way it is phrased",
+          "args": { "p_queries": ["project delays", "most common cause of delays", "delayed projects"] },
+          "results": []
+        },
+        {
+          "seq": 2,
+          "tool": "sql",
+          "intent": "fall back to listing subjects that carry a status",
+          "args": { "query": "SELECT subject_node_id FROM current_valid_assertions WHERE assertion_type = 'project_status'" },
+          "results": [{ "node_ids": ["fa000001-0003-0001-0001-000000000001"] }]
+        },
+        {
+          "seq": 3,
+          "tool": "find_paths",
+          "intent": "causes upstream of the one project that came back",
+          "args": { "p_from_node_id": "fa000001-0003-0001-0001-000000000001", "p_direction": "in", "p_semantics": ["causal"], "p_max_depth": 3 },
+          "results": [
+            { "node_path": ["fa000001-0003-0001-0001-000000000001", "fa000001-0004-0001-0001-000000000001"], "edge_path": ["fa000002-0002-0001-0001-000000000002"], "edge_type_path": ["affects"], "depth": 1 },
+            { "node_path": ["fa000001-0003-0001-0001-000000000001", "fa000001-0004-0001-0001-000000000001", "fa000001-0001-0001-0001-000000000006"], "edge_path": ["fa000002-0002-0001-0001-000000000002", "fa000002-0002-0001-0001-000000000001"], "edge_type_path": ["affects", "affects"], "depth": 2 }
+          ]
+        }
+      ],
+      "answer": {
+        "refused": false,
+        "text": "I can only account for one delay, the rebar shortage on Pier 9. Nothing here counts causes across projects.",
+        "node_ids": ["fa000001-0004-0001-0001-000000000001"]
+      }
+    }
+  ]
+}
