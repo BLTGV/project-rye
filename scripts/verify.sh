@@ -840,6 +840,51 @@ BEGIN
   ) THEN
     RAISE EXCEPTION 'a traversal function is SECURITY DEFINER or VOLATILE; it must be neither';
   END IF;
+
+  -- Retrieval tracing (0034). The widened signature, no ambiguous overload
+  -- beside it, the security setting the write gate depends on, and the read
+  -- surface that groups a loop.
+  IF to_regprocedure('rye.log_agent_query(text, text, text, uuid[], jsonb)') IS NULL THEN
+    RAISE EXCEPTION 'log_agent_query does not take p_trace; migration 0034 is missing';
+  END IF;
+
+  IF to_regprocedure('rye.log_agent_query(text, text, text, uuid[])') IS NOT NULL THEN
+    RAISE EXCEPTION 'a four-argument log_agent_query overload exists beside the five-argument one; both would match a four-argument call and PostgreSQL would refuse it as ambiguous';
+  END IF;
+
+  IF EXISTS (
+      SELECT 1
+      FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = v_schema
+        AND p.proname = 'log_agent_query'
+        AND p.prosecdef
+  ) THEN
+    RAISE EXCEPTION 'log_agent_query is SECURITY DEFINER; the write gate that stops a viewer tracing depends on it staying SECURITY INVOKER';
+  END IF;
+
+  IF NOT EXISTS (
+      SELECT 1
+      FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = v_schema
+        AND c.relname = 'agent_query_trace'
+        AND 'security_invoker=true' = ANY(coalesce(c.reloptions, '{}'::text[]))
+  ) THEN
+    RAISE EXCEPTION 'the agent_query_trace view is missing or is not security_invoker';
+  END IF;
+
+  -- Nothing auto-logs: no read surface calls log_agent_query.
+  IF EXISTS (
+      SELECT 1
+      FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = v_schema
+        AND p.proname <> 'log_agent_query'
+        AND p.prosrc LIKE '%log_agent_query%'
+  ) THEN
+    RAISE EXCEPTION 'a function in the rye schema calls log_agent_query; tracing is caller-driven and no read may write';
+  END IF;
 END
 $$;
 SQL
