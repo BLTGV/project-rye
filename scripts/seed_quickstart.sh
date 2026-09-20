@@ -29,6 +29,11 @@ fi
 psql "$DB_URL" -v ON_ERROR_STOP=1 <<'SQL'
 SET search_path = rye, public, pg_catalog;
 
+-- Seeding is an operator setting the instance up. Since migration 0026 only a
+-- role the role list says may write may write the core tables, and this script
+-- gets its own psql session, so an unset role would be an unset role throughout.
+SELECT set_config('app.current_role', 'admin', false) \g /dev/null
+
 -- Nodes
 INSERT INTO nodes (node_type, label, properties)
 VALUES

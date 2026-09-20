@@ -2,6 +2,12 @@
 
 SET search_path = rye, public, pg_catalog;
 
+-- This file writes core tables, and scripts/conformance.sh runs each SQL file
+-- in its own psql session, so an unset app.current_role is an unset role for
+-- the whole file. Since migration 0026 only a role the role list says may
+-- write may write; this flow is an operator setting the instance up.
+SELECT set_config('app.current_role', 'admin', false) \g /dev/null
+
 DO $$
 DECLARE
     v_node_id uuid;

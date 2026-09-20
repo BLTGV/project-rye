@@ -11,6 +11,12 @@ DB_URL="${DATABASE_URL:?DATABASE_URL required}"
 result="$(psql "$DB_URL" -v ON_ERROR_STOP=1 -Atq <<'SQL'
 SET search_path = rye, public, pg_catalog;
 
+-- The statements below write a domain table whose CDC trigger inserts an event
+-- and participants into the graph. That graph write is the trigger's, but it
+-- runs in this session, and since migration 0026 only a role the role list says
+-- may write may write. -Atq still prints the set_config row, so discard it.
+SELECT set_config('app.current_role', 'admin', false) \g /dev/null
+
 DO $$
 DECLARE
   v_node_id uuid;

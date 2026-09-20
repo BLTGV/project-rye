@@ -187,6 +187,35 @@ Default seed data:
 
 Agent roles (`agent:*`) can INSERT nodes, edges, events, event participants, assertions, and artifacts. They cannot DELETE any of these. Direct UPDATE is blocked — agents modify data only through approved function paths that set session flags.
 
+**Who may write at all.** Migration `0026` adds one conjunct,
+`rye_role_may_write()`, to every `INSERT`, `UPDATE`, and `DELETE` policy on the
+seven core tables. It is true when `app.current_role` is agent-shaped or names a
+`role_classification_access` row whose `may_write` column is true, and false for
+`viewer`, for an unknown role name, and for an unset role. The rule is a row in
+a table that is already the instance's role list, so a new read-only role is an
+`INSERT` and widening a role later is an `UPDATE`. The snippets below predate
+`0026` and omit that conjunct; the installed policies carry it, and
+`scripts/verify.sh` fails if any of the twenty-one does not.
+
+**The governance structure is admin-only.** The same policies carry a row-local
+test on the row's own type column: a `nodes` row whose `node_type` is
+`onboarding_scope`, and an `edges` row whose `edge_type` is
+`scope_governs_subject`, `scope_governs_source`, or `scope_enables_plugin`, may
+be inserted, updated, or deleted only by a caller whose `app.current_role` is
+`admin`. Because RLS applies `USING` to the old row and `WITH CHECK` to the new
+one, one rule covers archiving, ending, deleting, and re-pointing in both
+directions. `scope_status` is settle-gated to `admin` beside `registry_entry`
+and `review_policy`. `has_step` is not gated, so an inherited scope can still be
+dropped by archiving one; a subject that must stay governed gets its own
+`scope_governs_subject` edge.
+
+Every rule in this subsection reads the role in order to permit, which is what a
+role model is. It protects deployments where a trusted backend sets the session
+variables, and agents that state their role honestly. It is not a defence
+against a hostile caller with a raw connection. Recorded in
+`docs/decisions/0009-who-may-write.md`; contract in `contracts/sql-surface.md`,
+"Who may write".
+
 ```sql
 -- Nodes, edges, artifacts: any role can INSERT (including agents)
 CREATE POLICY node_insert_policy ON nodes
@@ -502,7 +531,7 @@ RLS is enabled and forced on all supporting and configuration tables.
 | SELECT | All roles (needed by `redact_properties()`) |
 | INSERT/UPDATE/DELETE | `admin` only |
 
-It is also the instance's list of role names. The governance policies in section 7 read it to decide whether a session is a named role.
+It is also the instance's list of role names. The governance policies in section 7 read it to decide whether a session is a named role, and the core write policies in section 2.5 read its `may_write` column to decide whether a session may write at all. Only `INSERT` was policed before `0026`; that migration adds the admin-only `UPDATE` policy the "widening a role is an UPDATE" rule needs.
 
 ---
 
