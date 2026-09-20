@@ -140,6 +140,26 @@ single-area grant would reopen the leak this contract closes. No agent client
 calls them. They are console surfaces, and they are reachable only with auth
 mode off.
 
+### Rejecting through the API is a capability, not authorship
+
+The schema gained an authorship rule in `0037`: an agent-shaped SQL session may
+close only a candidate it recorded, and only an admin closes a suggestion of a
+configuration type (`contracts/sql-surface.md`, "Who may reject a suggestion").
+That rule does **not** bind this API, and the difference is deliberate rather
+than an oversight. The Worker sets `app.current_role = 'admin'` on every query,
+so the database sees an admin; what decides here is the route table —
+`POST /api/assertions/:id/reject` requires `rye.candidate.adjudicate`, checked
+against the target. A token holding that capability may therefore close a
+suggestion it did not write, because a person granted it adjudication. A client
+must not read the schema rule as covering this route, and a deployment that
+wants the narrower rule does not grant `rye.candidate.adjudicate`.
+
+`GET /api/nodes/:id/graph` and the knowledge map return fewer edges from `0037`
+onward when an operator marks an edge with `attrs.classification` or
+`attrs.teams`, on exactly the same terms that already apply to marked nodes:
+there is no admin exemption in the node or edge read rule, only teams and
+grants.
+
 A `global` check is weaker than it looks. It asks whether the token holds the
 capability anywhere, not whether it holds it here. `global` routes return
 whole-instance data to any agent that holds the capability for one area.
@@ -323,6 +343,12 @@ badge can link to what made it stale.
 `opportunities_active`. It is an age marker, not change detection: `stale` false
 does not promise the underlying rows are unchanged. The route stays `deny` for
 agent tokens.
+
+Every candidate recorded from `0037` onward carries its author at
+`attrs.recorded_by` — the `app.current_role` of the session that wrote it — and
+the review routes already return `attrs`, so "suggested by" needs no new field.
+Rows written earlier carry no author, and absence means unknown, never "a
+person".
 
 A null `incumbent`, a null field, or an empty list is RLS silence, not absence.
 A caller that cannot read an incumbent sees no incumbent, and must not conclude
