@@ -351,6 +351,14 @@ async function buildSqlOnlyCommit(input: SqlOnlyCommitInput): Promise<string> {
   lines.push("-- Execute this whole script in one database session, for example through a SQL console or SQL-execution MCP tool.");
   lines.push("BEGIN;");
   lines.push("SET LOCAL search_path = rye, public, pg_catalog;");
+  lines.push("-- A session with no role set writes nothing. set_config() rather than");
+  lines.push("-- SET, because SET app.current_role fails through some SQL tools.");
+  lines.push("DO $rye_tabular_intake_session$");
+  lines.push("BEGIN");
+  lines.push("  PERFORM set_config('app.current_role', 'admin', false);");
+  lines.push("  PERFORM set_config('app.current_user_id', 'rye-tabular-intake', false);");
+  lines.push("END");
+  lines.push("$rye_tabular_intake_session$;");
   lines.push("");
   lines.push("CREATE TEMP TABLE IF NOT EXISTS _rye_tabular_intake_context (");
   lines.push("    key text PRIMARY KEY,");
@@ -727,6 +735,8 @@ function ctxUuid(key: string): string {
 async function rejectDuplicateRun(target: PsqlTarget, runId: string, runContext: RunContext): Promise<void> {
   const sql = `
 SET search_path = rye, public, pg_catalog;
+SET "app.current_role" = 'admin';
+SET "app.current_user_id" = 'rye-tabular-intake';
 SELECT external_id
 FROM rye.nodes
 WHERE external_source = ${sqlText(RYE_TABULAR_INTAKE.runExternalSource)}
@@ -773,6 +783,8 @@ async function upsertRunNode(
   );
   const sql = `
 SET search_path = rye, public, pg_catalog;
+SET "app.current_role" = 'admin';
+SET "app.current_user_id" = 'rye-tabular-intake';
 WITH existing AS (
     SELECT id FROM rye.nodes
     WHERE external_source = ${sqlText(RYE_TABULAR_INTAKE.runExternalSource)}
@@ -819,6 +831,8 @@ async function recordRunEvent(
   );
   const sql = `
 SET search_path = rye, public, pg_catalog;
+SET "app.current_role" = 'admin';
+SET "app.current_user_id" = 'rye-tabular-intake';
 SELECT rye.record_event(
   p_event_type := ${sqlText(eventType)},
   p_summary := ${sqlText(summary)},
@@ -865,6 +879,8 @@ async function ensureSourceArtifacts(
     );
     const sql = `
 SET search_path = rye, public, pg_catalog;
+SET "app.current_role" = 'admin';
+SET "app.current_user_id" = 'rye-tabular-intake';
 SELECT rye.record_artifact(
   p_artifact_type := ${sqlText(RYE_TABULAR_INTAKE.sourceFileArtifactType)},
   p_content := ${sqlJson(JSON.stringify(content))},
@@ -924,6 +940,8 @@ async function commitRecord(
 
   const sql = `
 SET search_path = rye, public, pg_catalog;
+SET "app.current_role" = 'admin';
+SET "app.current_user_id" = 'rye-tabular-intake';
 WITH existing AS (
     SELECT id FROM rye.nodes
     WHERE external_source = ${sqlText(RYE_TABULAR_INTAKE.rowExternalSource)}
@@ -995,6 +1013,8 @@ async function updateRunNodeSummary(
 ): Promise<void> {
   const inputPathSql = `
 SET search_path = rye, public, pg_catalog;
+SET "app.current_role" = 'admin';
+SET "app.current_user_id" = 'rye-tabular-intake';
 SELECT COALESCE(properties->>'input_path', '')
 FROM rye.nodes
 WHERE id = ${sqlText(runNodeId)}::uuid;`;
@@ -1019,6 +1039,8 @@ WHERE id = ${sqlText(runNodeId)}::uuid;`;
   );
   const sql = `
 SET search_path = rye, public, pg_catalog;
+SET "app.current_role" = 'admin';
+SET "app.current_user_id" = 'rye-tabular-intake';
 UPDATE rye.nodes
 SET properties = properties || ${sqlJson(JSON.stringify(properties))},
     updated_at = now()
@@ -1037,6 +1059,8 @@ interface ExistingRunProperties {
 async function fetchRunProperties(target: PsqlTarget, runNodeId: string): Promise<ExistingRunProperties> {
   const sql = `
 SET search_path = rye, public, pg_catalog;
+SET "app.current_role" = 'admin';
+SET "app.current_user_id" = 'rye-tabular-intake';
 SELECT properties::text
 FROM rye.nodes
 WHERE id = ${sqlText(runNodeId)}::uuid;`;

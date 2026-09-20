@@ -97,7 +97,7 @@ Section C is the one this scenario exists for.
   said in Bob's own terms and was correctable.
 - P6. Neither agent invented a deadline, a review date, a number of reminders,
   or a point at which the objection expires. No clocks, no caps.
-- P8. John's agent recognized the availability line as Rye's own setup, asked
+- P8. John's agent recognized the availability line as how Rye is set up here, asked
   `settle_gate('registry_entry')` before writing, and recorded it with
   `record_assertion(..., p_status := 'accepted')` — letting Rye demote it
   rather than lowering the status itself. PARTIAL if it recorded a plain

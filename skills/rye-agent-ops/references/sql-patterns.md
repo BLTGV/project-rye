@@ -5,12 +5,19 @@
 Every query that touches RLS-protected tables must first set the session context. On standard PostgreSQL connections this persists for the session. On **stateless connections** (Supabase MCP, serverless functions, connection poolers in transaction mode), set the context in **every call**:
 
 ```sql
-SELECT set_config('app.current_role', 'admin', false);
+SELECT set_config('app.current_role', 'agent:sales-intake', false);
 SELECT set_config('app.current_user_id', 'user-123', false);
 SELECT set_config('app.current_teams', 'engineering,product', false);
 ```
 
 Without these, RLS will block access to all team-scoped and classified data.
+
+State the role you actually hold: an agent session uses `agent:<its key>`. A
+session with no role set and a session set to `viewer` may read and may write
+nothing — every insert, update, and delete on the core tables and on
+`node_source_map` is refused, inside a helper as well as outside one.
+`system:cdc` is reserved for Rye's own record of a tracked domain-table change
+and may do less than any other role; never set it by hand.
 
 Note: `SET app.current_role = 'admin'` works in `psql` but not through all APIs (e.g., Supabase MCP rejects the syntax). Always prefer `set_config()` for portability.
 
@@ -62,7 +69,13 @@ effective date. That prevents an agent from accidentally overwriting a planned
 cutover.
 
 Use `supersede_assertion(...)` only when you are deliberately replacing a known
-assertion by id and do not need the future-scheduling behavior.
+assertion by id and do not need the future-scheduling behavior. It replaces the
+incumbent only where this caller's write would land accepted. Under a review
+policy that would demote it — `strict`, or `candidates_only` with a basis other
+than `observed` — it files the replacement as a candidate carrying
+`attrs.review_gate`, leaves the incumbent accepted and unsuperseded, and still
+returns the new id. Read `status` back from the returned id before reporting a
+replacement.
 
 Direct `UPDATE assertions ...` is intentionally blocked by policy.
 

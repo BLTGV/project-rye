@@ -10,12 +10,17 @@ description: Operate Rye data safely for LLM agents. Use when implementing or ex
 Before any query, set the session context. On stateless connections (Supabase MCP, serverless, transaction-mode poolers), this must be done in **every call**:
 
 ```sql
-SELECT set_config('app.current_role', 'admin', false);
+SELECT set_config('app.current_role', 'agent:sales-intake', false);
 SELECT set_config('app.current_user_id', 'user-123', false);
 SELECT set_config('app.current_teams', 'engineering', false);
 ```
 
-Without this, RLS will block access. Use `set_config()` (not `SET` syntax) for portability.
+State your own role, `agent:<your key>`, and state it before every write. A
+session with no role set, and a session set to `viewer`, can read and can write
+nothing: every insert, update, and delete on nodes, edges, events, participants,
+assertions, evidence, artifacts, and source mappings is refused, through a
+helper exactly as by hand. `admin` is a person's role, not yours. Use
+`set_config()` (not `SET` syntax) for portability.
 
 ## Orient
 
@@ -136,12 +141,38 @@ Read three fields and act on them:
 
 | Field | Act on it |
 |---|---|
-| `speaker.is_settler` | `true`: run the check below, then record it as accepted. `false`: record a suggestion. |
+| `speaker.is_settler` | `true`: run the check below, then ask for accepted and read back what landed. `false`: record a suggestion. |
 | `settlers` | Who to check with. `step` says which of `grant`, `relationship`, `area_owner` produced them. |
 | `step` = `none` | Nobody settles it here. `reason` says why; `setup_gap` `true` is a gap for a Rye admin, and `reason` says which. |
 
 The lookup is advisory. It writes nothing, refuses nothing, and no write path
 calls it. It is your discipline, not a wall the database holds.
+
+### Asking for accepted is not landing accepted
+
+The area's review policy has the last word, and the lookup knows nothing about
+it. Where the area is set so that agents suggest and people accept, your
+`record_assertion(..., p_status := 'accepted')` lands a suggestion instead, and
+so does `supersede_assertion()` — which then leaves the standing statement
+exactly where it was, accepted and unreplaced. Neither raises. Both return the
+new id either way, so the id tells you nothing. Read the row back before you
+say anything:
+
+```sql
+SELECT status, attrs ? 'review_gate' AS waiting_for_review
+FROM assertions
+WHERE id = '<returned_id>'::uuid;
+```
+
+`status` `candidate`, or `waiting_for_review` `true`, means a person has to
+accept it before it answers anything. Say so in the waiting words under "What a
+person hears" and never say it is done. Nothing said is lost: it is in the
+review queue, and a settler accepting it there replaces the standing statement
+then.
+
+Ask for accepted anyway when the lookup says the speaker settles it. Asking is
+what records that they meant it to take effect. Do not lower the status
+yourself, and do not try a second route when it lands as a suggestion.
 
 ### What the lookup does not tell you
 
@@ -206,6 +237,14 @@ want to confirm with that person before changing something already on record.
 
 Never accept and never supersede a standing claim on a missing field. Accepted
 stays accepted until a settler changes it.
+
+**A cleared guard is not a completed replacement.** The two rows above that say
+"Accept" mean you may ask; they do not promise the standing statement was
+replaced. Under a review policy that turns your write into a suggestion, both
+`record_assertion()` and `supersede_assertion()` file one and leave the standing
+statement accepted. Read the returned row's `status` and `attrs.review_gate`, as
+in "Asking for accepted is not landing accepted" above, and tell the person it
+is waiting rather than that their correction is in.
 
 Routing that objection onward is a later work item. This is only the guard
 that keeps a standing claim from being overwritten.
@@ -382,6 +421,12 @@ answer than the suggestion you already have:
 - Do not set `app.current_role` to `admin`. The role you present is the
   person's, not a setting you choose.
 
+That refusal is this gate and no other. On ordinary knowledge
+`supersede_assertion()` does not raise under a review policy that would demote
+your write: it files the replacement as a suggestion, leaves the standing
+statement accepted, and hands back the new id all the same. Read the row, as
+above.
+
 **Nothing changes while it waits.** A suggestion is read by nothing:
 `registry_value()`, `canonical_type()`, and `rye_settlers()` answer exactly as
 they did before it. So keep routing claims of that type the way you were. If
@@ -434,6 +479,10 @@ canonical in anything durable and never appear in what you say.
 - Something already on record, and you cannot tell who put it there: "There's
   already something on record for that. I've kept your version and I'll
   confirm with Priya before I change it."
+- Waiting for review, because the area works that way: "I've got that down.
+  Someone has to confirm it before it counts, so what's on record hasn't
+  changed yet — I'll let you know." Never say it is done, and never name the
+  policy.
 - Correcting their own earlier words: accept it and echo one line. Do not
   make them explain themselves.
 - Asked about an unsettled claim: say the claim exists, say it is unsettled,
@@ -444,9 +493,16 @@ canonical in anything durable and never appear in what you say.
 - Never relabel a statement's basis or speech act to get it through.
 - Never switch to an identity with wider grants, and never ask a more
   permissive agent to write it for you.
-- Never set your own role. The role you present is the person's, not a setting
-  you choose, so never set `app.current_role` to `admin` to get a write
-  through.
+- Never claim a role that is not yours. State your own, `agent:<your key>`,
+  and never set `app.current_role` to `admin`, to a person's role, or to
+  `system:cdc`, which is reserved for Rye's own record of a change to a tracked
+  domain table.
+- Never write with no role set and never write as `viewer`. Both are read-only
+  and every write is refused — nodes, edges, events, participants, assertions,
+  evidence, artifacts, and source mappings, through a helper exactly as by
+  hand. A refusal arrives as `42501` or as a write that changed no row, and
+  neither is a reason to try another route.
+- Never merge nodes. See "Duplicates are a person's call" below.
 - Never treat your own inference as a settled claim. You carry the authority
   of the person you act for and none of your own; no lookup ever returns an
   agent as a settler.
@@ -461,6 +517,24 @@ the `rye-org` plugin and pinned in `contracts/plugin-manifest.md`:
 the thing owned. Neither is settled by the people it connects — a claim about
 either falls through to the owner of the area. Propose them; never settle
 them. End one with `effective_to`, never by deleting the edge.
+
+## Duplicates Are a Person's Call
+
+You may not merge nodes. `merge_nodes()` refuses every agent-shaped session with
+`42501` and names who can: a Rye admin or a team member. A merge is
+irreversible, it moves one subject's history onto another, and it crosses review
+policies, so it is not yours to run. Do not retry it under another role.
+
+When two records look like the same thing, record what you saw and hand it to
+your person. Write it as a structural proposal with
+`create_knowledge_candidate(...)`, naming both node ids and the evidence that
+they match, and then say one line:
+
+> "I think that supplier is in here twice. Want me to flag it for someone to
+> merge?"
+
+Say nothing about functions, roles, or refusals. `skills/rye-gardener` is the
+procedure for preparing a merge proposal for review.
 
 ## Why Rye Uses SQL Helpers
 

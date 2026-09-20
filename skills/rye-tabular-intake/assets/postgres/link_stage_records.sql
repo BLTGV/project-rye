@@ -1,4 +1,8 @@
 SET search_path = rye, public, pg_catalog;
+-- link_record() writes nodes and node_source_map, so this session needs a role
+-- that may write. A session with no role set writes nothing.
+SET "app.current_role" = 'admin';
+SET "app.current_user_id" = 'rye-tabular-intake';
 
 SELECT rye.link_record(
     p_source_schema := 'public',

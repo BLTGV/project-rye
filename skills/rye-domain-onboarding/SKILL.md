@@ -37,5 +37,11 @@ description: Add new Rye domain conventions and profile migrations. Use when int
   which is who may see it.
 - Keep core migrations backward-safe.
 - Do not mutate assertion content directly.
-- Route assertion supersession through `supersede_assertion(...)`; avoid direct assertion updates.
+- Route assertion supersession through `supersede_assertion(...)`; avoid direct assertion updates. Under a review policy that would demote the caller's write it files a candidate and leaves the incumbent standing, so read `status` back from the returned id instead of assuming the replacement landed.
+- Set a role that may write before any write, in every session. A `viewer` and
+  an unset role write nothing, and a migration or seed script that writes sets
+  `app.current_role` to `admin` first.
+- Scopes are a Rye admin's to create, activate, and re-point, and so are the
+  `scope_governs_subject`, `scope_governs_source`, and `scope_enables_plugin`
+  edges. Propose a scope; do not build one under another role.
 - Enforce profile behavior through tests, not docs only.

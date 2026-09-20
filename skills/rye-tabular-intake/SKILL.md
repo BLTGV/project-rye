@@ -78,6 +78,8 @@ If the user wants to inspect, extract, map, or stage data without touching the d
 
 If the user has no `DATABASE_URL` but can execute SQL through a tool such as a SQL console or Supabase MCP, use `tabular_commit_rye.mts --emit-sql`, then execute the generated SQL in one call/session. The source files referenced by the NDJSON must still be readable locally when the SQL is generated so the tool can compute source hashes.
 
+The commit step writes as a Rye admin and says so in the SQL it runs or emits. A session with no role set, and a session set to `viewer`, writes nothing at all — every insert into `nodes`, `events`, `assertions`, `artifacts`, and `node_source_map` is refused — so do not strip the role lines out of an emitted script, and do not run the intake SQL in a session that has not set one.
+
 ## Runs And Duplicates
 
 A run is created only when `tabular_commit_rye.mts` is called.

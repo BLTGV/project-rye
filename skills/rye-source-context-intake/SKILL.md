@@ -132,6 +132,14 @@ node skills/rye-source-context-intake/scripts/source_context_commit_rye.mts \
 
 Use `--validate-only` to check record shape without writing.
 
+A committed run prints `{"ok": true, "run_id": ..., "summary": ...,
+"waiting_for_review": [...]}`. `waiting_for_review` lists every replacement the
+area's review policy filed as a suggestion instead: the earlier claim is still
+the current one until a person accepts the new one, and `summary
+.waiting_for_review` counts them. The commit itself still succeeded. Report
+those subjects in the post-commit worklist below rather than describing them as
+updated.
+
 ## MCP
 
 Use `scripts/rye_mcp_server.mts` when an LLM client needs a Rye instance interface. It exposes read tools (`rye.catalog`, `rye.search_nodes`, `rye.node_summary`, `rye.source_inventory`, `rye.pending_context_confirmations`) and source-context write tools (`rye.validate_source_context_update`, `rye.commit_source_context_update`).

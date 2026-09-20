@@ -23,6 +23,18 @@ so neither form survives to the next call: pass `set_config('app.current_role',
 `AGENTS.md`, where `SET app.current_role = ...` does not work through the MCP at
 all.
 
+The role is not decoration. A session with no role set, and a session whose role
+is `viewer`, reads normally and writes nothing at all: every insert, update, and
+delete on `nodes`, `edges`, `events`, `event_participants`, `assertions`,
+`assertion_evidence`, `artifacts`, and `node_source_map` is refused, inside a
+`SECURITY DEFINER` helper as well as outside one. A refusal is `42501` where the
+table owner is a superuser and a write that changed no row where the owner is
+bound by RLS, so check the row rather than one error text. An agent session sets
+its own key — `agent:<key>` — and never `admin` or `system:cdc`, which is
+reserved for Rye's record of a change to a tracked domain table and may insert
+nothing but events and participants. The normative table is "Who may write" in
+`contracts/sql-surface.md`.
+
 Call `rye_catalog()` first. Use `agent_node_summary(node_id, max_items)` for
 bounded context. Read current knowledge from `current_valid_assertions` or
 `current_assertions_weighted`, never from a bare `superseded_at IS NULL`
@@ -236,6 +248,10 @@ an answer, and neither is asking a more permissive agent. An agent does not set
 `app.current_role` to `admin`: the role it presents is the person's, not a
 setting it chooses.
 
+Those refusals belong to this gate alone. On an ordinary type
+`supersede_assertion()` does not raise under a review policy that would demote
+the caller's write; it files a suggestion. See "Assertions" below.
+
 Until an admin accepts it, the suggestion is read by nothing. `registry_value()`,
 `canonical_type()`, and `rye_settlers()` return exactly what they returned
 before, so claims of the affected type keep routing as they did, and a waiting
@@ -363,6 +379,29 @@ raises. `candidates_only` forces non-observed writes to candidates. `strict`
 forces all writes to candidates. Agent promotion under either policy requires
 `rye.authoritative.promote`.
 
+Three things about that policy are worth knowing before reading a helper's
+answer:
+
+- **It holds on every route.** `supersede_assertion()` no longer lands an
+  accepted replacement under a policy that would demote the caller's write. It
+  writes the replacement as a candidate carrying `attrs.review_gate`, leaves the
+  incumbent accepted and unsuperseded, raises a `NOTICE`, and returns the new
+  id exactly as before. The return value says nothing; read `status` or
+  `attrs->'review_gate'` from the returned id, or find the row in
+  `review_queue`. A settler accepting the candidate supersedes the incumbent
+  then. `resolve_knowledge_gap()` follows the same rule: the gap stays in
+  `open_gaps` and the `knowledge_gap_resolved` event carries `pending_review`.
+- **The most restrictive policy wins.** When more than one scope governs a
+  subject — what a cross-scope `merge_nodes()` leaves behind — the governing
+  scope is the one whose policy is strictest, ordering `strict` above
+  `candidates_only` above `open`, with `scope.id` only as a tie-break.
+- **A helper takes the stricter of two resolutions.** It resolves the scope
+  with the witness and again without one, and applies the stricter policy, so a
+  `scope_governs_source` edge from an `open` scope no longer opens a source on
+  an instance whose `DEFAULT_SCOPE` is `strict` or `candidates_only`. Those
+  writes land as candidates. To keep the exception, a Rye admin gives those
+  subjects their own `scope_governs_subject` edge to the open scope.
+
 To represent uncertainty, write one or more `candidate` rows on the same
 tuple. Review them through `review_queue` or `competing_candidates`.
 
@@ -383,7 +422,7 @@ SELECT reject_candidate(
 An inferred candidate cannot displace accepted observed, reported, assumed, or
 unknown knowledge. Do not update assertion content or lifecycle columns
 directly. Public `supersede_assertion()` only replaces the same subject, type,
-and key.
+and key, and only where the caller's write would land accepted.
 
 Use `schedule_assertion_change()` for future-effective replacements.
 Operational views continue returning the current assertion until the cutover.
@@ -393,7 +432,12 @@ writes derivation evidence, propagates classification, stores a watermark, and
 records a distillation event. It rejects mixed-access source sets.
 
 Use `resolve_knowledge_gap()` to close an accepted `knowledge_gap` with an
-answer assertion. It creates a resolved version on the gap's own tuple.
+answer assertion. It creates a resolved version on the gap's own tuple. Under a
+demoting review policy the resolved version is a candidate, the gap stays open
+and stays in `open_gaps`, and the event says `pending_review`. Because that
+version is written with basis `inferred`, `accept_assertion()` will not let it
+displace a gap recorded with another basis; record gaps with basis `inferred`,
+or reject the candidate and record the resolved gap with `record_assertion()`.
 
 ## Predictions and future knowledge
 
@@ -436,14 +480,33 @@ Digest narrative artifacts inherit the digest assertion classification.
 
 ## Other safe writes
 
-- Use `link_record()` to connect a domain row to a graph node.
-- Use `track_table()` to capture linked domain-row changes.
+- Use `link_record()` to connect a domain row to a graph node. Writing or
+  re-pointing a `node_source_map` row needs a role that may write, as the core
+  tables do; deleting one still needs an admin or a manager.
+- Use `track_table()` to capture linked domain-row changes. The CDC trigger
+  records its event under the reserved role `system:cdc`, so a tracked table
+  still produces its event when the application's session sets no Rye role at
+  all, and the event's `properties.session_role` keeps whatever role that
+  session did have. Never set `system:cdc` by hand: it may insert events and
+  participants and nothing else, anywhere.
 - Use `update_node_properties()` only when the node itself is the system of
-  record. Update the domain table otherwise.
+  record. Update the domain table otherwise. It refuses a session that may not
+  write, and refuses a non-admin editing an `onboarding_scope` node, with a
+  sentence rather than a silent miss.
 - Use `record_artifact()` for artifacts and optional content-hash deduplication.
 - Use `log_agent_query()` to audit agent reads.
 - Use `type_vocabulary_report` and the Rye gardener skill to propose aliases or
-  merges. The gardener never calls `merge_nodes()` directly.
+  merges. No agent merges: `merge_nodes()` refuses every agent-shaped session
+  with `42501` and names who can, a Rye admin or a team member. It also refuses
+  a non-admin merging a node the governance structure touches. An agent that
+  finds a duplicate records the evidence and tells its person.
+- Creating, activating, archiving, ending, deleting, or re-pointing the
+  governance structure — `onboarding_scope` nodes and `scope_governs_subject`,
+  `scope_governs_source`, and `scope_enables_plugin` edges — needs
+  `app.current_role = 'admin'`, and so do the `scope_status`, `review_policy`,
+  and `registry_entry` assertions that go with it. That covers
+  `create_onboarding_scope()`, `activate_onboarding_scope()`,
+  `enable_plugin_for_scope()`, and `record_scope_policy()`.
 - Use the tabular intake skill for CSV/XLSX staging and duplicate-run checks.
 
 ## Review and operational views

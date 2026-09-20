@@ -404,8 +404,11 @@ async function runPsqlFile(target: PsqlTarget, filePath: string): Promise<void> 
 }
 
 async function runPsqlCommand(target: PsqlTarget, sql: string): Promise<void> {
+  // Each psql call is its own session, and a session with no role set may not
+  // write. Plain SET rather than set_config(), so no extra row is printed.
+  const scoped = `SET "app.current_role" = 'admin';\nSET "app.current_user_id" = 'rye-tabular-intake';\n${sql}`;
   try {
-    await runPsql(target, ["-v", "ON_ERROR_STOP=1", "-c", sql], undefined, repoRoot);
+    await runPsql(target, ["-v", "ON_ERROR_STOP=1", "-c", scoped], undefined, repoRoot);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown psql error";
     throw new CliError(
