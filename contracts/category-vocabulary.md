@@ -51,6 +51,33 @@ ordinary lifecycle (`record_assertion`, `accept_assertion`,
 `supersede_assertion`), so the next call shows the new words. No new table and
 no file; the function never creates the `category` node.
 
+## Describing a category, twice, as an agent
+
+`describe_category()` upserts one `category` node per node type and records the
+description as an assertion on it, so the second call for a type is an `UPDATE`
+of an existing node. An `agent:*` caller may update a node only through the
+named `update_node_properties` gate, and a client never sets that gate itself,
+so **the function opens it around its own upsert and clears it on every exit
+path** (migration `0036`). A repeat `describe_category()` therefore works for an
+agent role, updating the existing category node and leaving `app.write_path`
+empty afterwards. Nothing else about the call changes: a `viewer` and a session
+with no role set are still refused by the write gate, the description is still
+an ordinary assertion and obeys the review policy and the settle gate like any
+other, and the function still never creates the `category` node for a scope it
+cannot see. Recorded in `docs/decisions/0013-leftovers-fail-restrictive.md`.
+
+## An unknown `--scope` is answered, never substituted
+
+A `--scope` value that names nothing does **not** fall back to automatic scope
+selection. A key and a uuid take the identical path: `scope_found` is `false`,
+`mode` is `explicit`, `categories` is `[]`, `empty` is `true` — the answer
+"Failure behavior" already describes for an unknown uuid. `--json` prints that
+answer verbatim; without `--json` the CLI prints `scope not found: <value>`.
+Both exit non-zero, because the caller asked about something that does not
+exist. The same rule governs `./scripts/rye context --scope`. An agent that
+passes a scope key it cannot confirm gets an empty answer and a non-zero exit,
+never another scope's vocabulary.
+
 ## Versioning
 
 Additive: new top-level and per-category keys may appear at any time, and
