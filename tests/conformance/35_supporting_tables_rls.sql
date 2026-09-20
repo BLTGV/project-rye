@@ -292,6 +292,144 @@ BEGIN
         RAISE EXCEPTION 'A viewer created a code counter';
     END IF;
 
+    -- ==================================================================
+    -- A writing role cannot START a series anywhere either. Pre-creating
+    -- next month's row, or this month's at a number of the caller's
+    -- choosing, is the same damage by another route: generate_crm_code()
+    -- would then issue a code wider than the series it continues.
+    -- ==================================================================
+    FOREACH v_role IN ARRAY ARRAY['team_member', 'agent:t'] LOOP
+        PERFORM set_config('app.current_role', v_role, true);
+
+        v_failed := false;
+        BEGIN
+            INSERT INTO crm_code_counters (prefix, year_month, next_val)
+            VALUES ('TSK', to_char(now() + interval '1 month', 'YYMM'), 10000);
+        EXCEPTION WHEN OTHERS THEN
+            v_failed := true;
+            v_msg := SQLERRM;
+        END;
+        IF NOT v_failed THEN
+            RAISE EXCEPTION
+                'Role "%" pre-created next month''s TSK counter at 10000; the first code that month would truncate and the second would collide',
+                v_role;
+        END IF;
+        IF v_msg NOT LIKE '%starts where generate_crm_code() starts it%' THEN
+            RAISE EXCEPTION
+                'Role "%" pre-created counter failed for the wrong reason: %', v_role, v_msg;
+        END IF;
+
+        v_failed := false;
+        BEGIN
+            INSERT INTO crm_code_counters (prefix, year_month, next_val)
+            VALUES ('OVR', v_yymm, 10000);
+        EXCEPTION WHEN OTHERS THEN
+            v_failed := true;
+            v_msg := SQLERRM;
+        END;
+        IF NOT v_failed THEN
+            RAISE EXCEPTION 'Role "%" started a series at 10000', v_role;
+        END IF;
+
+        -- Even the honest-looking value is refused unless it is the one the
+        -- function writes on first use.
+        v_failed := false;
+        BEGIN
+            INSERT INTO crm_code_counters (prefix, year_month, next_val)
+            VALUES ('ONE', v_yymm, 1);
+        EXCEPTION WHEN OTHERS THEN
+            v_failed := true;
+            v_msg := SQLERRM;
+        END;
+        IF NOT v_failed THEN
+            RAISE EXCEPTION 'Role "%" started a series by hand at 1', v_role;
+        END IF;
+    END LOOP;
+
+    PERFORM set_config('app.current_role', 'admin', true);
+    IF EXISTS (
+        SELECT 1 FROM crm_code_counters
+        WHERE prefix IN ('OVR', 'ONE')
+           OR (prefix = 'TSK' AND year_month <> v_yymm)
+    ) THEN
+        RAISE EXCEPTION 'A hand-made counter survived';
+    END IF;
+
+    -- ==================================================================
+    -- system:cdc is a writing role for rye_role_may_write(), because 0026
+    -- gives it a row in role_classification_access. It records domain
+    -- changes and does nothing else, anywhere: no code, no counter.
+    -- ==================================================================
+    PERFORM set_config('app.current_role', 'system:cdc', true);
+    v_failed := false;
+    BEGIN
+        v_code := generate_crm_code('CDC');
+    EXCEPTION WHEN OTHERS THEN
+        v_failed := true;
+        v_msg := SQLERRM;
+    END;
+    IF NOT v_failed THEN
+        RAISE EXCEPTION 'system:cdc drew the code %', v_code;
+    END IF;
+    IF v_msg NOT LIKE '%system:cdc only records domain changes%' THEN
+        RAISE EXCEPTION 'system:cdc was refused a code for the wrong reason: %', v_msg;
+    END IF;
+
+    -- Under the RLS-bound path the update policy filters the row out and the
+    -- statement matches nothing; where the owner bypasses RLS the trigger
+    -- raises. Both are a refusal, and the row is what is asserted.
+    v_failed := false;
+    v_rows := -1;
+    BEGIN
+        UPDATE crm_code_counters SET next_val = next_val + 1
+        WHERE prefix = 'TSK' AND year_month = v_yymm;
+        GET DIAGNOSTICS v_rows = ROW_COUNT;
+    EXCEPTION WHEN OTHERS THEN
+        v_failed := true;
+        v_msg := SQLERRM;
+    END;
+    IF NOT v_failed AND v_rows <> 0 THEN
+        RAISE EXCEPTION 'system:cdc stepped % code counters by hand', v_rows;
+    END IF;
+
+    -- ==================================================================
+    -- Past 9999 the code widens instead of truncating. The counter is
+    -- walked there the only legal way there is -- one code at a time,
+    -- through the function, as a writing role -- because no shortcut is
+    -- permitted to any caller, including the table owner this suite runs
+    -- as under scripts/test-nonsuperuser-owner.sh.
+    -- ==================================================================
+    PERFORM set_config('app.current_role', 'team_member', true);
+    SELECT next_val INTO v_before
+    FROM crm_code_counters WHERE prefix = 'TSK' AND year_month = v_yymm;
+    WHILE (SELECT next_val FROM crm_code_counters
+           WHERE prefix = 'TSK' AND year_month = v_yymm) < 10000 LOOP
+        PERFORM generate_crm_code('TSK');
+    END LOOP;
+
+    v_task := create_task(p_title := 'Supporting RLS task 10000', p_assigned_to_id := v_owner);
+    IF (SELECT external_id FROM nodes WHERE id = v_task)
+       IS DISTINCT FROM 'TSK-' || v_yymm || '-10000'
+    THEN
+        RAISE EXCEPTION
+            'The 10000th TSK code is %, not TSK-%-10000: the sequence truncated',
+            (SELECT external_id FROM nodes WHERE id = v_task), v_yymm;
+    END IF;
+
+    v_opp := v_task;
+    v_task := create_task(p_title := 'Supporting RLS task 10001', p_assigned_to_id := v_owner);
+    IF (SELECT external_id FROM nodes WHERE id = v_task)
+       IS DISTINCT FROM 'TSK-' || v_yymm || '-10001'
+    THEN
+        RAISE EXCEPTION 'The 10001st TSK code is %',
+            (SELECT external_id FROM nodes WHERE id = v_task);
+    END IF;
+    IF (SELECT external_id FROM nodes WHERE id = v_task)
+       = (SELECT external_id FROM nodes WHERE id = v_opp)
+    THEN
+        RAISE EXCEPTION 'Two tasks past 9999 carry the same code';
+    END IF;
+
     -- The counter is readable, because generate_crm_code() reads it back and
     -- because it says nothing about the world.
     PERFORM set_config('app.current_role', 'viewer', true);
@@ -374,7 +512,9 @@ BEGIN
     -- Reproduction 2. A read-only session forges a merge and erases real
     -- ones.
     -- ==================================================================
-    FOREACH v_role IN ARRAY ARRAY['viewer', ''] LOOP
+    -- system:cdc is in the list: it is a writing role for
+    -- rye_role_may_write(), and it records domain changes and nothing else.
+    FOREACH v_role IN ARRAY ARRAY['viewer', '', 'system:cdc'] LOOP
         PERFORM set_config('app.current_role', v_role, true);
         v_failed := false;
         BEGIN
@@ -386,6 +526,11 @@ BEGIN
         END;
         IF NOT v_failed THEN
             RAISE EXCEPTION 'Role "%" forged a merge record', v_role;
+        END IF;
+        IF v_role = 'system:cdc'
+           AND v_msg NOT LIKE '%system:cdc only records domain changes%'
+        THEN
+            RAISE EXCEPTION 'system:cdc was refused a merge record for the wrong reason: %', v_msg;
         END IF;
     END LOOP;
 

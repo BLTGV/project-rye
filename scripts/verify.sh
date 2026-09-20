@@ -293,6 +293,21 @@ BEGIN
     RAISE EXCEPTION 'supersede_assertion does not apply the review policy';
   END IF;
 
+  -- 0030: the other two helpers that demote say so, in the same marker.
+  IF EXISTS (
+      SELECT required.name
+      FROM (VALUES ('record_assertion'), ('record_distillation')) required(name)
+      WHERE NOT EXISTS (
+          SELECT 1 FROM pg_proc p
+          JOIN pg_namespace n ON n.oid = p.pronamespace
+          WHERE n.nspname = v_schema
+            AND p.proname = required.name
+            AND p.prosrc LIKE '%review_gate%'
+      )
+  ) THEN
+    RAISE EXCEPTION 'record_assertion or record_distillation does not mark a review-policy demotion';
+  END IF;
+
   IF EXISTS (
       SELECT 1 FROM pg_proc p
       JOIN pg_namespace n ON n.oid = p.pronamespace
@@ -345,6 +360,9 @@ BEGIN
     RAISE EXCEPTION 'crm_code_counters and node_merges must both have RLS enabled+forced';
   END IF;
 
+  IF to_regprocedure('rye.rye_may_write_table(text)') IS NULL THEN
+    RAISE EXCEPTION 'rye_may_write_table function missing';
+  END IF;
   IF to_regprocedure('rye.rye_crm_code_counter_gate()') IS NULL THEN
     RAISE EXCEPTION 'rye_crm_code_counter_gate function missing';
   END IF;

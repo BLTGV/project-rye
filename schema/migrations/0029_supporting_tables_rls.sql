@@ -46,6 +46,35 @@
 SET search_path = rye, pg_catalog, public;
 
 -- ---------------------------------------------------------------------------
+-- 0. May this session write this table at all
+-- ---------------------------------------------------------------------------
+--
+-- rye_role_may_write() answers "does this session write", and it says yes to
+-- system:cdc, because 0026 gives that reserved role a row in
+-- role_classification_access. What keeps system:cdc to events and
+-- event_participants is a second test inside rye_gate_may_write(), which only
+-- the seven core tables carry. A session that sets app.current_role to
+-- system:cdc by hand would therefore have drawn a code, stepped a counter, and
+-- forged a merge record on the two tables below.
+--
+-- So the table question gets its own answer, in one place. The reserved role
+-- name is written once, here, rather than in every policy and trigger that
+-- has to honour it.
+CREATE OR REPLACE FUNCTION rye_may_write_table(p_table_name text)
+RETURNS boolean
+SET search_path = rye, pg_catalog
+AS $$
+    SELECT rye_role_may_write()
+       AND (
+           current_setting('app.current_role', true) IS DISTINCT FROM 'system:cdc'
+           OR p_table_name IN ('events', 'event_participants')
+       );
+$$ LANGUAGE sql STABLE;
+
+COMMENT ON FUNCTION rye_may_write_table(text) IS
+    'True when app.current_role may write this table: rye_role_may_write(), and system:cdc only for events and event_participants. The contract rule that system:cdc records domain changes and does nothing else, anywhere, in one expression. STABLE, SECURITY INVOKER, session variables only.';
+
+-- ---------------------------------------------------------------------------
 -- 1. crm_code_counters
 -- ---------------------------------------------------------------------------
 
@@ -64,13 +93,13 @@ CREATE POLICY ccc_read_policy ON crm_code_counters
 DROP POLICY IF EXISTS ccc_insert_policy ON crm_code_counters;
 CREATE POLICY ccc_insert_policy ON crm_code_counters
     FOR INSERT
-    WITH CHECK (rye_role_may_write());
+    WITH CHECK (rye_may_write_table('crm_code_counters'));
 
 DROP POLICY IF EXISTS ccc_update_policy ON crm_code_counters;
 CREATE POLICY ccc_update_policy ON crm_code_counters
     FOR UPDATE
-    USING (rye_role_may_write())
-    WITH CHECK (rye_role_may_write());
+    USING (rye_may_write_table('crm_code_counters'))
+    WITH CHECK (rye_may_write_table('crm_code_counters'));
 
 -- A counter is never removed. Removing one restarts the series, which is the
 -- same damage as rewinding it.
@@ -89,9 +118,9 @@ BEGIN
             USING ERRCODE = '42501';
     END IF;
 
-    IF NOT rye_role_may_write() THEN
+    IF NOT rye_may_write_table('crm_code_counters') THEN
         RAISE EXCEPTION
-            'A session that may not write attempted to % crm_code_counters. Set app.current_role to a role the instance allows to write.',
+            'A session that may not write crm_code_counters attempted to % it. Set app.current_role to a role the instance allows to write; system:cdc only records domain changes.',
             lower(TG_OP)
             USING ERRCODE = '42501';
     END IF;
@@ -111,9 +140,20 @@ BEGIN
                 OLD.prefix, OLD.year_month, OLD.next_val, NEW.next_val
                 USING ERRCODE = '42501';
         END IF;
-    ELSIF NEW.next_val < 1 THEN
+    -- A new row is held to the shape generate_crm_code() writes on first use,
+    -- for the same reason an update is: the function inserts
+    -- (prefix, to_char(now(), 'YYMM'), 2) -- it has just drawn code 0001 and
+    -- says the next one is 2. Anything else starts a series somewhere of the
+    -- caller's choosing, and a series started high re-collides as soon as it
+    -- passes the width of the code. The month is the function's own
+    -- expression, so a row for a month that has not begun is refused too.
+    ELSIF NEW.year_month IS DISTINCT FROM to_char(now(), 'YYMM')
+          OR NEW.next_val IS DISTINCT FROM 2
+    THEN
         RAISE EXCEPTION
-            'A code counter starts at 1 or later, not %.', NEW.next_val
+            'A code counter starts where generate_crm_code() starts it: (%, %, 2) for the current month, not (%, %, %). Draw the first code with generate_crm_code().',
+            NEW.prefix, to_char(now(), 'YYMM'),
+            NEW.prefix, NEW.year_month, NEW.next_val
             USING ERRCODE = '42501';
     END IF;
 
@@ -155,7 +195,7 @@ CREATE POLICY nm_read_policy ON node_merges
 DROP POLICY IF EXISTS nm_insert_policy ON node_merges;
 CREATE POLICY nm_insert_policy ON node_merges
     FOR INSERT
-    WITH CHECK (rye_role_may_write());
+    WITH CHECK (rye_may_write_table('node_merges'));
 
 DROP POLICY IF EXISTS nm_update_policy ON node_merges;
 CREATE POLICY nm_update_policy ON node_merges
@@ -178,9 +218,9 @@ BEGIN
             USING ERRCODE = '42501';
     END IF;
 
-    IF NOT rye_role_may_write() THEN
+    IF NOT rye_may_write_table('node_merges') THEN
         RAISE EXCEPTION
-            'A session that may not write attempted to record a node merge. Set app.current_role to a role the instance allows to write.'
+            'A session that may not write node_merges attempted to record a node merge. Set app.current_role to a role the instance allows to write; system:cdc only records domain changes.'
             USING ERRCODE = '42501';
     END IF;
 
@@ -195,6 +235,47 @@ DROP TRIGGER IF EXISTS trg_node_merges_gate ON node_merges;
 CREATE TRIGGER trg_node_merges_gate
     BEFORE INSERT OR UPDATE OR DELETE ON node_merges
     FOR EACH ROW EXECUTE FUNCTION rye_node_merge_gate();
+
+-- ---------------------------------------------------------------------------
+-- 3. The code itself: a sequence past 9999 widens, it does not truncate
+-- ---------------------------------------------------------------------------
+--
+-- lpad(v_seq::text, 4, '0') pads a short number and TRUNCATES a long one, so
+-- the 10000th code of a month was 'TSK-2511-1000' -- a code the 1000th task
+-- already has, and idx_nodes_external_unique refuses the second one. It is a
+-- latent defect independent of who writes the counter: a busy month reaches it
+-- through generate_crm_code() alone. The format {PREFIX}-{YYMM}-{SEQ} is
+-- unchanged for every sequence that fits in four digits, which is every code
+-- any instance has issued, and past that the sequence widens: 10000, 10001.
+-- Codes stay unique, and they stay lexically ordered within a run of the same
+-- width, which is what the four-digit padding was for.
+--
+-- Carried forward from 0002 unchanged except that one expression.
+CREATE OR REPLACE FUNCTION generate_crm_code(p_prefix text) RETURNS text
+SET search_path = rye, pg_catalog
+AS $$
+DECLARE
+    v_yymm text;
+    v_seq int;
+BEGIN
+    v_yymm := to_char(now(), 'YYMM');
+
+    INSERT INTO crm_code_counters (prefix, year_month, next_val)
+    VALUES (p_prefix, v_yymm, 2)
+    ON CONFLICT (prefix, year_month)
+    DO UPDATE SET next_val = crm_code_counters.next_val + 1
+    RETURNING next_val - 1 INTO v_seq;
+
+    RETURN p_prefix || '-' || v_yymm || '-' ||
+           CASE WHEN length(v_seq::text) < 4
+                THEN lpad(v_seq::text, 4, '0')
+                ELSE v_seq::text
+           END;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION generate_crm_code(text) IS
+    'Next human-readable code for a prefix in the current month, {PREFIX}-{YYMM}-{SEQ}. The sequence is zero-padded to four digits and widens past 9999 rather than truncating. SECURITY INVOKER: the counter moves as the caller, under the rules on crm_code_counters.';
 
 COMMENT ON TABLE crm_code_counters IS
     'Per prefix and month counter behind generate_crm_code(). RLS enabled and forced: readable by every role, movable only forward by one, only by a role that may write, and never deleted.';
