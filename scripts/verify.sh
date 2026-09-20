@@ -243,6 +243,66 @@ BEGIN
     RAISE EXCEPTION 'assertion lifecycle gate helper functions are missing';
   END IF;
 
+  -- Review policy holds on every route (0027). Three facts, each checked
+  -- where it lives: the ranking helper exists, governing_scope() orders by
+  -- it rather than by uuid alone, supersede_assertion() can write the
+  -- review_gate marker, and the 0025 insert exemption is gone.
+  IF to_regprocedure('rye.scope_review_policy_rank(uuid)') IS NULL THEN
+    RAISE EXCEPTION 'scope_review_policy_rank function missing';
+  END IF;
+
+  IF to_regprocedure('rye.effective_review_policy(uuid,uuid,text,uuid)') IS NULL THEN
+    RAISE EXCEPTION 'effective_review_policy function missing';
+  END IF;
+
+  -- Every helper that inserts an assertion takes the stricter of its two
+  -- scope resolutions, or the insert guard can demote a row the helper meant
+  -- to keep accepted and the commit-time check then refuses the transaction.
+  IF EXISTS (
+      SELECT required.name
+      FROM (VALUES ('record_assertion'), ('supersede_assertion'), ('record_distillation'))
+           required(name)
+      WHERE NOT EXISTS (
+          SELECT 1 FROM pg_proc p
+          JOIN pg_namespace n ON n.oid = p.pronamespace
+          WHERE n.nspname = v_schema
+            AND p.proname = required.name
+            AND p.prosrc LIKE '%effective_review_policy%'
+      )
+  ) THEN
+    RAISE EXCEPTION 'an assertion-inserting helper does not take the stricter of its two scope resolutions';
+  END IF;
+
+  IF NOT EXISTS (
+      SELECT 1 FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = v_schema
+        AND p.proname = 'governing_scope'
+        AND p.prosrc LIKE '%scope_review_policy_rank%'
+  ) THEN
+    RAISE EXCEPTION 'governing_scope does not order by review policy restrictiveness';
+  END IF;
+
+  IF NOT EXISTS (
+      SELECT 1 FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = v_schema
+        AND p.proname = 'supersede_assertion'
+        AND p.prosrc LIKE '%review_gate%'
+  ) THEN
+    RAISE EXCEPTION 'supersede_assertion does not apply the review policy';
+  END IF;
+
+  IF EXISTS (
+      SELECT 1 FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = v_schema
+        AND p.proname = 'assertions_insert_review_guard'
+        AND p.prosrc LIKE '%superseded_by = NEW.id%'
+  ) THEN
+    RAISE EXCEPTION 'the 0025 insert exemption is still present in assertions_insert_review_guard';
+  END IF;
+
   IF NOT EXISTS (
       SELECT 1
       FROM pg_class c
