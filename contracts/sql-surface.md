@@ -380,9 +380,88 @@ meet them:
   read rule is row-local: a policy on `nodes` may not depend on a table whose
   own policy depends on `nodes`. `agent:*` keeps exactly the writes it has.
 
+### The gate is a trigger, and the policy conjunct is the second line
+
+A policy is not enough, and the reason is the reference install. `0026` was
+first verified as an RLS conjunct only, and the Verifier committed the hole:
+under `SET ROLE` to a non-superuser on the Docker test database, whose table
+owner **is** a superuser, `app.current_role = 'viewer'` still accepted a
+candidate through `accept_assertion()`, closed one through
+`reject_candidate()`, and rewrote `attrs` through `mark_assertion_outcome()`.
+All three are `SECURITY DEFINER` and owned by that superuser, so RLS — and the
+`rye_role_may_write()` conjunct with it — never ran. On an owner RLS binds, all
+three were refused. A rule that holds on one of Rye's two supported deployments
+is not a rule.
+
+So the gate is a trigger. One function, `rye_gate_may_write()`, on each of the
+seven core tables, `BEFORE INSERT OR UPDATE OR DELETE ... FOR EACH ROW`, raising
+`42501` with `A session that may not write attempted to % %. Set
+app.current_role to a role the instance allows to write.` when
+`rye_role_may_write()` is false. Triggers fire for a superuser, inside a
+`SECURITY DEFINER` function, and on a raw write alike, so this covers every
+helper that exists and every helper written later without anyone remembering to
+add a check. It is the same argument
+`docs/decisions/0008-the-row-is-the-gate-for-assertion-lifecycle.md` made for
+the lifecycle rules, applied to the role rule.
+
+The RLS conjunct stays. It is the cheaper refusal on the deployment where the
+owner is bound by RLS, it keeps `USING` and `WITH CHECK` doing the governance
+row test described below, and two independent refusals on the same rule is the
+right number when one of them is invisible on half the deployments.
+
+**Trigger names, and why they are these.** Row-level, not statement-level: a
+`BEFORE STATEMENT` trigger fires before every `BEFORE ROW` trigger whatever it
+is called, which would take `trg_assertion_settle_gate`'s message away from
+`tests/conformance/30_configuration_gate.sql`. The name on `assertions` is
+chosen so the settle gate still sorts first and the shape guards still sort
+after, in the C and `en_US.UTF-8` collations alike:
+`trg_assertion_settle_gate`, `trg_assertions_gate_may_write`,
+`trg_assertions_immutable`, `trg_assertions_insert_review`.
+
+| table | trigger |
+|---|---|
+| `nodes` | `trg_nodes_gate_may_write` |
+| `edges` | `trg_edges_gate_may_write` |
+| `events` | `trg_events_gate_may_write` |
+| `event_participants` | `trg_event_participants_gate_may_write` |
+| `assertions` | `trg_assertions_gate_may_write` |
+| `assertion_evidence` | `trg_assertion_evidence_gate_may_write` |
+| `artifacts` | `trg_artifacts_gate_may_write` |
+
+On the other six tables the order against the pre-existing shape triggers is not
+load-bearing, and a refused caller may see either message.
+
+**A refusal has two shapes, by owner, and both are refusals.** A `BEFORE ROW`
+trigger only sees rows RLS admitted. Where the owner is bound by RLS a refused
+`UPDATE` or `DELETE` still affects zero rows and raises nothing; where the owner
+is a superuser the rows are visited and the trigger raises `42501`. An `INSERT`
+raises on both. A test asserts "the row is unchanged", not one error text.
+
+**The CDC path never refuses, because the domain table is the system of
+record.** `capture_domain_change()` runs inside the application's own
+transaction on a tracked domain table, in whatever session that application
+uses, and that session may set no `app.current_role` at all. If its
+`record_event()` were refused, the application's own `INSERT` would fail, and
+Rye would be getting in the way of the system of record — the one thing the
+overlay promises it never does. So `capture_domain_change()` asks
+`rye_role_may_write()` first and **returns without recording an event** when the
+answer is false, the same way it already returns silently when the row maps to
+no node. The domain write always succeeds. The cost is stated plainly: **a
+tracked table written by a session with no role produces no CDC event**, and the
+fix is for that session to set one. It reads the same helper the gate reads, so
+it can only make Rye record less, never more, and it is not a bypass anyone can
+set.
+
+**Maintenance and install.** `refresh_materialized_views()` and
+`log_agent_query()` write no core table and are unaffected. `migrate.sh` runs
+each migration file in its own psql session, so `0026` and every later migration
+that writes data sets `app.current_role` to `admin` itself; `0001`–`0025` are
+unaffected because the trigger does not exist while they run.
+
 ### The matrix
 
-Every cell is the rule after `0026`. "yes" means the policy admits the write;
+Every cell is the rule after `0026`. "yes" means the trigger and the policy both
+admit the write;
 the row rules in "The row is the gate, not the route" and the type rules in
 `assertion_type_access` still apply on top, and a `no` from either of those is
 still a `no`.
@@ -527,11 +606,14 @@ with a raw connection.
 
 ### What a refusal looks like
 
-As in "Governance tables": a refused `INSERT` raises `42501`,
-`new row violates row-level security policy`; a refused `UPDATE` or `DELETE`
-raises nothing and affects zero rows, so assert the row count; a helper that
-looks a row up first may refuse with its own sentence, and the two helpers named
-above do.
+A refused `INSERT` raises `42501` — the trigger's sentence where the trigger
+sees it first, `new row violates row-level security policy` where the policy
+does. A refused `UPDATE` or `DELETE` raises `42501` where the table owner is a
+superuser and affects zero rows and raises nothing where the owner is bound by
+RLS, so assert the row, not the error. A helper that looks a row up first may
+refuse with its own sentence, and the two helpers named above do. A
+`SECURITY DEFINER` helper is refused by the trigger on both owners; it is not a
+way past this section.
 
 ## Configuration writes need an admin
 
@@ -784,7 +866,9 @@ shape-constrained, not role-constrained, so a caller may still label an outcome
 by hand. The insert
 check resolves the governing scope without a witness, because evidence is
 written after the assertion, so a scope reached only through
-`scope_governs_source` does not demote a raw insert. And a caller who may
+`scope_governs_source` does not demote a raw insert; a helper covers the gap
+from its own side by taking the stricter of the two resolutions, but a raw
+insert is judged by the witness-free one alone. And a caller who may
 accept through `accept_assertion()` under an `open` policy is a caller whose
 raw promotion is refused only by the missing acceptance event, which is a
 record, not a lock. The rival test for a promotion is taken at one instant,
@@ -833,10 +917,47 @@ candidate, the candidate is in `review_queue` and `competing_candidates`, and a
 settler accepting it through `accept_assertion()` supersedes the incumbent then,
 which is the ordinary acceptance path.
 
-The predicate is the same one `record_assertion()` applies, resolved from the
-incumbent's own subject, type, and primary witness, so for the same caller and
-the same claim the two helpers agree. Where `record_assertion()` would land
-accepted, `supersede_assertion()` behaves exactly as before.
+The predicate is the same one `record_assertion()` applies, so for the same
+caller and the same claim the two helpers agree. Where `record_assertion()`
+would land accepted, `supersede_assertion()` behaves exactly as before.
+
+### A helper's policy is the stricter of the two resolutions
+
+Every helper that inserts an assertion resolves the governing scope **twice**
+and takes the **stricter** of the two review policies: once with the primary
+witness, as it always did, and once with no witness, which is what the insert
+guard can see. The scope *id* a helper reports and passes on is unchanged — it
+is still the witness-resolved one, because that is what a capability check, a
+scoped type resolution, and a scoped registry read are about. Only the policy is
+the maximum of the two, compared with `scope_review_policy_rank()`.
+
+This is not symmetry for its own sake. The witness branch of `governing_scope()`
+runs *before* `DEFAULT_SCOPE`, so a witness-free resolution does not merely lose
+the witness scope — it **falls through to `DEFAULT_SCOPE`**, which may be
+stricter. A subject with no direct, inherited, or type coverage, whose witness is
+reached by a `scope_governs_source` edge from an `open` scope, on an instance
+whose `DEFAULT_SCOPE` is `strict`, resolved `open` in the helper and `strict` in
+the guard. The helper ended the incumbent and inserted the replacement accepted,
+the guard demoted it to candidate, and the transaction was refused at commit
+with the key left holding nothing. Taking the stricter of the two makes the
+helper's policy always at least as demoting as the guard's, so the guard can
+never demote a row a helper meant to keep accepted, and the two can never
+disagree in the accepting direction.
+
+**A behaviour change worth naming.** A `scope_governs_source` edge from an
+`open` scope no longer opens a source on an instance whose witness-free
+resolution is stricter — in practice, one with a `strict` or `candidates_only`
+`DEFAULT_SCOPE`. Writes witnessed through that source now land as candidates
+where they used to land accepted. A deployment that used an open source scope as
+an exception to a strict default keeps it by giving those subjects their own
+`scope_governs_subject` edge to the open scope: direct subject coverage is
+resolved identically with and without a witness, so both resolutions agree and
+the exception holds.
+
+The same rule removes a silent divergence that pre-dates this migration. In that
+fixture with no incumbent, `record_assertion()` already said `accepted` and the
+guard already wrote `candidate`; now the helper demotes deliberately and the
+caller sees one answer from one place.
 
 **How the caller is told.** The signature does not change and neither does the
 return type: `supersede_assertion()` returns the new row's id, whether that row
@@ -925,7 +1046,7 @@ What each caller of `governing_scope()` sees:
 | `record_assertion()` | resolves the strictest governing scope. A caller passing `p_scope_node_id` for a looser scope on a subject two scopes govern now gets `Explicit scope % does not match governing scope %` where it did not before. The type is canonicalized in the strictest scope. |
 | `accept_assertion()` | an `agent:*` caller now needs `rye.authoritative.promote` for the strictest governing scope, not for whichever sorted first. A narrowing, and the intended one. |
 | `record_distillation()` | reads `digest_facets:<node_type>` from the strictest scope. |
-| the insert guard in "The row is the gate, not the route" | resolves with no witness, as before, and takes the strictest of whatever the witness-free branches produce. The witness asymmetry between the guard and `accept_assertion()` is unchanged and is still a stated limit. |
+| the insert guard in "The row is the gate, not the route" | resolves with no witness, as before, and takes the strictest of whatever the witness-free branches produce, which includes falling through to `DEFAULT_SCOPE`. The helpers meet it there by taking the stricter of both resolutions, so the two never disagree in the accepting direction. |
 | `agent_can_promote_in_scope()` | unchanged. It answers about the scope it is handed. |
 | `compile_scope_policy()`, `rye_agent_context()`, the CLI `--scope` option | unchanged. They take an explicit scope and never call `governing_scope()`. |
 

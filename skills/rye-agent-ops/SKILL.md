@@ -124,7 +124,8 @@ and it costs nothing. On a team it costs one question.
 
 If a person tells you the type they want is their own call to make, that is a
 change to how Rye is set up here, and only a Rye admin settles it. Record what
-they said, never assume it. See "Rye's own setup is an admin's call" below.
+they said, never assume it. See "How Rye is set up here is an admin's call"
+below.
 
 `speech_act_recognized` is false when you passed a value outside the
 recognized set. **Do not record anything as accepted while it is false.**
@@ -273,10 +274,10 @@ routed is yours to carry. Do not apologize for it and do not reach for a
 different type to make it settle — that is relabelling, and it is forbidden
 below.
 
-### Rye's own setup is an admin's call
+### How Rye is set up here is an admin's call
 
-A few records are not knowledge about the world. They are how Rye is set up
-here, and Rye reads them to decide how it treats every other write:
+A few records are not knowledge about the world. They are **how Rye is set up
+here**, and Rye reads them to decide how it treats every other write:
 
 | What it is, in plain words | The record | What reads it |
 |---|---|---|
@@ -365,9 +366,9 @@ the registry. They said something ordinary about how the team works; the
 routing is yours to carry.
 
 **One route, and only once.** `record_assertion()` is the only way you ever
-record Rye's setup, and a suggestion is the end of the attempt, not the start
-of a workaround. Every other route raises, and trying one is a worse answer
-than the suggestion you already have:
+record how Rye is set up here, and a suggestion is the end of the attempt, not
+the start of a workaround. Every other route raises, and trying one is a worse
+answer than the suggestion you already have:
 
 - No `INSERT INTO assertions` and no `UPDATE` of one, whatever you set
   `app.write_path` to.

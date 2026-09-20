@@ -43,11 +43,22 @@ accepted until a settler changes it."
 ## Assumed by default
 - Demote, do not refuse, so nothing said is lost (as decision 0007 and work/008 did). Overturn: Architect.
 - Most restrictive policy wins among several governing scopes. Overturn: Casey, since it changes which areas review what after a merge.
+- resolve_knowledge_gap() under strict can produce a candidate accept_assertion() refuses (inferred displacing non-inferred). Disclosed, accept_assertion() not loosened. Overturn: Architect.
+- 0025's insert exemption is removed, so a raw supersede-and-replace under a demoting policy is refused at commit. Overturn: Architect.
 
 ## Verified
 - filled in at close
 
 ## Reports
+### Architect, 2026-09-20 (commits 7356ce2, 32504b7, 940a5a9)
+Decision 0010. supersede_assertion() writes the replacement as a candidate
+where record_assertion() would demote, leaves the incumbent accepted, marks
+attrs.review_gate with a NOTICE, same return. Most restrictive policy wins
+(strict, candidates_only, open), scope.id only as tie-break, through a
+never-raising scope_review_policy_rank(). Migration 0027 replaces
+supersede_assertion, governing_scope, assertions_insert_review_guard, and
+resolve_knowledge_gap; no overlap with 0026.
+
 
 ## Close
 status line and date

@@ -56,11 +56,25 @@ carries the authority of the person it acts for and none of its own."
 - Who may merge nodes: admin and team_member. Agents and viewers may not; an agent that finds a duplicate says so to its person. Overturn: Casey (work/006 queued this question for you).
 - Scope and governance structure is configuration, so admin only, consistent with decision 0007. Overturn: Casey.
 - team_member and agent:* keep every other write they have today. Overturn: Architect.
+- Who may merge, as the Architect built it: any named role that may write; never an agent-shaped session, never viewer or unset. A `may_merge` column is the way to narrow it to admin and team_member. Overturn: Casey.
+- `scope_status` becomes admin-gated, reversing a stated choice in decision 0007, because scope creation is now admin-only. Overturn: Casey.
 
 ## Verified
 - filled in at close
 
 ## Reports
+### Architect, 2026-09-20 (commits 7356ce2, 32504b7, 940a5a9)
+Decision 0009. role_classification_access gains may_write (viewer false);
+rye_role_may_write() is a conjunct on every INSERT, UPDATE, DELETE policy of
+the seven core tables. Scope and governance structure admin-only.
+merge_nodes() and update_node_properties() refuse before FOR UPDATE, so
+"Duplicate node not found" only means absent or invisible. Migration 0026
+replaces those policies and those two functions and nothing 0027 touches.
+Blast radius: nine sites write with no role; conformance 01, 02, 03, 04, 05,
+07, 09 and seed_quickstart.sh must set one; concurrency/01 to confirm;
+nothing writes as viewer. migrate.sh runs each migration in its own session,
+so 0026 sets admin itself.
+
 
 ## Close
 status line and date

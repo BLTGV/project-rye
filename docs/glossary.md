@@ -48,6 +48,7 @@ identifiers stay canonical everywhere durable.
 - **Review policy** — one of: agents may record accepted knowledge here; agents suggest and people accept; everything waits for a person.
 - **Suggestions waiting for a person** — the single list a reviewer works through.
 - **Permission** — a named thing an agent is allowed to do in an area.
+- **How Rye is set up here** — the few records that are not knowledge about the world but decide how Rye treats every other write: which words mean the same thing, which kinds of thing a person may settle about themselves, and an area's review policy. Only a Rye admin settles a change to one. Called Rye's own configuration internally.
 - **Rye admin** — the person who sets up areas, sources, and policies, and decides how much agents may do.
 - **Reviewer** — the person who accepts, declines, and settles what agents propose.
 - **Revisiting the scope** — a proposal to change an area's purpose or boundary, raised by recurring evidence and decided by a person.
