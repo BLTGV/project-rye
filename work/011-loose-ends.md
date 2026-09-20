@@ -36,6 +36,22 @@ past the merge.
 - filled in at close
 
 ## Reports
+### Builder admin, 2026-09-20 (commit 4b28c57, merged ed7b9d0 lineage)
+admin/scripts/db-usage-check.ts and `check:db`, run beside check:routes from
+tests/conformance/21_api_security.sh. Gates `.unsafe(`, `set_config(`,
+`withAdminCte`, a runtime import of postgres, and a tagged-template sql call,
+outside db.ts. Passes on the tree; each probe failed with file and line.
+
+### Operator, 2026-09-20 (commit fd95e17)
+scripts/bootstrap-worktree.sh: hard-links or copies node_modules for admin/,
+site/, and the intake skill from the main checkout when the lock hash
+matches, else npm ci. Fresh worktree then passed test-all.sh; second run a
+no-op; no containers left. Lead's note for the Verifier: hard links share
+inodes with the main checkout.
+
+### Architect, 2026-09-20 (commit 7356ce2)
+Contract sentence: no alias FROM a gated configuration type. rye-cli
+contract line for `settle-gate <assertion_type>`.
 
 ## Close
 status line and date

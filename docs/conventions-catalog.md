@@ -239,10 +239,11 @@ table. The key carries the canonical type; an alias is registered as an alias,
 not as a second entry. Core members need no row, so a fresh instance works with
 none.
 
-The declaration is configuration, not an ordinary claim. In plain words it
-sounds like "people decide their own availability", and only a Rye admin
-settles it — see the Configuration Write Convention below. An area owner who is
-not a Rye admin records the same call and it becomes a suggestion for an admin.
+The declaration is part of how Rye is set up here, not an ordinary claim. In
+plain words it sounds like "people decide their own availability", and only a
+Rye admin settles it — see the Configuration Write Convention below. An area
+owner who is not a Rye admin records the same call and it becomes a suggestion
+for an admin.
 Plugin manifests cannot contribute self-settled types today.
 
 An agent picks a claim type the category discovery request lists rather than
@@ -299,8 +300,10 @@ the database holds.
 ## Configuration Write Convention
 
 Some assertion types are Rye's own configuration rather than knowledge about
-the world, and Rye reads them to decide how it treats every other write. Only a
-Rye admin may make one accepted. Normative shape:
+the world, and Rye reads them to decide how it treats every other write. To a
+person these are **how Rye is set up here** (`docs/glossary.md`); the canonical
+term stays in the schema, the contracts, and this catalog. Only a Rye admin may
+make one accepted. Normative shape:
 `contracts/sql-surface.md`, "Configuration writes need an admin". Rationale:
 `docs/decisions/0007-configuration-writes-need-an-admin.md`.
 
