@@ -2,7 +2,7 @@
 --
 -- Contract:  contracts/sql-surface.md, "The row is the gate, not the route".
 -- Decision:  docs/decisions/0008-the-row-is-the-gate-for-assertion-lifecycle.md.
--- Work item: work/007-assertion-lifecycle-gate.md.
+-- Work item: work/008-assertion-lifecycle-gate.md.
 --
 -- The fourteen obligations from section H of the decision, in order. Every
 -- case runs under a non-superuser role and forges every helper-owned session
@@ -1186,6 +1186,57 @@ BEGIN
     END IF;
     IF (SELECT superseded_by FROM assertions WHERE id = v_incumbent) IS DISTINCT FROM v_id THEN
         RAISE EXCEPTION 'supersede_assertion() as team_member did not end the internal incumbent';
+    END IF;
+
+    -- ==================================================================
+    -- Obligation 18. A replacement that is a CANDIDATE is allowed. The
+    -- tuple then has no accepted value and the content stands in
+    -- review_queue for an admin. "Nothing is lost" is the claim under
+    -- test, not "an accepted value always stands" -- merge_nodes() into a
+    -- strict scope reaches exactly this state, which is why the rule is
+    -- written this way.
+    -- ==================================================================
+    PERFORM set_config('app.current_role', 'admin', true);
+    INSERT INTO nodes (node_type, label) VALUES ('thing', 'Candidate replacement subject')
+    RETURNING id INTO v_other;
+    v_incumbent := record_assertion(
+        'candidate_replacement_probe', '{"value":"standing"}', v_other,
+        p_assertion_key := 'default', p_basis := 'assumed'
+    );
+    v_smuggled := gen_random_uuid();
+    PERFORM set_config('app.write_path', 'supersede_assertion', true);
+    PERFORM set_config('app.supersede_assertion_id', v_incumbent::text, true);
+    UPDATE assertions SET superseded_at = now(), superseded_by = v_smuggled
+    WHERE id = v_incumbent;
+    PERFORM set_config('app.write_path', '', true);
+    INSERT INTO assertions (
+        id, assertion_type, assertion_key, status, basis, subject_node_id, claim
+    ) VALUES (
+        v_smuggled, 'candidate_replacement_probe', 'default', 'candidate', 'assumed',
+        v_other, '{"value":"waiting for review"}'
+    );
+    SET CONSTRAINTS trg_assertions_transition_complete IMMEDIATE;
+    SET CONSTRAINTS trg_assertions_transition_complete DEFERRED;
+
+    IF (SELECT superseded_by FROM assertions WHERE id = v_incumbent) IS DISTINCT FROM v_smuggled THEN
+        RAISE EXCEPTION 'A readable same-tuple candidate replacement was refused';
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM current_valid_assertions
+        WHERE subject_node_id = v_other AND assertion_type = 'candidate_replacement_probe'
+    ) THEN
+        RAISE EXCEPTION 'The tuple still has an accepted value after a candidate replacement';
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM review_queue
+        WHERE subject_node_id = v_other AND assertion_type = 'candidate_replacement_probe'
+    ) THEN
+        RAISE EXCEPTION 'The candidate replacement is not standing in review_queue';
+    END IF;
+    IF (SELECT claim FROM assertions WHERE id = v_smuggled)
+       IS DISTINCT FROM '{"value":"waiting for review"}'::jsonb
+    THEN
+        RAISE EXCEPTION 'The candidate replacement lost its content';
     END IF;
 
     -- The one legitimate call fail-closed refuses, pinned so the cost is a

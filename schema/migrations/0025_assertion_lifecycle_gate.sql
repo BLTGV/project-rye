@@ -1,6 +1,6 @@
 -- The row is the gate, not the route.
 --
--- Work item: work/007-assertion-lifecycle-gate.md
+-- Work item: work/008-assertion-lifecycle-gate.md
 -- Contract:  contracts/sql-surface.md, "The row is the gate, not the route"
 -- Decision:  docs/decisions/0008-the-row-is-the-gate-for-assertion-lifecycle.md
 --
@@ -543,11 +543,21 @@ COMMENT ON FUNCTION assertions_immutable_guard() IS
 -- own read level over an accepted incumbent: the write is now refused at COMMIT
 -- instead of blinding the writer to its own row.
 --
--- Not every read in this migration fails closed, and the ones that do not are
--- deliberate: an invisible accepted rival and an invisible witness are read the
--- same way by accept_assertion(), so refusing here would be stricter than the
--- helper, and idx_assertions_active_unique is not RLS-filtered and still
--- refuses the identical-window pair.
+-- Not every read in this migration fails closed. The conflict searches do not:
+-- an invisible accepted rival does not block a promotion, and an invisible
+-- witness does not change the policy answer. Inverting that would refuse every
+-- promotion to a caller who cannot see the whole tuple. The cost is disclosed
+-- in the contract as a stated limit: a caller who cannot read an accepted rival
+-- can promote a visible candidate on the same tuple and leave two accepted rows
+-- covering one instant, and the inferred-displacement search shares the cause.
+-- accept_assertion() does not read rivals the same way -- it is SECURITY
+-- DEFINER, so where the table owner is a superuser (the Docker install) it
+-- reads past RLS and ends the hidden incumbent, while on Supabase, where the
+-- owner is bound by RLS, helper and raw path agree. A SECURITY DEFINER reader
+-- here was rejected: it would reveal that a hidden row exists, it is a no-op
+-- where the owner is bound by RLS, and it is the route deployment.md refuses.
+-- idx_assertions_active_unique is not RLS-filtered and still refuses the
+-- identical-window pair.
 CREATE OR REPLACE FUNCTION assertions_transition_complete() RETURNS trigger
 SET search_path = rye, pg_catalog
 AS $$
