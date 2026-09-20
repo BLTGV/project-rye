@@ -116,6 +116,21 @@ for dir in "${DIRS[@]}"; do
     continue
   fi
 
+  # Recover from an interrupted prior run: node_modules missing but its
+  # .bak sibling still exists (e.g. a prior npm ci exited 0 without ever
+  # creating node_modules — a zero-dependency package — so the stamp write
+  # failed and the run stopped before the success path removed the .bak).
+  # Restore it before anything else, every run, so a leftover .bak is never
+  # silently dropped and the directory is never left empty.
+  if [[ ! -d "$NM" && -d "$BAK" ]]; then
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+      echo "[dry-run] $dir: would restore node_modules from $(basename "$BAK") (missing, but a backup exists)"
+    else
+      mv "$BAK" "$NM"
+      echo "== $dir: node_modules was missing but $(basename "$BAK") existed from an earlier run; restored it =="
+    fi
+  fi
+
   HASH="$(sha256sum "$LOCK" | awk '{print $1}')"
 
   if [[ -d "$NM" && -f "$STAMP" ]] && [[ "$(cat "$STAMP")" == "$HASH" ]]; then
@@ -161,14 +176,19 @@ for dir in "${DIRS[@]}"; do
 
   if [[ "$COPIED" -eq 0 ]]; then
     echo "== $dir: no usable node_modules to copy (main checkout missing one, or its lock hash differs); running npm ci =="
-    [[ -e "$BAK" ]] && rm -rf "$BAK"
     HAD_EXISTING=0
     if [[ -d "$NM" ]]; then
+      rm -rf "$BAK"
       mv "$NM" "$BAK"
       HAD_EXISTING=1
       echo "== $dir: moved existing node_modules aside to $(basename "$BAK") before npm ci =="
     fi
     if npm ci --prefix "$REPO_ROOT/$dir"; then
+      # npm ci can exit 0 without ever creating node_modules (a package
+      # with zero dependencies) — mkdir -p first so the stamp write below
+      # always succeeds, and the .bak is only removed once the new
+      # node_modules is in place and stamped.
+      mkdir -p "$NM"
       echo "$HASH" > "$STAMP"
       echo "== $dir: npm ci succeeded =="
       [[ "$HAD_EXISTING" -eq 1 ]] && rm -rf "$BAK"
