@@ -90,6 +90,11 @@ strict to open, and that 0023 now refuses it. This item must not reopen it.
 - The four other forged paths found during reproduction (window, outcome attrs, classification, and the supersede id) are in scope, since they are the same defect. Overturn: Casey.
 - Admin keeps the ability it has today. Whether an admin may do by raw UPDATE what a helper does is the Architect's call. Overturn: Architect.
 - Viewer and no-role callers being able to insert assertions at all is reported, and fixed here only if the Architect finds it is the same mechanism. Overturn: Architect.
+- Mechanism (decision 0008): no signal a helper can produce is out of a caller's reach under session-variable authorization, so the gate reads the row, not the route. Casey asked for the settings to be "made unforgeable or replaced by something a caller cannot set"; this is the second branch. Consequence: a caller who forges the settings can still do by raw SQL what the matching helper would have let that same caller do, provided it also writes what the helper writes (the acceptance event, a real replacement). It cannot do more. Overturn: Casey.
+- A merge under a strict scope now moves the copied assertions into review instead of carrying them across accepted. Visible behavior change. Overturn: Casey.
+- An admin gets no raw-UPDATE exemption, because an exemption keyed on the role is forgeable by the same set_config(). An admin's raw `UPDATE assertions SET superseded_at = now()` works today and will fail; the helpers remain. Overturn: Casey.
+- Three refusals arrive at COMMIT, not at the statement. Overturn: Architect.
+- The raw-promotion rule must refuse whatever accept_assertion() refuses for the same caller and row. If accept_assertion() checks more than decision 0008 section C lists, the guard follows the helper. Overturn: Architect.
 - No agent-kit change: the skill already tells agents to use the helpers. If the Architect changes a helper's signature or a caller-visible message, agent-kit is added. Overturn: Architect.
 
 ## Verified
@@ -97,6 +102,31 @@ strict to open, and that 0023 now refuses it. This item must not reopen it.
 
 ## Reports
 Paste each role's report here as it arrives.
+
+### Architect, 2026-09-19 (commit f3808d8)
+Result: done. Changed: contracts/sql-surface.md (new "The row is the gate,
+not the route"; one bullet under Failure behavior),
+docs/decisions/0008-the-row-is-the-gate-for-assertion-lifecycle.md (A to I,
+14 test obligations), docs/areas/schema.md (one entry corrected, five
+added). Tested: none, docs only; derived by grep. Mechanism: there is no
+unforgeable helper signal here. Session variables forge; table privileges
+do not bind the owner (Supabase `postgres`, Docker `rye`); PG_CONTEXT can be
+matched from a pg_temp function; current_query() is text. So
+assertions_immutable_guard() is replaced in place with per-column rules
+read from OLD, NEW, existing rows, and app.current_role; a BEFORE INSERT
+trigger trg_assertions_insert_review demotes where record_assertion()
+demotes; a deferred constraint trigger trg_assertions_transition_complete
+checks the acceptance event, the replacement's type and key, and the
+narrowed window's successor. app.write_path stays as a pre-filter and
+grants nothing. No helper changes. trg_assertion_settle_gate sorts first in
+both C and en_US collations, and test 30 depends on it. Exactly five
+functions UPDATE assertions. Questions: commit-time refusals (Lead:
+accepted, listed as a default); merge under strict routes to review (Lead:
+accepted as a default Casey can overturn); viewer and no-role callers
+inserting assertions at all is a role-model gap, not forgery (Lead: separate
+item); supersede_assertion() never consults the review policy, so any caller
+writes an accepted row under strict by superseding (Lead: separate item;
+0025 must not half-close it).
 
 ## Close
 status line and date
