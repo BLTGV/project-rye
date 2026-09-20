@@ -1026,6 +1026,13 @@ interactive caller. A client that must know reads `status` or
 `attrs->'review_gate'` from the returned id, or finds the row in
 `review_queue`.
 
+**A new claim is told the same way** (migration 0030). Where the review policy
+demotes a write, `record_assertion()` and `record_distillation()` land the row
+as a candidate carrying `attrs.review_gate` in the same shape
+`supersede_assertion()` writes, with `incumbent_assertion_id` null, and raise
+the same `NOTICE`; where the settle gate demotes it first the row carries
+`attrs.settle_gate` alone.
+
 **Per helper that reaches it.** Derived by grep, not memory: exactly one
 in-repo helper calls `supersede_assertion()`.
 
