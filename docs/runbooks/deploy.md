@@ -124,24 +124,47 @@ at conformance test 21, then `astro: command not found` in the site build),
 and a plain `npm ci` in `admin/` tries to build `sharp` from source, which is
 slow and can fail outright.
 
-**Run it once per fresh worktree, before `test-all.sh`:**
+**Run it in worktrees only** (`git worktree add`, e.g. `.claude/worktrees/...`
+or `.codex/worktrees/...`) — never in the main checkout. Run it once per
+fresh worktree, before `test-all.sh`:
 
 ```bash
 ./scripts/bootstrap-worktree.sh
 ```
 
 For each of the three directories it copies `node_modules` from the main
-checkout (found via `git worktree list`) when that checkout has one whose
-`package-lock.json` hashes the same — hard-linked (`cp -al`) when the
-worktree shares a filesystem with the main checkout, otherwise a full copy
-(`cp -a`; never a symlink, since sharp/astro/tsx resolve real paths). It only
-falls back to `npm ci` when no usable copy exists. It never writes into the
-main checkout, and it stamps each `node_modules` it prepares so a second run
-is a no-op.
+checkout (found via `git rev-parse --git-common-dir`) when that checkout has
+one whose `package-lock.json` hashes the same — hard-linked (`cp -al`) when
+the worktree shares a filesystem with the main checkout, otherwise a full
+copy (`cp -a`; never a symlink, since sharp/astro/tsx resolve real paths). It
+only falls back to `npm ci` when no usable copy exists, and even then it
+first moves any existing `node_modules` aside to a `.bak` sibling and
+restores it if `npm ci` fails, so a failed install never leaves the
+directory empty. It never writes into the main checkout, and it stamps each
+`node_modules` it prepares so a second run is a no-op. `--dry-run` prints
+the plan per directory without changing anything.
+
+**Detect the main checkout, always — never run `npm ci` there.** Run
+directly in the main checkout, the script prints that there is nothing to
+bootstrap from and exits 0 untouched; dependencies there are installed by
+hand (`npm ci` in each of the three directories directly). This matters
+because `npm ci` deletes `node_modules` before installing: run against the
+main checkout by mistake with a broken install, it can leave the one copy
+every worktree links from empty.
+
+**Hard links share inodes with the main checkout.** A hard-linked copy is
+safe against deletion or replacement (a normal `npm install`/`npm ci` just
+drops the link), but a tool that rewrites a file's contents in place —
+`npm rebuild`, `patch-package`, hand-editing a file under `node_modules` —
+changes the main checkout's copy too, and every other worktree linked from
+it. Use `./scripts/bootstrap-worktree.sh --copy` first (forces a real `cp -a`
+instead of a hard link) in any worktree where you need to run something
+like that.
 
 **Rollback:** nothing to roll back — it only ever adds `node_modules`
-directories inside the worktree. Delete `node_modules` in the affected
-directory and re-run to force a fresh copy or `npm ci`.
+directories inside the worktree (or a `.bak` sibling during an `npm ci`
+fallback, which it cleans up or restores itself). Delete `node_modules` in
+the affected directory and re-run to force a fresh copy or `npm ci`.
 
 ## Notes
 
