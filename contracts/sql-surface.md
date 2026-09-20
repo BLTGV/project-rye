@@ -461,8 +461,8 @@ produced by the same `set_config()` this section closes.
 | Column | May change |
 |---|---|
 | `status` | `candidate` to `accepted` only. Never back. The row must be a live candidate; no accepted, unsuperseded assertion on the same subject, type, and key may cover the instant the promoted row takes effect, which is `greatest(coalesce(effective_at, now()), now())`; and the acceptance must be accompanied by an `assertion_accepted` event naming the row. An `agent:*` caller under `candidates_only` or `strict`, or on a `pattern_claim`, additionally needs `rye.authoritative.promote` for the governing scope, which is the rule `accept_assertion()` already applied. |
-| `superseded_at` | Null to non-null once, and never back. On a row that was `accepted`, only when `superseded_by` is set in the same statement. **An accepted assertion ends only when a readable assertion of the same type and key takes its place** — accepted, or waiting in `review_queue` where the scope's policy put it. What it never does is end with nothing. A candidate may still be closed with `superseded_by` null, which is how `reject_candidate()` records a rejection. |
-| `superseded_by` | Null to non-null once, together with `superseded_at`, never to the row itself. The replacement must carry the same `assertion_type` and `assertion_key`, and when the ended row was `accepted` it must be a row this caller can read at commit. The subject may differ, because `merge_nodes()` replaces a duplicate's assertion with the canonical node's. |
+| `superseded_at` | Null to non-null once, and never back. On a row that was `accepted`, only when `superseded_by` is set in the same statement. **An accepted assertion ends only when something readable holds its place.** A candidate may still be closed with `superseded_by` null, which is how `reject_candidate()` records a rejection. |
+| `superseded_by` | Null to non-null once, together with `superseded_at`, never to the row itself. The replacement must carry the same `assertion_type` and `assertion_key` and, when the ended row was `accepted`, be a row this caller can read at commit. The subject may differ, because `merge_nodes()` replaces a duplicate's assertion with the canonical node's; a replacement on another subject must also be live at commit, and it may be a candidate. |
 | `effective_to` | Narrowing only, to a non-null instant after `effective_at`, before the previous `effective_to`, and in the future. A successor accepted assertion on the same subject, type, and key must start where the window now ends. |
 | `attrs` | Only as an outcome label: the result must name an `outcome` in the recorded set, and no existing key may be dropped or have its value changed except the keys an outcome labelling writes. |
 | `classification` | Only on a row that has derivation evidence, and only to the value `derived_assertion_classification()` computes for that evidence. Nothing else, for anyone. Propagation is the only writer, and it runs when derivation evidence is recorded. |
@@ -504,6 +504,24 @@ commit that names a statement it ran earlier. `superseded_by` already behaves
 this way: its foreign key is `DEFERRABLE INITIALLY DEFERRED` so a helper can
 point an incumbent at a replacement it has not inserted yet.
 
+**Ending an accepted assertion leaves the key standing.** The named replacement
+is not the whole test, because a caller can name a row and then write it closed,
+or close it in the next transaction. So at commit, when the ended row was
+`accepted` and the replacement is **on the same subject**, that subject, type,
+and key must still carry a readable assertion that is `accepted` and not
+superseded. The named replacement itself need not be the one: two writes to the
+same key in one transaction leave a chain, and what matters is that the chain
+ends somewhere current.
+
+**A merge is the one shape that moves the value to another subject.** When the
+replacement is on a **different** subject, it must be readable, of the same
+type and key, and live at commit, and it may be a candidate: a merge into a
+subject under `strict` routes the copy to `review_queue`, and refusing that
+would refuse the merge. The residual is worth naming. That copy can be rejected
+later, and then the duplicate's key has ended and the canonical's holds
+nothing. That is exactly what `merge_nodes()` followed by `reject_candidate()`
+already allows through the helpers, so the raw path grants nothing new.
+
 **Blindness is restrictive here too.** The commit-time checks run under the
 caller's own visibility. A replacement or a successor the caller cannot read is
 not one: the write is refused, exactly as if the row were absent. A caller
@@ -528,9 +546,10 @@ review by accident or by following bad instructions. It is not a defence
 against a hostile caller with a raw connection.
 
 Inside that boundary, three claims hold for every caller, forged role included,
-because they do not read a role at all: an accepted assertion is ended only by
-a readable assertion of the same type and key taking its place, which is either
-accepted or waiting in `review_queue`; a window cannot be narrowed without a
+because they do not read a role at all: an accepted assertion is ended only
+when its own subject, type, and key still carry a readable accepted assertion,
+or, in a merge, when a readable live assertion of the same type and key stands
+on the other subject; a window cannot be narrowed without a
 successor; and `claim`, `basis`, `confidence`, and the subject of an assertion
 cannot be rewritten. Everything else is as strong as the deployment's control
 of the session.

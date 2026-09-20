@@ -280,6 +280,39 @@ demote a raw insert. Both are in the contract.
   The commit-time check applies when the ended row was `accepted`; a candidate
   closed with a replacement is not holding a value anyone can lose.
 
+  **Corrected 2026-09-20, fifth pass. Naming a replacement is not enough.** The
+  Verifier committed, as `viewer` under a non-superuser owner: end an accepted
+  row naming `R`, then insert `R` of the same type and key as a candidate with
+  `superseded_at` already set. Type, key, and readability all passed, and the
+  key was left with nothing. A live candidate replacement reaches the same
+  state in two steps, through `reject_candidate()`. So the test is on the key,
+  not on the named row: at commit, when the ended row was accepted and the
+  replacement is on the same `subject_ref`, that `subject_ref`, `assertion_type`,
+  `assertion_key` must still carry a readable assertion with `status` accepted
+  and `superseded_at` null. Requiring the *named* row to be live would break a
+  legitimate pattern — two `record_assertion()` calls on one key in one
+  transaction leave `I -> B -> C`, where `B` is superseded by commit — so the
+  chain may pass through anything as long as it ends somewhere current.
+
+  A replacement on a different `subject_ref` is the merge shape and keeps the
+  named-row test: readable, same type and key, and live at commit, candidate
+  allowed. A merge into a subject under `strict` demotes the copy, and refusing
+  that would refuse the merge. Residual, stated: that copy can be rejected
+  later and both keys are then empty, which is `merge_nodes()` followed by
+  `reject_candidate()`, already available through the helpers.
+
+  Every helper re-checked against the same-subject arm, and none breaks.
+  `accept_assertion()` names the candidate and accepts it in the same
+  transaction. `supersede_assertion()` and `record_assertion()` insert the
+  replacement with status accepted, and the insert exemption keeps it accepted
+  even under `strict`, because it is the same tuple and the incumbent was
+  accepted. `record_distillation()` applies the review policy itself and only
+  supersedes the incumbent when its own write is accepted, so under `strict` it
+  never ends anything. `resolve_knowledge_gap()` goes through
+  `supersede_assertion()`. `reject_candidate()` ends a candidate, which this
+  arm does not reach. `merge_nodes()` is always cross-subject, including the
+  branch that reuses an existing accepted row on the canonical node.
+
   Every helper path was walked for a case where the caller cannot read its own
   replacement, and none breaks. `supersede_assertion()` copies the incumbent's
   `classification` onto the replacement, so it is exactly as readable as the row
@@ -497,14 +530,21 @@ with the matching `app.*_assertion_id` set to the target row.
     fail-closed rule did not catch a helper: `supersede_assertion()` on an
     `internal` assertion as a `team_member` still commits, and the replacement
     is readable by that role.
-18. A replacement that is a candidate is allowed, and the suite must pin that
-    rather than leave it to be discovered. End an accepted row naming a
-    readable same-tuple replacement that is a `candidate`: it commits, the
-    tuple then has no accepted value, and the content stands in `review_queue`
-    for an admin to accept. Reach the same state through `merge_nodes()` with
-    the canonical subject in a `strict` scope, which is why the rule is written
-    this way. Nothing is lost is the assertion under test, not "an accepted
-    value always stands".
+18. What a replacement has to be, in three cases, each asserted on
+    `current_valid_assertions` and `review_queue` afterwards and not on the
+    error alone.
+    - Same subject, live candidate replacement: **refused**. End an accepted
+      row naming a readable same-tuple `candidate`. The transaction fails and
+      the incumbent is still current.
+    - Born closed: **refused**. End an accepted row naming `R`, then insert `R`
+      of the same type and key with `superseded_at` already set. This is the
+      fifth pass's reproduction and it must now fail at commit.
+    - Cross-subject live candidate: **allowed**. `merge_nodes()` with the
+      canonical subject in a `strict` scope commits, the duplicate's row is
+      ended, and the copy stands in `review_queue` on the canonical node.
+    Then the chain that must keep working: two `record_assertion()` calls on
+    one key in one transaction, where the middle row is superseded by commit,
+    commits and leaves one accepted row current.
 
 ## I. The protection boundary
 
@@ -518,19 +558,20 @@ instructions. It is not a defence against a hostile caller with a raw
 connection.
 
 Inside that, three claims hold for any caller at all, forged role included,
-because they read no role: an accepted assertion is ended only by a readable
-assertion of the same type and key taking its place, accepted or waiting in
-`review_queue`; a window cannot be narrowed without a successor; and an
+because they read no role: an accepted assertion is ended only when its own
+subject, type, and key still carry a readable accepted assertion, or, in a
+merge, when a readable live assertion of the same type and key stands on the
+other subject; a window cannot be narrowed without a successor; and an
 assertion's claim, basis, confidence, and subject cannot be rewritten. Nothing
 anywhere may claim more than that.
 
-The first claim says "taking its place", not "accepted", on purpose. Requiring
-the replacement to be accepted would break `merge_nodes()` under a strict
-scope, where the copy is demoted to a candidate by the review policy — the
-default this decision already took in B. So a tuple can be left with its
-content in review and no current value. Nothing is lost and an admin can accept
-it, which is the promise; "never ends with nothing replacing it" read stronger
-than the rule and has been corrected here and in the contract.
+The first claim is split because the merge shape is real: a merge into a
+subject under `strict` leaves the copy in `review_queue`, and requiring an
+accepted replacement there would refuse the merge. Two earlier wordings of this
+claim were too strong. "Never ends with nothing replacing it" said nothing
+about liveness, and "accepted or waiting in review_queue" was falsified by a
+replacement born closed. What holds is above, and nothing should be written
+that reads stronger.
 
 ## Cost
 
