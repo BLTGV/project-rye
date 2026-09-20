@@ -1255,6 +1255,16 @@ fatal, and it is closed from both ends. Recorded in
 A client that recorded a policy value Rye does not know was already getting
 nothing it asked for. What changes is that it now finds out at the write.
 
+A `review_policy` row whose claim carries no readable value — a missing or
+wrong key, a JSON null, a non-string — reads `strict` and ranks `0` exactly as
+an unsupported value does, and cannot be recorded. A scope with **no**
+`review_policy` row still reads `open` and ranks `2`: absent is not broken,
+present and unreadable is.
+
+The guard does not refuse an `UPDATE` that leaves the claim alone and does not
+make the row accepted, so a standing broken row can still be superseded, ended,
+or rejected. That is how an instance that already holds one is repaired.
+
 ## Review surfaces
 
 What a reviewer's screen needs comes from the views, not from a client's own
