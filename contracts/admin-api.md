@@ -166,6 +166,19 @@ same data and the same authorization model, read one layer out. This is a
 known and bounded exception to "checks go through the schema's authorization
 helpers", recorded in `docs/decisions/0006-agent-tokens-deny-by-default.md`,
 and it is removed when a schema helper expresses the narrower question.
+Ruled on 2026-09-20 in `docs/decisions/0013-leftovers-fail-restrictive.md`: no
+such helper is planned. It would move the exception rather than remove it — the
+API needs the answer for the token it has just authenticated and already holds
+that token's grant rows, so a helper would cost a round trip to re-read them.
+The sentence above stands as a standing offer, not a plan, and the predicate is
+pinned from outside by `tests/conformance/21_api_security.sh` instead.
+
+The grant rows this predicate reads come from `authenticate_agent_token()`,
+which already excludes inactive and expired grants. Every capability test in the
+API therefore inherits expiry from the schema, including the `rye.domain.admin`
+gate on the domains `properties` field, which does not test expiry itself. That
+inheritance is the rule, not an accident, and it is pinned by the same test
+file.
 
 **`GET /api/domains`.** The listing returns only areas the token holds for
 `rye.context.read`. Areas it does not hold are absent from the array
@@ -273,6 +286,68 @@ The console SPA sends no bearer token, so with auth required every one of its
 calls is a `401` and the screen does not work at all. One Worker today serves
 either the reviewer's screen or scoped agents, not both. Putting a human
 login in front of the console is separate work and is not promised here.
+
+## Review fields and counts
+
+The review routes project the views in `contracts/sql-surface.md`, section
+"Review surfaces". Everything below is additive: new response fields and one
+new optional query parameter. Clients ignore fields they do not know.
+
+**`GET /api/review/assertions`** gains, per group: `incumbent.effective_confidence`
+(now populated from the view rather than recomputed), `incumbent.is_current`,
+`waiting_reason` (`settle_gate`, `review_gate`, or `none`), and
+`waiting_detail`. Per candidate: `projected_effective_confidence`,
+`evidence_count`, `witness_count`, `evidence_kinds`, `latest_evidence_at`. The
+`basis_prior` field stays for one release as the chip's fallback and is
+deprecated by `projected_effective_confidence`.
+
+`incumbent` changes meaning in one direction and the change is stated: it is now
+the accepted, unsuperseded assertion an acceptance would supersede, which may be
+one that is not currently effective. `incumbent.is_current` carries the old
+distinction, so a client that wants the previous behaviour reads
+`is_current === true`.
+
+**`?state=`** is a new optional parameter on `GET /api/review/assertions`:
+`waiting` (the default, today's behaviour) or `rejected`, which returns
+`rejected_candidates` rows with `rejected_at`, `rejected_by`,
+`rejected_reason`, `rejected_outcome`, and `rejection_event_id`. It is the same
+route, the same capability, and the same row filtering; rejected suggestions are
+never mixed into the waiting list.
+
+**`GET /api/stale-digests`** gains `newer_assertion_ids`,
+`newer_latest_asserted_at`, and `overturned_source_assertion_ids`, so a stale
+badge can link to what made it stale.
+
+**`GET /api/workspace/crm`** gains `freshness`:
+`{snapshot_at, age_seconds, stale_after_seconds, stale, row_count}` for
+`opportunities_active`. It is an age marker, not change detection: `stale` false
+does not promise the underlying rows are unchanged. The route stays `deny` for
+agent tokens.
+
+A null `incumbent`, a null field, or an empty list is RLS silence, not absence.
+A caller that cannot read an incumbent sees no incumbent, and must not conclude
+there is none.
+
+### `stats.total` and `stats.filtered`
+
+Both appear on `GET /api/candidates/review` and `GET /api/review/assertions`,
+and they mean the same thing on both:
+
+- **`total`** counts every row the caller is entitled to see on this route,
+  after RLS and after the area row filter in "Row filtering", and **before** the
+  request's own `status`, `kind`, `assertion_type`, `competingOnly`, and `q`
+  filters. It never counts a row that was withheld.
+- **`filtered`** counts the rows that survive those request filters, still
+  before `limit` and `offset`.
+
+Three consequences a client may rely on: `filtered <= total`; neither depends on
+`limit` or `offset`, so paging does not move them; and the returned array's
+length is at most `min(filtered, limit)` and is less than `filtered` whenever
+paging applies. A test that compares a total against a page's length is testing
+the page size, not the count — compare against `filtered`, and compare `total`
+only with no request filters set. The facet counts (`statuses`, `kinds`,
+`types`) are computed on the same population as `total`, which is why a facet
+can exceed `filtered`.
 
 ## Versioning
 
