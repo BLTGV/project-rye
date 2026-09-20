@@ -974,12 +974,13 @@ ORDER BY seq;
 ```
 
 Pass the nodes the step touched as the fourth argument whenever it touched
-any, including the ones you rejected. An event is visible to you through its
-participants, so a step recorded with an empty array is readable only by an
-admin — and that is the step that found nothing, the one worth reading. The
-loop above returns `seq` 2 for you and both steps for an admin. When a step
-truly matched nothing, say so in `intent` and expect a person to be the one
-who reads it.
+any, including the ones you rejected. The event read policy needs a
+participant the reader can see, so a step recorded with an empty array is
+readable only by an admin session — and a step that found nothing has no nodes
+to name, so the steps that explain a miss are exactly the ones you will not be
+able to read back. Analysis of misses is an admin's read. The loop above
+returns `seq` 2 to you and both steps to an admin. Say in `intent` what the
+step was reaching for, and expect a person to be the one who reads it.
 
 A trace with no `trace_id` or no `seq` is refused: it could not be grouped or
 ordered, and an ungroupable trace looks like data. Tracing is a write like any

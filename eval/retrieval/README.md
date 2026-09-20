@@ -22,6 +22,20 @@ node eval/retrieval/score_retrieval.mjs --trace path.json
 The scorer needs no database and no dependencies. Its input is a trace; the
 database is only needed to produce one.
 
+A trace is usually hand-written, so a missing field is the common mistake. The
+scorer checks every field it will dereference before it starts, and says which
+file and which field in one line, then exits 1. Two fixtures under
+`traces/malformed/` demonstrate that; the directory is skipped by a plain run,
+so they never enter a score.
+
+```
+$ node eval/retrieval/score_retrieval.mjs --trace eval/retrieval/traces/malformed/no_scenario.json
+eval/retrieval/traces/malformed/no_scenario.json: scenario: required, and must name a directory under scenarios/
+
+$ node eval/retrieval/score_retrieval.mjs --trace eval/retrieval/traces/malformed/step_without_seq.json
+eval/retrieval/traces/malformed/step_without_seq.json: results[0].steps[1].seq: required: a whole number of at least 1, ordering this step within the loop
+```
+
 The seed sets `app.current_role = 'admin'` itself, because the write gate
 refuses a `viewer` and a role-less session; the database role running `psql`
 needs INSERT on the `rye` tables. It ends by checking its own outcome: under a
