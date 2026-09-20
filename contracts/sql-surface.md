@@ -915,18 +915,24 @@ The fifth is the one a client is most likely to meet. **A rival the caller
 cannot read does not stop a raw promotion.** A caller whose role hides an
 accepted assertion — classified above its read level — can promote a visible
 candidate on the same subject, type, and key and leave two accepted rows
-covering the same instant. The inferred-displacement test is measured in
+covering the same instant. Two cases, measured separately.
+
+*The candidate is not inferred* (work/008, passes four and five).
+`accept_assertion()` is `SECURITY DEFINER`, so in a deployment
+whose table owner is a superuser — the Docker reference install — it reads past
+RLS and ends the hidden incumbent, leaving one row, while the raw path leaves
+two; where the owner is bound by RLS, as on Supabase, the helper sees no more
+than the caller and the two paths agree on two rows.
+
+*The candidate is inferred and the hidden incumbent is not* is measured in
 `tests/conformance/31_assertion_lifecycle_gate.sql` (obligation 20): the raw
 path cannot reach the displacement at all, because an `UPDATE` applies the
 SELECT policies to the rows it scans, so a caller cannot end an incumbent it
 cannot read; what it leaves is a duplicate accepted row. `accept_assertion()`
 refuses the inferred candidate where the table owner is a superuser and
-promotes it where the owner is bound by RLS. Where the two paths differ is
-worth knowing: `accept_assertion()` is `SECURITY DEFINER`, so in a deployment
-whose table owner is a superuser — the Docker reference install — it reads past
-RLS and ends the hidden incumbent, leaving one row, while the raw path leaves
-two; where the owner is bound by RLS, as on Supabase, the helper sees no more
-than the caller and the two paths agree. Reading past RLS in the guard was
+promotes it where the owner is bound by RLS.
+
+Reading past RLS in the guard was
 rejected: it would tell a caller that a row it may not see exists, it does
 nothing at all where the owner is bound by RLS, and it is the kind of route
 `design/model/deployment.md` refuses. The consequence is a duplicate, not an
