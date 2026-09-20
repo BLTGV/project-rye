@@ -1036,6 +1036,151 @@ first, uncovered raw assertions, and recent activity. Assertions come only from
 
 **Why it exists:** Agents need context but have limited context windows. Dumping a node's full history overwhelms the model. This function returns a ranked, bounded summary that fits typical agent consumption.
 
+#### `resolve_node_identity()`
+
+```
+resolve_node_identity(p_node_type, p_label, p_identity, p_limit, p_scope) → jsonb
+```
+
+Advisory identity lookup. Returns `verdict` (`match`, `ambiguous`, or `new`)
+plus the candidates and why each surfaced. Matches exact external identity and
+declared identity keys from `identity_keys:<node_type>`, then falls back to
+trigram label similarity.
+
+Fuzzy label matching never produces `match` — a similar name is grounds for
+review, not evidence of identity.
+
+A **former name** is searchable. When a node was merged away its label went
+with it, so an archived, merged-away node whose label is similar surfaces its
+live survivor as a candidate with `match_reason` `former_label_similarity` and
+the old name in `matched_former_label`, counted in `former_label_count`. It is
+a label match, so it is `ambiguous`, never `match`. Without it an agent
+searching an old name would be told `new` and would recreate the entity that
+was just deduplicated.
+
+**Why it exists:** Agents perform graph inserts; the database gates outcomes,
+not steps. This is a read an intake agent consults before creating a node. It
+writes nothing, blocks nothing, and no write helper calls it — a deterministic
+resolver in the write path would make the judgment with less context than the
+agent has and stall a bulk import on per-row ambiguity. Ambiguity routes to
+`create_knowledge_candidate()` for review like any other uncertain claim.
+
+**Visibility.** `SECURITY INVOKER`, so it sees exactly what the caller sees. A
+node hidden by classification is not matched and the verdict is `new` — the
+same answer a genuinely absent node gives. That is the split-brain risk in
+`design/proposals/rls-visibility-contract.md`; its `restricted` verdict (D3)
+is not implemented, because the `SECURITY DEFINER` probe it assumed does not
+read past `FORCE ROW LEVEL SECURITY` on a non-superuser owner. Where it
+matters, run intake under a role that sees the whole population for the node
+type. `tests/security/04_identity_visibility.sql` pins the behavior.
+
+**Scale note:** identity-key matching normalizes both sides, so it cannot use
+an index out of the box. On large installs add an expression index per
+declared key:
+
+```sql
+CREATE INDEX idx_org_email_identity ON rye.nodes
+  (rye.normalize_identity_value(properties->>'email', 'lower'))
+  WHERE node_type = 'org' AND archived_at IS NULL;
+```
+
+#### `normalize_identity_value()` / `identity_keys()`
+
+```
+normalize_identity_value(p_value, p_normalizer) → text
+identity_keys(p_node_type, p_scope) → jsonb
+```
+
+Normalizers are `trim`, `lower`, `digits_only`, and `domain`. An unknown
+normalizer raises — a silent pass-through would quietly widen identity.
+`identity_keys()` resolves the declared keys for a node type, returning `[]`
+when none are configured or when the caller cannot see the registry entry.
+
+#### `resolve_merged_node()`
+
+```
+resolve_merged_node(p_node_id) → uuid
+```
+
+Follows `node_merges` transitively to the surviving node, returning the input
+when it was never merged and raising on a merge cycle.
+
+**Why it exists:** `merge_nodes()` has always recorded merges so old
+references could be traced to the survivor, but nothing read the table — a
+stale reference to a merged-away id resolved to nothing.
+
+**Visibility.** `SECURITY INVOKER`. `node_merges` has forced RLS since `0029`
+and its read policy admits an admin or a caller that can see both endpoints,
+so the lookup works for every role that can see the nodes involved without any
+elevated privilege. A chain through a node the caller cannot see stops at the
+last visible link: no id behind the policy is ever returned, and a caller with
+wider access gets the whole chain on a re-run.
+
+**A merge record is held to the shape a merge leaves.** `node_merges` is
+insert-only, and since `0033` a row is refused unless it passes every refusal
+`merge_nodes()` makes before its own insert, evaluated from the same facts: a
+role that may not write, an agent-shaped role, `system:cdc`, equal ids, a
+non-admin merging a node the governance structure touches, a duplicate or
+canonical the caller cannot see, an already-archived duplicate. Four more are
+this migration's own, because the row is now read: `merged_at` must equal the
+transaction's `now()`, a duplicate carries at most one merge record, the
+canonical must not already resolve back to the duplicate, and the canonical
+must not itself be archived. At commit the duplicate must be archived and a
+`node_merge` event must name the pair.
+
+So what a caller can reach by raw SQL is exactly what `merge_nodes()` would
+have done for it: a role allowed to merge that pair may write the row itself,
+and to survive the commit it must also archive the duplicate and record the
+event. It cannot do more. A role the helper refuses is refused here too, by
+the same sentence.
+
+One consequence: `merge_nodes()` inserts the row *before* it archives the
+duplicate, so calling it inside `SET CONSTRAINTS ALL IMMEDIATE` fails with
+"the duplicate is not archived". Leave the constraint deferred — its default —
+and it judges the transaction's final state as intended.
+
+**The table is read as untrusted.** A merge archives its duplicate, so a row
+whose duplicate is still live is not a merge and is not followed. Several rows
+for one duplicate resolve by earliest `merged_at`, then `id`, so a later row
+cannot outrank an earlier one. A cycle stops and returns the last node reached
+rather than raising — this is a read an agent calls, and one bad row must not
+break every lookup that passes through it.
+
+**Rows written before `0033`** were subject to no rule beyond "a role that may
+write", so an upgraded instance should be checked once. Every row a real merge
+left is archived, unique per duplicate, and has a `node_merge` event; anything
+else predates the guard and may be forged:
+
+```sql
+SELECT m.id, m.duplicate_id, m.canonical_id, m.merged_at, m.merged_by,
+       CASE
+         WHEN d.archived_at IS NULL THEN 'duplicate is not archived'
+         WHEN c.archived_at IS NOT NULL THEN 'canonical is archived'
+         WHEN (SELECT count(*) FROM rye.node_merges x
+                WHERE x.duplicate_id = m.duplicate_id) > 1
+              THEN 'more than one merge record for this duplicate'
+         ELSE 'no node_merge event'
+       END AS why
+FROM rye.node_merges m
+JOIN rye.nodes d ON d.id = m.duplicate_id
+JOIN rye.nodes c ON c.id = m.canonical_id
+WHERE d.archived_at IS NULL
+   OR c.archived_at IS NOT NULL
+   OR (SELECT count(*) FROM rye.node_merges x
+        WHERE x.duplicate_id = m.duplicate_id) > 1
+   OR NOT EXISTS (
+        SELECT 1 FROM rye.events e
+        WHERE e.event_type = 'node_merge'
+          AND e.properties->>'duplicate_id' = m.duplicate_id::text
+          AND e.properties->>'canonical_id' = m.canonical_id::text
+   )
+ORDER BY m.merged_at;
+```
+
+Run it as `admin`. Rows it returns are not followed by `resolve_merged_node()`
+when the duplicate is live; for the rest, decide by hand — `node_merges` is
+insert-only, so a wrong row is corrected by a real merge, not by deleting it.
+
 #### `find_nodes()` / `find_nodes_batch()`
 
 ```
