@@ -22,7 +22,14 @@ Directed relationships between nodes with optional temporal bounds and weights.
 
 **Why it exists:** The relationships between entities (who works where, which ticket is about which customer, which task blocks which task) are often more valuable than the entities themselves. These relationships live in different systems and are invisible to each other. Edges make them explicit and queryable.
 
-**Key columns:** `edge_type` (open convention), `source_id` / `target_id` (directionality), `effective_from` / `effective_to` (temporal bounds), `weight` (relevance ranking), `archived_at` (soft delete — use instead of deletion).
+**Key columns:** `edge_type` (open convention), `source_id` / `target_id` (directionality), `effective_from` / `effective_to` (temporal bounds), `weight` (relevance ranking), `archived_at` (soft delete — use instead of deletion), `attrs` (system metadata: classification, teams).
+
+**An edge carries its own classification (0037).** `attrs.classification` and
+`attrs.teams` decide who may read the edge, ANDed with the unchanged rule that
+both endpoints must be visible. `attrs.teams` without an
+`attrs.classification` is refused at write time. Assertions about a hidden edge
+are hidden with it, and traversal inherits the same answer. See
+`enforce_edge_classification_with_teams()`.
 
 #### `events` — Activity Log
 
@@ -60,6 +67,12 @@ time, and classification.
 **Write convention:** Use `record_assertion()`. Direct inserts without evidence
 are reserved for explicit `assumed` assertions. Use lifecycle helpers for
 acceptance, rejection, supersession, and scheduling.
+
+**Authorship:** `attrs.recorded_by` is written by Rye on every insert from
+`app.current_role`, overwriting whatever the caller supplied, and
+`attrs.recorded_by_label` carries `app.current_user_id` as a label that decides
+nothing. It is what "an agent may close only its own suggestion" reads. Rows
+written before `0037` carry neither. See `assertion_authorship_stamp()`.
 
 #### `assertion_evidence` — Assertion Provenance
 
@@ -888,6 +901,44 @@ optional outcome label. Inferred candidates cannot displace non-inferred
 incumbents. Scoped restrictive policy requires a human or the
 `rye.authoritative.promote` capability.
 
+**Who may reject (0037).** Closing a suggestion is an authority, not
+bookkeeping:
+
+| caller | may close a live candidate |
+|---|---|
+| `admin` | any, configuration included |
+| named role with `may_write` | any **except** an assertion type carrying a `settle` row |
+| agent-shaped (`agent:<key>`) | only one whose `attrs.recorded_by` is its own role, and never a settle-gated type |
+| `viewer`, unset, unknown, `system:cdc` | none, as "who may write" already says |
+
+`reject_candidate()` refuses before it labels an outcome or marks the row, so a
+refused rejection records no `candidate_rejected` event and the candidate is
+still waiting. The rule itself is
+`trg_assertions_reject_authority`, a `BEFORE UPDATE` trigger firing on the
+rejection shape — a live candidate ending with `superseded_by` null — so a raw
+`UPDATE` with a forged `app.write_path` is bound identically. An agent's
+documented correction route is unchanged: close your own pending suggestion,
+file a corrected one.
+
+#### `assertion_authorship_stamp()`
+
+`BEFORE INSERT` trigger on `assertions`, trigger
+`trg_assertion_authorship_stamp` (0037). Writes `attrs.recorded_by` from
+`app.current_role` and `attrs.recorded_by_label` from `app.current_user_id`,
+overwriting anything the caller supplied, on every route — helper and raw
+`INSERT` alike.
+
+**Why it exists:** `assertions` has no author column and `record_assertion()`
+takes no actor, so "an agent may close only its own suggestion" had nothing to
+read. A trigger is the only place the write cannot be skipped, and it also means
+a caller can never claim another author. Consequences a client meets: a row
+written before `0037` carries no `recorded_by` and **no agent may close it** —
+unknown authorship is not own authorship, and `attrs` is immutable so there is
+no backfill; and a `merge_nodes()` copy carries the recorded_by of the session
+that ran the merge, because that session is what put that row on the canonical
+node. The original row keeps its own author. `review_queue` and the other review
+surfaces already project `attrs`, so "who suggested this" needs no view change.
+
 #### `schedule_assertion_change()`
 
 Creates an accepted future-effective replacement for any assertion type and
@@ -1342,6 +1393,23 @@ helper because a trigger fires inside a `SECURITY DEFINER` helper and on a raw
 BEFORE INSERT/UPDATE trigger on `nodes`. Rejects nodes that have `attrs->'teams'` (non-empty array) but no `attrs->>'classification'`.
 
 **Why it exists:** Team-scoped nodes without a classification would be visible to all users by default, creating a security hole. This trigger catches the mistake at write time.
+
+#### `enforce_edge_classification_with_teams()`
+
+`BEFORE INSERT OR UPDATE` trigger on `edges`, trigger
+`trg_edges_classification_check` (0037). The same rule, one table over:
+a non-empty `attrs.teams` with no `attrs.classification` is refused.
+
+**Why it exists:** since `0037` an edge's own `attrs.classification` and
+`attrs.teams` decide who may read it, ANDed with endpoint visibility. Without
+this trigger a team-marked edge with no classification would take the
+`classification IS NULL` branch and be world-readable — the same hole the node
+trigger closes. The trigger judges writes, not history: an edge that already
+carries teams and no classification stays readable until a write sets one, and
+setting one is an `UPDATE` the trigger accepts. There is no admin exemption on
+the read side, exactly as there is none for nodes, and an `UPDATE`'s new row is
+checked against the SELECT policy, so the session doing the marking must hold
+the team it is about to require.
 
 #### `mark_assertion_superseded()`
 
