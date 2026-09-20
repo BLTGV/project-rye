@@ -733,10 +733,15 @@ helper consults it — the decision is yours. Route `ambiguous` to
 `create_knowledge_candidate()` and batch review by resolved cluster rather
 than by row, or a large import will stall on individual near-misses. Do not
 try to clean up an `ambiguous` verdict yourself. Merging is for people, and
-the rule is about the row, not the route: `merge_nodes()` refuses an
+the rule is about the row, not the route. `merge_nodes()` refuses an
 agent-shaped session by name, and a direct write to `node_merges` is refused
-the same way — along with any row that is not the shape a real merge leaves.
-Record the duplicate and ask a person.
+by the same sentence — as is every other merge the helper would refuse: equal
+ids, a node the governance structure touches when you are not an admin, a node
+you cannot see, a duplicate that is already archived. What a raw write can
+still reach is exactly the merge `merge_nodes()` would have performed for that
+caller, and only if it also archives the duplicate and records the
+`node_merge` event, which the record is checked against at commit. It cannot
+do more. Record the duplicate and ask a person.
 
 `new` means nothing matched *that you can see*. A node hidden from you by
 classification is not matched, so a duplicate is possible across an access

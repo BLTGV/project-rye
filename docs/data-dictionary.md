@@ -1116,6 +1116,29 @@ elevated privilege. A chain through a node the caller cannot see stops at the
 last visible link: no id behind the policy is ever returned, and a caller with
 wider access gets the whole chain on a re-run.
 
+**A merge record is held to the shape a merge leaves.** `node_merges` is
+insert-only, and since `0033` a row is refused unless it passes every refusal
+`merge_nodes()` makes before its own insert, evaluated from the same facts: a
+role that may not write, an agent-shaped role, `system:cdc`, equal ids, a
+non-admin merging a node the governance structure touches, a duplicate or
+canonical the caller cannot see, an already-archived duplicate. Four more are
+this migration's own, because the row is now read: `merged_at` must equal the
+transaction's `now()`, a duplicate carries at most one merge record, the
+canonical must not already resolve back to the duplicate, and the canonical
+must not itself be archived. At commit the duplicate must be archived and a
+`node_merge` event must name the pair.
+
+So what a caller can reach by raw SQL is exactly what `merge_nodes()` would
+have done for it: a role allowed to merge that pair may write the row itself,
+and to survive the commit it must also archive the duplicate and record the
+event. It cannot do more. A role the helper refuses is refused here too, by
+the same sentence.
+
+One consequence: `merge_nodes()` inserts the row *before* it archives the
+duplicate, so calling it inside `SET CONSTRAINTS ALL IMMEDIATE` fails with
+"the duplicate is not archived". Leave the constraint deferred — its default —
+and it judges the transaction's final state as intended.
+
 **The table is read as untrusted.** A merge archives its duplicate, so a row
 whose duplicate is still live is not a merge and is not followed. Several rows
 for one duplicate resolve by earliest `merged_at`, then `id`, so a later row

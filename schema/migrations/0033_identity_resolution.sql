@@ -162,6 +162,21 @@ COMMENT ON FUNCTION identity_keys(text, uuid) IS
 -- owner types. Named to sort after trg_node_merges_gate (0029), so that gate's
 -- "who may write" message is still the one a read-only or system:cdc session
 -- sees.
+--
+-- The gate makes every refusal merge_nodes() makes before its insert, from
+-- the same facts and with the same predicates, so the two cannot drift: a
+-- role that may not write (0029's gate, by rye_may_write_table()), an
+-- agent-shaped role, system:cdc, equal ids, a non-admin merging a node the
+-- governance structure touches, a duplicate or canonical the caller cannot
+-- see, and an already-archived duplicate. What remains reachable by raw SQL
+-- is exactly this: a caller that merge_nodes() would have let merge this pair
+-- can write the row itself, and to survive the commit it must also archive
+-- the duplicate and record the node_merge event -- which is what
+-- merge_nodes() would have done for it. It cannot do more.
+--
+-- Consequence worth knowing: merge_nodes() inserts the row before it archives
+-- the duplicate, so running it under SET CONSTRAINTS ALL IMMEDIATE fails at
+-- the deferred check. Leave the constraint deferred, which is its default.
 
 CREATE OR REPLACE FUNCTION rye_node_merge_shape_gate() RETURNS trigger
 SET search_path = rye, pg_catalog
@@ -185,17 +200,47 @@ BEGIN
             USING ERRCODE = '42501';
     END IF;
 
-    -- A merge happened now. Back-dating hides one; forward-dating used to win
-    -- the lookup outright.
-    IF NEW.merged_at IS DISTINCT FROM now() THEN
-        RAISE EXCEPTION
-            'node_merges.merged_at is the moment of the merge (%), not % — a merge record is neither back-dated nor future-dated.',
-            now(), NEW.merged_at
+    IF NEW.duplicate_id = NEW.canonical_id THEN
+        RAISE EXCEPTION 'duplicate_id and canonical_id must be different'
             USING ERRCODE = '42501';
     END IF;
 
-    IF NEW.duplicate_id = NEW.canonical_id THEN
-        RAISE EXCEPTION 'duplicate_id and canonical_id must be different'
+    -- A merge re-points the duplicate's edges and archives the duplicate, so
+    -- a node the governance structure touches is an admin's to merge. Same
+    -- predicate as merge_nodes(), on the same facts: without it a
+    -- team_member refused by the helper could insert the row, record the
+    -- event and archive the node by hand, and leave a live governance edge on
+    -- an archived node.
+    IF v_role <> 'admin' THEN
+        IF EXISTS (
+            SELECT 1 FROM nodes n
+            WHERE n.id = NEW.duplicate_id AND n.node_type = 'onboarding_scope'
+        ) OR EXISTS (
+            SELECT 1 FROM edges e
+            WHERE (e.source_id = NEW.duplicate_id OR e.target_id = NEW.duplicate_id)
+              AND e.edge_type IN (
+                  'scope_governs_subject', 'scope_governs_source', 'scope_enables_plugin'
+              )
+              AND e.archived_at IS NULL
+              AND (e.effective_from IS NULL OR e.effective_from <= now())
+              AND (e.effective_to IS NULL OR e.effective_to > now())
+        ) THEN
+            RAISE EXCEPTION
+                'Merging a node a scope governs requires a Rye admin ("%" is not).', v_role
+                USING ERRCODE = '42501';
+        END IF;
+    END IF;
+
+    -- merge_nodes() locks both nodes next and reports them absent when the
+    -- caller cannot see them. The foreign keys guarantee the rows exist, so
+    -- here "not visible" is the only way this fires -- and it is the same
+    -- answer the helper gives.
+    IF NOT EXISTS (SELECT 1 FROM nodes WHERE id = NEW.duplicate_id) THEN
+        RAISE EXCEPTION 'Duplicate node % not found', NEW.duplicate_id
+            USING ERRCODE = '42501';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM nodes WHERE id = NEW.canonical_id) THEN
+        RAISE EXCEPTION 'Canonical node % not found', NEW.canonical_id
             USING ERRCODE = '42501';
     END IF;
 
@@ -204,6 +249,20 @@ BEGIN
         SELECT 1 FROM nodes WHERE id = NEW.duplicate_id AND archived_at IS NOT NULL
     ) THEN
         RAISE EXCEPTION 'Duplicate node % is already archived', NEW.duplicate_id
+            USING ERRCODE = '42501';
+    END IF;
+
+    -- ------------------------------------------------------------------
+    -- Past here the checks are this migration's own: a merge record is now
+    -- read, so it carries rules merge_nodes() never needed.
+    -- ------------------------------------------------------------------
+
+    -- A merge happened now. Back-dating hides one; forward-dating used to win
+    -- the lookup outright.
+    IF NEW.merged_at IS DISTINCT FROM now() THEN
+        RAISE EXCEPTION
+            'node_merges.merged_at is the moment of the merge (%), not % — a merge record is neither back-dated nor future-dated.',
+            now(), NEW.merged_at
             USING ERRCODE = '42501';
     END IF;
 
@@ -255,7 +314,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION rye_node_merge_shape_gate() IS
-    'BEFORE ROW trigger on node_merges, sorting after rye_node_merge_gate(). Holds a new row to the shape merge_nodes() writes at the moment it writes it: never an agent or system:cdc, merged_at = now(), distinct ids, an unarchived duplicate with no earlier merge row, no cycle, and an unarchived canonical. SECURITY INVOKER, so the cycle walk sees what the caller sees; resolve_merged_node() defends itself as well.';
+    'BEFORE ROW trigger on node_merges, sorting after rye_node_merge_gate(). Makes every refusal merge_nodes() makes before its insert, from the same facts: no agent, no system:cdc, distinct ids, the governance rule for a non-admin, both nodes visible, and an unarchived duplicate. Then its own: merged_at = now(), no earlier merge record for the duplicate, no cycle, an unarchived canonical. A caller can therefore reach by raw SQL only the merge merge_nodes() would have performed for it. SECURITY INVOKER, so the walk sees what the caller sees; resolve_merged_node() defends itself as well.';
 
 DROP TRIGGER IF EXISTS trg_node_merges_shape ON node_merges;
 CREATE TRIGGER trg_node_merges_shape
@@ -295,7 +354,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION rye_node_merge_shape_complete() IS
-    'Deferred constraint trigger on node_merges. At commit the duplicate is archived and a node_merge event names the pair -- the two facts merge_nodes() establishes after its insert, so they cannot be checked in the BEFORE trigger.';
+    'Deferred constraint trigger on node_merges. At commit the duplicate is archived and a node_merge event names the pair -- the two facts merge_nodes() establishes after its insert, so they cannot be checked in the BEFORE trigger. Because merge_nodes() inserts before it archives, calling it under SET CONSTRAINTS ALL IMMEDIATE fails here; leave the constraint deferred, which is its default.';
 
 DROP TRIGGER IF EXISTS trg_node_merges_shape_complete ON node_merges;
 CREATE CONSTRAINT TRIGGER trg_node_merges_shape_complete

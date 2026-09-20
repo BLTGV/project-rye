@@ -187,6 +187,9 @@ DECLARE
     v_cyc_x uuid;
     v_cyc_y uuid;
     v_failed boolean;
+    v_gov_canon uuid;
+    v_gov_dup uuid;
+    v_gov_scope uuid;
     v_msg text;
     v_merge_d uuid;
     v_merge_e uuid;
@@ -594,6 +597,70 @@ BEGIN
         RAISE EXCEPTION 'the refused merge archived the surviving node';
     END IF;
     RAISE NOTICE 'PASS: a merge that would close a cycle is refused and the chain stands';
+
+    -- 4b. Every refusal merge_nodes() makes, the row makes. A team_member is
+    --     refused a governed pair by the helper; the raw route is refused by
+    --     the same sentence, so it cannot archive the node out from under a
+    --     live governance edge.
+    INSERT INTO nodes (node_type, label) VALUES ('onboarding_scope', 'Halden Scope')
+    RETURNING id INTO v_gov_scope;
+    INSERT INTO nodes (node_type, label) VALUES ('ident_org', 'Halden Governed')
+    RETURNING id INTO v_gov_dup;
+    INSERT INTO nodes (node_type, label) VALUES ('ident_org', 'Halden Survivor')
+    RETURNING id INTO v_gov_canon;
+    INSERT INTO edges (edge_type, source_id, target_id)
+    VALUES ('scope_governs_subject', v_gov_scope, v_gov_dup);
+
+    PERFORM set_config('app.current_role', 'team_member', true);
+    v_failed := false;
+    BEGIN
+        PERFORM merge_nodes(v_gov_dup, v_gov_canon, 'team_member');
+    EXCEPTION WHEN others THEN
+        v_failed := true; v_msg := SQLERRM;
+    END;
+    IF NOT v_failed OR v_msg NOT LIKE '%requires a Rye admin%' THEN
+        RAISE EXCEPTION 'premise broken: merge_nodes let a team_member merge a governed node (%)', v_msg;
+    END IF;
+
+    v_failed := false;
+    BEGIN
+        INSERT INTO node_merges (duplicate_id, canonical_id, merged_by)
+        VALUES (v_gov_dup, v_gov_canon, 'team_member');
+    EXCEPTION WHEN others THEN
+        v_failed := true; v_msg := SQLERRM;
+    END;
+    IF NOT v_failed THEN
+        RAISE EXCEPTION
+            'a team_member recorded by hand a merge merge_nodes() refuses it';
+    END IF;
+    IF v_msg NOT LIKE '%requires a Rye admin%' THEN
+        RAISE EXCEPTION 'the raw governed merge was refused for the wrong reason: %', v_msg;
+    END IF;
+    PERFORM set_config('app.current_role', 'admin', true);
+    IF resolve_merged_node(v_gov_dup) <> v_gov_dup THEN
+        RAISE EXCEPTION 'the refused raw merge moved the lookup';
+    END IF;
+    RAISE NOTICE 'PASS: the raw route refuses every merge merge_nodes() refuses';
+
+    -- ...and an admin, whom merge_nodes() would allow on this pair, reaches
+    -- exactly that by hand: the row, the event, and the archive. Nothing more.
+    INSERT INTO node_merges (duplicate_id, canonical_id, merged_by)
+    VALUES (v_gov_dup, v_gov_canon, 'admin');
+    PERFORM record_event(
+        p_event_type := 'node_merge',
+        p_summary := 'merge by hand',
+        p_properties := jsonb_build_object(
+            'duplicate_id', v_gov_dup, 'canonical_id', v_gov_canon),
+        p_participant_ids := ARRAY[v_gov_canon, v_gov_dup],
+        p_participant_roles := ARRAY['canonical', 'duplicate'],
+        p_actor := 'admin');
+    UPDATE nodes SET archived_at = now() WHERE id = v_gov_dup;
+    SET CONSTRAINTS trg_node_merges_shape_complete IMMEDIATE;
+    SET CONSTRAINTS ALL DEFERRED;
+    IF resolve_merged_node(v_gov_dup) <> v_gov_canon THEN
+        RAISE EXCEPTION 'an admin''s hand-written merge did not resolve';
+    END IF;
+    RAISE NOTICE 'PASS: an admin by hand reaches what merge_nodes() would have done, and no more';
 
     -- 5. A row that pre-dates this guard may be any shape at all. The lookup
     --    treats the table as untrusted: a row whose duplicate is still live
