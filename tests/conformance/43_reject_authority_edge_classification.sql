@@ -1113,4 +1113,88 @@ BEGIN
 END
 $$;
 
+-- ---------------------------------------------------------------------------
+-- 43.17 An admin is never locked out of the review queue by a marker.
+--
+-- attrs is caller-supplied on a raw INSERT, so an agent can write an empty
+-- allowed_roles -- or one that excludes admin -- onto a suggestion of an
+-- ungated type. Read literally nobody qualifies, and the row could be neither
+-- accepted (0036) nor rejected (0037): it sat in review_queue until its author
+-- withdrew it. So where the MARKER is the gate an admin always qualifies.
+-- Every other role still has to be named, and the type gate is untouched --
+-- 43.5 above pins that a gated stored type refuses an admin-less caller on its
+-- settle row. Conformance 42.11 owns the acceptance half.
+-- ---------------------------------------------------------------------------
+DO $$
+DECLARE
+    v_empty   uuid;
+    v_failed  boolean;
+    v_manager uuid;
+    v_msg     text;
+    v_role    text;
+    v_subj    uuid := (SELECT v FROM t43 WHERE k = 'subject')::uuid;
+BEGIN
+    PERFORM set_config('app.current_role', 'agent:alpha', true);
+    INSERT INTO assertions
+        (assertion_type, assertion_key, status, basis, subject_node_id, claim, attrs)
+    VALUES ('reject_lockout_probe', 'empty', 'candidate', 'assumed', v_subj,
+            '{"value":"nobody named"}',
+            '{"settle_gate":{"allowed_roles":[]}}')
+    RETURNING id INTO v_empty;
+
+    INSERT INTO assertions
+        (assertion_type, assertion_key, status, basis, subject_node_id, claim, attrs)
+    VALUES ('reject_lockout_probe', 'manager', 'candidate', 'assumed', v_subj,
+            '{"value":"manager named"}',
+            '{"settle_gate":{"allowed_roles":["manager"]}}')
+    RETURNING id INTO v_manager;
+
+    PERFORM set_config('app.current_role', 'admin', true);
+    IF assertion_settle_roles('reject_lockout_probe') IS NOT NULL THEN
+        RAISE EXCEPTION
+            'Refusing to pass vacuously: the probe type is settle-gated, so the marker is not what decides';
+    END IF;
+
+    -- Everyone the marker does not name is still refused, the author aside.
+    FOREACH v_role IN ARRAY ARRAY['team_member', 'agent:beta'] LOOP
+        PERFORM set_config('app.current_role', v_role, true);
+        v_failed := false;
+        BEGIN
+            PERFORM reject_candidate(v_empty, 'closing a row whose marker names nobody');
+        EXCEPTION WHEN OTHERS THEN
+            v_failed := true;
+            v_msg := SQLERRM;
+        END;
+        IF NOT v_failed THEN
+            RAISE EXCEPTION 'role "%" closed a row whose marker names nobody', v_role;
+        END IF;
+        IF v_msg NOT LIKE '%Rye configuration%' THEN
+            RAISE EXCEPTION 'role "%" was refused the empty-marker row for the wrong reason: %',
+                v_role, v_msg;
+        END IF;
+        PERFORM set_config('app.current_role', 'admin', true);
+        IF (SELECT superseded_at FROM assertions WHERE id = v_empty) IS NOT NULL THEN
+            RAISE EXCEPTION 'role "%" closed the empty-marker row after all', v_role;
+        END IF;
+    END LOOP;
+
+    -- The admin is not locked out, whatever the array holds.
+    PERFORM set_config('app.current_role', 'admin', true);
+    PERFORM reject_candidate(v_empty, 'an admin clears the queue');
+    IF (SELECT superseded_at FROM assertions WHERE id = v_empty) IS NULL THEN
+        RAISE EXCEPTION 'an admin could not close a row whose marker names nobody';
+    END IF;
+
+    PERFORM reject_candidate(v_manager, 'an admin closes a row naming only manager');
+    IF (SELECT superseded_at FROM assertions WHERE id = v_manager) IS NULL THEN
+        RAISE EXCEPTION 'an admin could not close a row whose marker names only manager';
+    END IF;
+
+    RAISE NOTICE 'PASS 43.17: an admin always qualifies where the marker is the gate';
+
+    SET CONSTRAINTS ALL IMMEDIATE;
+    SET CONSTRAINTS ALL DEFERRED;
+END
+$$;
+
 ROLLBACK;

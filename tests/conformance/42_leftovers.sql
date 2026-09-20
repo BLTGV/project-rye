@@ -1183,4 +1183,87 @@ BEGIN
 END
 $$;
 
+-- ==========================================================================
+-- 42.11  An admin is never locked out of the review queue by a marker.
+--
+-- attrs is caller-supplied on a raw INSERT, so an agent can write
+-- {"settle_gate":{"allowed_roles":[]}} -- or an array that simply excludes
+-- admin -- onto a suggestion of an ungated type. Read literally, nobody
+-- qualifies: the row could be neither accepted nor rejected and sat in
+-- review_queue for good. Self-inflicted, but an admin must always be able to
+-- clear the queue, so where the MARKER is the gate an admin always qualifies.
+-- Every other role still has to be named. The type gate is untouched: 42.10
+-- above already pins that a gated stored type is judged by its settle row.
+-- ==========================================================================
+DO $$
+DECLARE
+    v_empty   uuid;
+    v_failed  boolean;
+    v_manager uuid;
+    v_msg     text;
+    v_role    text;
+    v_subject uuid;
+BEGIN
+    PERFORM set_config('app.current_role', 'admin', true);
+    INSERT INTO nodes (node_type, label) VALUES ('thing', 'Leftovers lockout subject')
+    RETURNING id INTO v_subject;
+
+    PERFORM set_config('app.current_role', 'agent:t', true);
+    INSERT INTO assertions
+        (assertion_type, assertion_key, status, basis, subject_node_id, claim, attrs)
+    VALUES ('leftover_lockout_probe', 'empty', 'candidate', 'assumed', v_subject,
+            '{"value":"nobody named"}',
+            '{"settle_gate":{"allowed_roles":[]}}')
+    RETURNING id INTO v_empty;
+
+    INSERT INTO assertions
+        (assertion_type, assertion_key, status, basis, subject_node_id, claim, attrs)
+    VALUES ('leftover_lockout_probe', 'manager', 'candidate', 'assumed', v_subject,
+            '{"value":"manager named"}',
+            '{"settle_gate":{"allowed_roles":["manager"]}}')
+    RETURNING id INTO v_manager;
+
+    PERFORM set_config('app.current_role', 'admin', true);
+    IF assertion_settle_roles('leftover_lockout_probe') IS NOT NULL THEN
+        RAISE EXCEPTION
+            'Refusing to pass vacuously: the probe type is settle-gated, so the marker is not what decides';
+    END IF;
+
+    -- Still closed to everyone the marker does not name.
+    FOREACH v_role IN ARRAY ARRAY['team_member', 'agent:other'] LOOP
+        PERFORM set_config('app.current_role', v_role, true);
+        v_failed := false;
+        BEGIN
+            PERFORM accept_assertion(v_empty);
+        EXCEPTION WHEN OTHERS THEN
+            v_failed := true;
+            v_msg := SQLERRM;
+        END;
+        IF NOT v_failed OR v_msg NOT LIKE '%waiting on the settle gate%' THEN
+            RAISE EXCEPTION
+                'Role "%" accepted a row whose marker names nobody: failed=% msg=%',
+                v_role, v_failed, v_msg;
+        END IF;
+        PERFORM set_config('app.current_role', 'admin', true);
+        IF (SELECT status FROM assertions WHERE id = v_empty) <> 'candidate' THEN
+            RAISE EXCEPTION 'Role "%" left the empty-marker row accepted', v_role;
+        END IF;
+    END LOOP;
+
+    -- The admin is not. Accepting the empty-marker row is the half this
+    -- migration owns; conformance 43 owns rejecting it.
+    PERFORM set_config('app.current_role', 'admin', true);
+    PERFORM accept_assertion(v_empty);
+    IF (SELECT status FROM assertions WHERE id = v_empty) <> 'accepted' THEN
+        RAISE EXCEPTION 'An admin could not accept a row whose marker names nobody';
+    END IF;
+
+    -- A marker naming only another role is the same answer.
+    PERFORM accept_assertion(v_manager);
+    IF (SELECT status FROM assertions WHERE id = v_manager) <> 'accepted' THEN
+        RAISE EXCEPTION 'An admin could not accept a row whose marker names only manager';
+    END IF;
+END
+$$;
+
 ROLLBACK;

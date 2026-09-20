@@ -531,6 +531,20 @@ BEGIN
         RETURN NEW;
     END IF;
 
+    -- Where the MARKER is the gate, an admin always qualifies, whatever the
+    -- array holds. attrs is caller-supplied on a raw INSERT, so an empty
+    -- allowed_roles -- or one naming roles that exclude admin -- otherwise
+    -- parks a suggestion in review_queue that nobody with the authority to
+    -- clear it can accept or reject. An admin must never be locked out of the
+    -- queue. This widens nothing: a gated STORED type is judged by
+    -- assertion_type_access above and never reaches here, and an admin already
+    -- settles those. Every other role still has to be named.
+    IF v_marked
+       AND coalesce(nullif(current_setting('app.current_role', true), ''), '') = 'admin'
+    THEN
+        RETURN NEW;
+    END IF;
+
     IF v_marked THEN
         RAISE EXCEPTION
             'Assertion % is waiting on the settle gate for Rye configuration type %: only % may make it accepted. It is in review_queue for one of those roles.',
@@ -557,7 +571,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION assertion_settle_gate_guard() IS
-    'Refuse any write that makes an assertion of a settle-gated type accepted, any change to a row of a gated type that is already accepted, any registry_entry that aliases a settle-gated type away (assertion_key type_alias:assertion_type:<gated type>, at every status, for every caller), and -- where the stored type is ungated -- the same two refusals driven by attrs.settle_gate.allowed_roles on the row itself, so a demotion under a pre-gate alias cannot be settled by the role it excluded. Unless app.current_role is one of the allowed roles. The marker is consulted only when the stored type is ungated, so a forged one can only add refusals; 0025 makes it unstrippable. Fires inside SECURITY DEFINER helpers and on raw writes alike. DELETE needs no branch: assertion_delete_policy refuses every delete.';
+    'Refuse any write that makes an assertion of a settle-gated type accepted, any change to a row of a gated type that is already accepted, any registry_entry that aliases a settle-gated type away (assertion_key type_alias:assertion_type:<gated type>, at every status, for every caller), and -- where the stored type is ungated -- the same two refusals driven by attrs.settle_gate.allowed_roles on the row itself, so a demotion under a pre-gate alias cannot be settled by the role it excluded. Unless app.current_role is one of the allowed roles, or is admin where the marker is the gate -- a caller-supplied empty or admin-less array must not lock an admin out of the review queue. The marker is consulted only when the stored type is ungated, so a forged one can only add refusals; 0025 makes it unstrippable. Fires inside SECURITY DEFINER helpers and on raw writes alike. DELETE needs no branch: assertion_delete_policy refuses every delete.';
 
 -- --------------------------------------------------------------------------
 -- 4. record_assertion() judges the written name as well as the canonical one
