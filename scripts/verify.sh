@@ -318,6 +318,115 @@ BEGIN
     RAISE EXCEPTION 'the 0025 insert exemption is still present in assertions_insert_review_guard';
   END IF;
 
+  -- Leftovers fail restrictive (0036). Four facts: one extraction helper that
+  -- the reading sites share, two reading functions that no longer raise, the
+  -- value guard and its trigger, and the written-name settle gate.
+  IF to_regprocedure('rye.review_policy_claim_value(jsonb)') IS NULL
+     OR to_regprocedure('rye.review_policy_value_supported(jsonb)') IS NULL
+  THEN
+    RAISE EXCEPTION 'the review policy claim extraction helpers are missing';
+  END IF;
+
+  IF EXISTS (
+      SELECT required.name
+      FROM (VALUES ('scope_review_policy'), ('scope_review_policy_rank'),
+                   ('record_scope_policy'), ('assertion_review_policy_value_guard'))
+           required(name)
+      WHERE NOT EXISTS (
+          SELECT 1 FROM pg_proc p
+          JOIN pg_namespace n ON n.oid = p.pronamespace
+          WHERE n.nspname = v_schema
+            AND p.proname = required.name
+            AND (p.prosrc LIKE '%review_policy_claim_value%'
+                 OR p.prosrc LIKE '%review_policy_value_supported%')
+      )
+  ) THEN
+    RAISE EXCEPTION
+      'one or more review-policy sites do not read the shared claim extraction, so they can drift apart';
+  END IF;
+
+  -- Reading a stored policy value must not raise. The old body is the only
+  -- thing in the tree that raised, so its sentence is the marker.
+  IF EXISTS (
+      SELECT 1 FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = v_schema
+        AND p.proname = 'scope_review_policy'
+        AND p.prosrc LIKE '%Unsupported review_policy % on scope%'
+  ) THEN
+    RAISE EXCEPTION 'scope_review_policy still raises on an unsupported stored value';
+  END IF;
+
+  IF NOT EXISTS (
+      SELECT 1
+      FROM pg_trigger t
+      JOIN pg_class c ON c.oid = t.tgrelid
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = v_schema
+        AND c.relname = 'assertions'
+        AND t.tgname = 'trg_assertions_review_policy_value'
+        AND NOT t.tgisinternal
+        AND t.tgenabled = 'O'
+        AND t.tgtype & 1 = 1  -- FOR EACH ROW
+        AND t.tgtype & 2 = 2  -- BEFORE
+        AND t.tgtype & 4 = 4  -- INSERT
+        AND t.tgtype & 16 = 16 -- UPDATE
+  ) THEN
+    RAISE EXCEPTION
+      'trg_assertions_review_policy_value is missing, disabled, or is not BEFORE INSERT OR UPDATE FOR EACH ROW';
+  END IF;
+
+  -- The settle gate judges the written name as well as the canonical one, and
+  -- says which spelling gated the write.
+  IF NOT EXISTS (
+      SELECT 1 FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = v_schema
+        AND p.proname = 'record_assertion'
+        AND p.prosrc LIKE '%gated_as%'
+  ) THEN
+    RAISE EXCEPTION 'record_assertion does not mark which spelling gated a settle-gate demotion';
+  END IF;
+
+  IF NOT EXISTS (
+      SELECT 1 FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = v_schema
+        AND p.proname = 'settle_gate'
+        AND p.prosrc LIKE '%gated_as%'
+        AND p.prosrc LIKE '%canonical_type%'
+        AND p.prosrc LIKE '%trim(p_assertion_type)%'
+  ) THEN
+    RAISE EXCEPTION
+      'settle_gate does not judge the written name as well as the canonical one, or does not normalise its argument as record_assertion does';
+  END IF;
+
+  -- The demotion marker is itself a gate: without this, a row demoted under a
+  -- pre-gate alias is stored under an ungated type and the excluded role can
+  -- accept its own write.
+  IF NOT EXISTS (
+      SELECT 1 FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = v_schema
+        AND p.proname = 'assertion_settle_gate_guard'
+        AND p.prosrc LIKE '%settle_gate%allowed_roles%'
+  ) THEN
+    RAISE EXCEPTION
+      'assertion_settle_gate_guard does not read the attrs.settle_gate marker, so a demotion can be settled by the role it excluded';
+  END IF;
+
+  -- A repeat describe_category() works for an agent because the function opens
+  -- the named write path around its own upsert.
+  IF NOT EXISTS (
+      SELECT 1 FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = v_schema
+        AND p.proname = 'describe_category'
+        AND p.prosrc LIKE '%update_node_properties%'
+  ) THEN
+    RAISE EXCEPTION 'describe_category does not open the named write path around its upsert';
+  END IF;
+
   IF NOT EXISTS (
       SELECT 1
       FROM pg_class c

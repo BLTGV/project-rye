@@ -872,19 +872,42 @@ BEGIN
     END LOOP;
 
     -- ==================================================================
-    -- Obligation 13. scope_review_policy_rank() never raises. A scope
-    -- carrying an unsupported review_policy value ranks as open, so it
-    -- does not break a write on a subject a second scope also governs,
-    -- while scope_review_policy() on that scope still raises.
+    -- Obligation 13. Neither scope_review_policy_rank() nor
+    -- scope_review_policy() raises, for any input, and a second scope
+    -- governing the same subject does not disturb the answer.
+    --
+    -- Updated 2026-09-20 for migration 0036
+    -- (docs/decisions/0013-leftovers-fail-restrictive.md, B). Until then a
+    -- scope carrying an unsupported review_policy value ranked 2 and
+    -- scope_review_policy() raised on it, and this obligation pinned that
+    -- pair. From 0036 the value cannot be recorded at all -- the call below
+    -- that used to seed it now raises at the write -- and a standing one
+    -- reads strict and ranks 0. The broken-value half of this obligation
+    -- moved to tests/conformance/42_leftovers.sql, which seeds a standing
+    -- row honestly; what remains here is the part that is still about this
+    -- migration: a neighbouring scope does not break a write, and nothing
+    -- raises.
     -- ==================================================================
-    INSERT INTO nodes (node_type, label) VALUES ('onboarding_scope', 'Broken policy scope')
+    INSERT INTO nodes (node_type, label) VALUES ('onboarding_scope', 'Unpolicied neighbour scope')
     RETURNING id INTO v_broken;
-    PERFORM record_assertion('review_policy', '{"review_policy":"whenever"}', v_broken, p_basis := 'assumed');
     PERFORM record_assertion('scope_status', '{"status":"active"}', v_broken, p_basis := 'assumed');
 
-    IF scope_review_policy_rank(v_broken) <> 2 THEN
-        RAISE EXCEPTION 'A scope with an unsupported review_policy ranks %, not open',
-            scope_review_policy_rank(v_broken);
+    v_failed := false;
+    BEGIN
+        PERFORM record_assertion('review_policy', '{"review_policy":"whenever"}', v_broken,
+                                 p_basis := 'assumed');
+    EXCEPTION WHEN OTHERS THEN
+        v_failed := SQLERRM LIKE 'Unsupported review_policy%';
+    END;
+    IF NOT v_failed THEN
+        RAISE EXCEPTION 'An unsupported review_policy value was recorded on a scope';
+    END IF;
+
+    -- A scope with no review_policy row is open and ranks 2: absent is not
+    -- broken, which is the distinction 0036 keeps.
+    IF scope_review_policy_rank(v_broken) <> 2 OR scope_review_policy(v_broken) <> 'open' THEN
+        RAISE EXCEPTION 'A scope with no review_policy row reads %/%',
+            scope_review_policy(v_broken), scope_review_policy_rank(v_broken);
     END IF;
     IF scope_review_policy_rank(NULL) <> 2 THEN
         RAISE EXCEPTION 'A null scope does not rank as open';
@@ -893,17 +916,7 @@ BEGIN
         RAISE EXCEPTION 'Premise broken: a strict scope does not rank 0';
     END IF;
 
-    v_failed := false;
-    BEGIN
-        PERFORM scope_review_policy(v_broken);
-    EXCEPTION WHEN OTHERS THEN
-        v_failed := SQLERRM LIKE 'Unsupported review_policy%';
-    END;
-    IF NOT v_failed THEN
-        RAISE EXCEPTION 'scope_review_policy() stopped raising on an unsupported stored value';
-    END IF;
-
-    INSERT INTO nodes (node_type, label) VALUES ('thing', 'Neighbour of a broken scope')
+    INSERT INTO nodes (node_type, label) VALUES ('thing', 'Neighbour of an unpolicied scope')
     RETURNING id INTO v_subject;
     INSERT INTO edges (edge_type, source_id, target_id)
     VALUES ('scope_governs_subject', v_broken, v_subject);
@@ -912,16 +925,16 @@ BEGIN
 
     IF governing_scope(v_subject, NULL, 'broken_probe', NULL) IS DISTINCT FROM v_strict THEN
         RAISE EXCEPTION
-            'The broken scope was selected over the strict one: %',
+            'The unpolicied scope was selected over the strict one: %',
             governing_scope(v_subject, NULL, 'broken_probe', NULL);
     END IF;
     v_probe := record_assertion(
-        'broken_probe', '{"value":"written next to a broken scope"}', v_subject,
+        'broken_probe', '{"value":"written next to an unpolicied scope"}', v_subject,
         p_assertion_key := 'default', p_basis := 'assumed'
     );
     IF (SELECT status FROM assertions WHERE id = v_probe) <> 'candidate' THEN
         RAISE EXCEPTION
-            'A write beside a broken scope landed %, not candidate',
+            'A write beside an unpolicied scope landed %, not candidate',
             (SELECT status FROM assertions WHERE id = v_probe);
     END IF;
 
