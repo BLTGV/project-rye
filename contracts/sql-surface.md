@@ -491,11 +491,17 @@ the row rules in "The row is the gate, not the route" and the type rules in
 `assertion_type_access` still apply on top, and a `no` from either of those is
 still a `no`.
 
-| table | operation | admin | named role with `may_write` (incl. `team_member`) | `agent:*` | `viewer` | unset or unknown |
-|---|---|---|---|---|---|---|
+`node_source_map` follows the same rule as the core tables: only a role that may
+write can insert, update, or delete a mapping, by raw SQL or through
+`link_record()`, enforced by the same trigger and policy conjunct. A mapping
+decides which node a tracked table's change events attach to, so a session that
+may not write must not be able to create or re-point one.
+
 `system:cdc` is not in the table below and is not a general writing role: it may
 `INSERT` into `events` and `event_participants` and do nothing else, anywhere.
 
+| table | operation | admin | named role with `may_write` (incl. `team_member`) | `agent:*` | `viewer` | unset or unknown |
+|---|---|---|---|---|---|---|
 | `nodes` | INSERT | yes | yes | yes | no | no |
 | `nodes` | UPDATE | yes | yes, except governance rows | only with `app.write_path = 'update_node_properties'`, and never a governance row | no | no |
 | `nodes` | DELETE | yes | yes, except governance rows | no | no | no |

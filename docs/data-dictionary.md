@@ -812,12 +812,24 @@ spelling of an agent key gets past it.
 supersede_assertion(p_old_assertion_id, p_new_assertion_type, p_new_subject_node_id, p_new_subject_edge_id, p_new_claim, ...) → uuid
 ```
 
-Replaces an accepted assertion with a new accepted version on exactly the same
-subject, type, and key. Cross-tuple replacement raises an error.
+Replaces an accepted assertion with a new version on exactly the same subject,
+type, and key. Cross-tuple replacement raises an error.
+
+Under a scope where `record_assertion()` would demote the same caller's write —
+`strict`, or `candidates_only` with a basis other than `observed` — the
+replacement lands as a **candidate**, the accepted incumbent is left standing and
+unsuperseded, and the new row carries
+`attrs.review_gate = {"pending": true, "requested_status": "accepted",
+"review_policy": ..., "scope_node_id": ..., "incumbent_assertion_id": ...}`,
+the same shape as `attrs.settle_gate`. A `NOTICE` names the incumbent and the
+policy. The return type does not change: the new row's id comes back either way,
+so read `status` or `attrs->'review_gate'`, or find the row in `review_queue`.
+Accepting the candidate with `accept_assertion()` supersedes the incumbent then.
 
 **Why it exists:** Supersession must close the prior accepted row before
 inserting its replacement. The helper controls that ordering and the narrow
-immutability bypass.
+immutability bypass, and it is where the review policy is applied so that a
+supersession cannot land accepted where an ordinary write would not.
 
 #### `record_assertion()`
 
@@ -861,7 +873,15 @@ facet against `digest_facets:<node_type>` when configured.
 
 Supersedes a `knowledge_gap` with a resolved version on the same tuple. The
 claim links the answer assertion; the answer is never used for cross-type
-supersession.
+supersession. It goes through `supersede_assertion()`, so under a demoting
+review policy the resolution is filed as a candidate, the gap stays open and
+stays in `open_gaps` until a settler accepts, and the `knowledge_gap_resolved`
+event carries `pending_review` and `review_policy` in its properties. One limit:
+the resolution is written with basis `inferred`, and `accept_assertion()` refuses
+an inferred candidate displacing a non-inferred accepted incumbent, so a gap
+recorded with another basis produces a candidate a settler cannot accept. Record
+gaps with basis `inferred`, or reject the resolution and record the resolved gap
+with `record_assertion()`.
 
 #### `assertions_as_of()`
 
@@ -881,7 +901,18 @@ governing_scope(p_subject_node_id, p_subject_edge_id,
 ```
 
 Resolves the active scope by direct/inherited subject coverage, type coverage,
-source coverage, then `DEFAULT_SCOPE`. Ambiguous type coverage raises.
+source coverage, then `DEFAULT_SCOPE`. Ambiguous type coverage raises. When more
+than one scope is a candidate inside the branch that matched — which is what a
+cross-scope `merge_nodes()` leaves behind — the **most restrictive review policy
+wins**, `strict` over `candidates_only` over `open`, with `scope.id` only as a
+tie-break. For an edge subject the source endpoint still beats the target
+endpoint before restrictiveness is consulted.
+
+`scope_review_policy_rank(p_scope_id) → int` does the ranking: `0` strict, `1`
+candidates_only, `2` everything else. Unlike `scope_review_policy()` it never
+raises, so one scope carrying an unsupported stored value cannot refuse writes on
+a neighbouring subject; if that scope is the one selected,
+`scope_review_policy()` still raises on it.
 
 #### `canonical_type()`
 
@@ -1090,13 +1121,32 @@ subject: `assertion_has_subject` is `OR`, not `XOR`, so a row with both
 `subject_node_id` and `subject_edge_id` is insertable, `governing_scope()`
 cannot read it, and it would escape the review rules while still appearing as
 the node's row in `current_valid_assertions`. `record_assertion()` already
-refuses that shape, so nothing legitimate writes it. Nothing said is lost. One
-exemption, confined to a single tuple: a row
-is left accepted when an already superseded, formerly accepted assertion **on
-the same `subject_ref`, `assertion_type` and `assertion_key`** names it as its
-replacement, so the supersede-then-insert order the helpers use does not strand
-that key with no accepted value. The exemption does not carry across subjects,
-so a `merge_nodes()` copy is judged by the canonical node's review policy.
+refuses that shape, so nothing legitimate writes it. Nothing said is lost.
+
+**There is no exemption.** Migration `0025` left a row accepted when an already
+superseded, formerly accepted assertion on the same tuple named it as its
+replacement, so that the helpers' supersede-then-insert order would not strand
+the key. Migration `0027` removed it, and replaced it with the rule below: every
+helper that inserts an assertion takes the stricter of its two scope
+resolutions, so no helper ends an incumbent the guard is about to demote. A raw
+supersede-and-replace under a demoting policy is therefore refused at commit by
+`trg_assertions_transition_complete` rather than landing accepted — the
+incumbent still stands after the rollback. A `merge_nodes()` copy is judged by
+the canonical node's review policy, as before.
+
+**A helper's policy is the stricter of two resolutions.** This guard resolves
+the governing scope with no witness, because evidence is written after the
+assertion. A witness-free resolution does not merely lose the witness scope: the
+witness branch of `governing_scope()` runs *before* `DEFAULT_SCOPE`, so it falls
+through to `DEFAULT_SCOPE`, which can be stricter. So
+`record_assertion()`, `supersede_assertion()` and `record_distillation()` each
+resolve twice — with their primary witness and with none — and apply the
+stricter policy, through `effective_review_policy()`. The scope *id* they report
+is still the witness-resolved one. Without this, a subject whose only coverage is
+a `scope_governs_source` edge from an `open` scope, on an instance with a
+`strict` `DEFAULT_SCOPE`, had the helper insert accepted and this guard demote
+the same row. A raw `INSERT` is still judged by the witness-free policy alone,
+which is a stated limit in the contract.
 
 **Why it exists:** Rye cannot tell `record_assertion()`'s insert from a raw one,
 so it judges the row. Refusing instead would break `merge_nodes()` and throw

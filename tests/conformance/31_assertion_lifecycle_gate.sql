@@ -665,24 +665,21 @@ BEGIN
     -- across; the copy is judged by the canonical node's.
     --
     -- merge_nodes() redirects the duplicate's scope_governs_subject edge
-    -- onto the canonical, so after the merge both scopes govern it and
-    -- governing_scope() picks the lowest scope id. The fixture ids are
-    -- pinned so the strict scope wins, and the policy is re-probed after
-    -- the merge rather than assumed.
-    --
-    -- That id ordering is the pre-existing gap, not this gate's: which of
-    -- two governing scopes wins a merged node is its own item. Until it
-    -- lands, this case's result depends on the pinned uuids, and the
-    -- re-probe below is what keeps it honest rather than lucky.
+    -- onto the canonical, so after the merge both scopes govern it. The
+    -- most restrictive policy wins (0027), so the strict scope does,
+    -- whichever uuid the generator hands out; the ids are generated rather
+    -- than pinned, and the policy is re-probed after the merge rather than
+    -- assumed. Both id orders are covered in
+    -- tests/conformance/33_review_policy_holds.sql.
     -- ==================================================================
-    INSERT INTO nodes (id, node_type, label)
-    VALUES ('d1e51fe0-0025-4000-8000-0000000000f0', 'onboarding_scope', 'Lifecycle gate open scope')
+    INSERT INTO nodes (node_type, label)
+    VALUES ('onboarding_scope', 'Lifecycle gate open scope')
     RETURNING id INTO v_open_scope;
     PERFORM record_assertion('review_policy', '{"review_policy":"open"}', v_open_scope, p_basis := 'assumed');
     PERFORM record_assertion('scope_status', '{"status":"active"}', v_open_scope, p_basis := 'assumed');
 
-    INSERT INTO nodes (id, node_type, label)
-    VALUES ('d1e51fe0-0025-4000-8000-000000000001', 'onboarding_scope', 'Lifecycle gate low-id strict scope')
+    INSERT INTO nodes (node_type, label)
+    VALUES ('onboarding_scope', 'Lifecycle gate second strict scope')
     RETURNING id INTO v_strict_scope;
     PERFORM record_assertion('review_policy', '{"review_policy":"strict"}', v_strict_scope, p_basis := 'assumed');
     PERFORM record_assertion('scope_status', '{"status":"active"}', v_strict_scope, p_basis := 'assumed');
@@ -781,9 +778,17 @@ BEGIN
         RAISE EXCEPTION 'The smuggled row became accepted at the deferred checks';
     END IF;
 
-    -- The honest version must still commit accepted, or supersede-then-insert
-    -- would strand the key with no accepted value at all. Same subject, type
-    -- and key, on a strict subject where the demotion would otherwise bite.
+    -- The honest version, amended by 0027. The insert exemption is gone,
+    -- because supersede_assertion() now demotes instead of ending the
+    -- incumbent, so nothing legitimate needs it. Same subject, type and key
+    -- on a strict subject: the replacement is demoted to candidate, the
+    -- tuple then carries nothing accepted, and the transaction is refused
+    -- at the deferred check. Nothing is lost -- the incumbent still stands
+    -- after the rollback, and supersede_assertion() records the same
+    -- statement as a suggestion beside it, which
+    -- tests/conformance/33_review_policy_holds.sql asserts. The same shape
+    -- under a non-demoting policy still commits accepted, which is
+    -- obligation 8 below and obligation 9 of decision 0010.
     PERFORM set_config('app.current_role', 'admin', true);
     INSERT INTO nodes (node_type, label) VALUES ('thing', 'Exemption honest subject')
     RETURNING id INTO v_honest_subject;
@@ -799,18 +804,52 @@ BEGIN
 
     PERFORM set_config('app.current_role', 'agent:t', true);
     v_smuggled := gen_random_uuid();
-    PERFORM set_config('app.write_path', 'supersede_assertion', true);
-    PERFORM set_config('app.supersede_assertion_id', v_incumbent::text, true);
-    UPDATE assertions SET superseded_at = now(), superseded_by = v_smuggled
-    WHERE id = v_incumbent;
+    v_failed := false;
+    BEGIN
+        PERFORM set_config('app.write_path', 'supersede_assertion', true);
+        PERFORM set_config('app.supersede_assertion_id', v_incumbent::text, true);
+        UPDATE assertions SET superseded_at = now(), superseded_by = v_smuggled
+        WHERE id = v_incumbent;
+        GET DIAGNOSTICS v_rows = ROW_COUNT;
+        PERFORM set_config('app.write_path', '', true);
+        IF v_rows <> 1 THEN
+            RAISE EXCEPTION
+                'Premise broken: agent:t could not end its own accepted row, so the shape never starts';
+        END IF;
+        INSERT INTO assertions (id, assertion_type, assertion_key, status, basis, subject_node_id, claim)
+        VALUES (v_smuggled, 'exemption_probe', 'default', 'accepted', 'assumed', v_honest_subject,
+                '{"value":"replaced"}');
+        IF (SELECT status FROM assertions WHERE id = v_smuggled) <> 'candidate' THEN
+            RAISE EXCEPTION
+                'The removed insert exemption still left a raw replacement % under a strict scope',
+                (SELECT status FROM assertions WHERE id = v_smuggled);
+        END IF;
+        SET CONSTRAINTS trg_assertions_transition_complete IMMEDIATE;
+    EXCEPTION WHEN OTHERS THEN
+        v_failed := true;
+        v_msg := SQLERRM;
+    END;
+    SET CONSTRAINTS trg_assertions_transition_complete DEFERRED;
     PERFORM set_config('app.write_path', '', true);
-    INSERT INTO assertions (id, assertion_type, assertion_key, status, basis, subject_node_id, claim)
-    VALUES (v_smuggled, 'exemption_probe', 'default', 'accepted', 'assumed', v_honest_subject,
-            '{"value":"replaced"}');
-    IF (SELECT status FROM assertions WHERE id = v_smuggled) <> 'accepted' THEN
+    IF NOT v_failed THEN
         RAISE EXCEPTION
-            'The honest same-tuple replacement was demoted to %, stranding the key with no accepted value',
-            (SELECT status FROM assertions WHERE id = v_smuggled);
+            'A raw supersede-and-replace under a strict scope committed; the insert exemption is still in place';
+    END IF;
+    IF v_msg NOT LIKE '%left with no accepted assertion standing%' THEN
+        RAISE EXCEPTION
+            'The raw supersede-and-replace under strict failed for an unexpected reason: %', v_msg;
+    END IF;
+    -- Nothing is lost: the incumbent stands after the rollback.
+    PERFORM set_config('app.current_role', 'admin', true);
+    IF (SELECT superseded_at FROM assertions WHERE id = v_incumbent) IS NOT NULL THEN
+        RAISE EXCEPTION 'The refused raw replacement still ended the incumbent';
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM current_valid_assertions
+        WHERE subject_node_id = v_honest_subject AND assertion_type = 'exemption_probe'
+          AND claim->>'value' = 'standing'
+    ) THEN
+        RAISE EXCEPTION 'The refused raw replacement emptied the key';
     END IF;
 
     -- ==================================================================

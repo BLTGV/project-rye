@@ -45,6 +45,7 @@ accepted until a settler changes it."
 - Most restrictive policy wins among several governing scopes. Overturn: Casey, since it changes which areas review what after a merge.
 - resolve_knowledge_gap() under strict can produce a candidate accept_assertion() refuses (inferred displacing non-inferred). Disclosed, accept_assertion() not loosened. Overturn: Architect.
 - 0025's insert exemption is removed, so a raw supersede-and-replace under a demoting policy is refused at commit. Overturn: Architect.
+- Helpers take the stricter of the witness-resolved and witness-free policies. Visible change: a `scope_governs_source` edge from an open scope no longer opens a source on an instance whose DEFAULT_SCOPE is strict or candidates_only; those writes land as suggestions. Remedy: a direct scope_governs_subject edge to the open scope. Overturn: Casey.
 
 ## Verified
 - filled in at close
@@ -59,6 +60,24 @@ never-raising scope_review_policy_rank(). Migration 0027 replaces
 supersede_assertion, governing_scope, assertions_insert_review_guard, and
 resolve_knowledge_gap; no overlap with 0026.
 
+
+### Builder schema, 2026-09-20 (branch worktree-agent-af00e77e25c00877a, commit 1d93913)
+0027 as decision 0010; new suite; three scoped changes to test 31
+(obligation 11b ids and comment, obligation 15's honest half). Negative
+control fails at obligation 2. test-all.sh green twice. Raised the witness
+and DEFAULT_SCOPE question himself.
+
+### Verifier, 2026-09-20, first pass: FAIL
+HIGH, regression: helper resolves an open scope through a witness, the
+witness-free guard falls through to a strict DEFAULT_SCOPE, demotes the
+helper's replacement, and the commit check refuses the transaction. 30 of 30
+other combinations match record_assertion(); strictest wins in both id
+orders; constraints pass. Routed for agent-kit: source_context_commit_rye.mts
+ignores the returned status; pattern-library common-patterns.md line 64.
+
+### Architect, 2026-09-20 (b5ceea9)
+effective_review_policy(): stricter of the two resolutions. 0027 also
+replaces record_assertion and record_distillation. Fix attempt 1 sent.
 
 ## Close
 status line and date

@@ -58,6 +58,8 @@ carries the authority of the person it acts for and none of its own."
 - team_member and agent:* keep every other write they have today. Overturn: Architect.
 - Who may merge, as the Architect built it: any named role that may write; never an agent-shaped session, never viewer or unset. A `may_merge` column is the way to narrow it to admin and team_member. Overturn: Casey.
 - `scope_status` becomes admin-gated, reversing a stated choice in decision 0007, because scope creation is now admin-only. Overturn: Casey.
+- Change capture keeps recording when the application's session has no Rye role, under a reserved `system:cdc` role that may only insert events and participants; the event records the original session role. The Architect first ruled that such writes record nothing; the Lead overturned that because a role-less application session is the normal overlay deployment. Overturn: Casey.
+- Tests 30 and 31 had to change: they attacked as viewer and unset, which can no longer write. Their write loops now use agent:t and team_member, and the viewer and unset cases move to test 32 as refusals. Overturn: Lead.
 
 ## Verified
 - filled in at close
@@ -75,6 +77,25 @@ Blast radius: nine sites write with no role; conformance 01, 02, 03, 04, 05,
 nothing writes as viewer. migrate.sh runs each migration in its own session,
 so 0026 sets admin itself.
 
+
+### Builder schema, 2026-09-20 (branch worktree-agent-a4ce0a332077aac6e, commits 873c640, 2c9a781)
+0026: may_write, rye_role_may_write(), the conjunct on 21 policies,
+governance rule, merge_nodes and update_node_properties gated before the
+lock, scope_status settle row. Eight blast-radius sites set admin. Tests 30
+and 31 narrowed (missed by the decision). test-all.sh green, both owners.
+Found: role_classification_access had no UPDATE policy.
+
+### Verifier, 2026-09-20, first pass: FAIL
+HIGH: viewer writes through accept_assertion, reject_candidate,
+mark_assertion_outcome under a superuser owner, because a definer function
+owned by a superuser skips RLS and so the policy conjunct. MEDIUM: coverage
+dropped where tests 30 and 31 were narrowed. All else passed.
+
+### Architect, 2026-09-20 (da415de, 7acf534)
+The gate is a BEFORE ROW trigger on the seven core tables, the conjunct the
+second line; names in the contract. CDC records under system:cdc (Lead's
+overturn), insert on events and participants only, session_role recorded.
+Fix attempt 1 sent to the builder.
 
 ## Close
 status line and date
