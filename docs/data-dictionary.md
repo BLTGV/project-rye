@@ -1031,10 +1031,12 @@ A type is settle-gated by its stored spelling, by the spelling
 `attrs.settle_gate.allowed_roles`, the marker `record_assertion()` writes when
 the **written** name was gated and the canonical one was not (`0036`). A row
 carrying that marker is a suggestion waiting for an admin, so the role the
-demotion excluded may not close it either. Its author is the one exception: an
-agent may withdraw its own marked suggestion, because the stored type is
-ungated and withdrawing your own words decides nothing. A row whose stored type
-is gated has no such exception.
+demotion excluded may not close it either. Its author is the one exception,
+whatever shape of role it is: the caller whose `attrs.recorded_by` is this
+session's role withdraws its own marked suggestion, because the stored type is
+ungated and withdrawing your own words decides nobody else's. Unknown
+authorship is not own authorship, and a row whose stored type is gated has no
+such exception at all.
 
 `reject_candidate()` refuses before it labels an outcome or marks the row, so a
 refused rejection records no `candidate_rejected` event and the candidate is

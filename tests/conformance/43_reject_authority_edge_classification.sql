@@ -951,7 +951,9 @@ $$;
 -- same reason: closing such a suggestion is deciding it, and a role the
 -- demotion excluded must not be able to make sure it never reaches an admin.
 --
--- The author may still withdraw its own, which is the correction route.
+-- The author may still withdraw its own, whatever shape of role it is: the
+-- correction route for an agent, and the same answer for a person, because
+-- withdrawing your own words decides nobody else's.
 -- ---------------------------------------------------------------------------
 DO $$
 DECLARE
@@ -960,6 +962,7 @@ DECLARE
     v_failed  boolean;
     v_m1      uuid;
     v_m2      uuid;
+    v_m3      uuid;
     v_msg     text;
     v_roles   text[];
     v_row     assertions;
@@ -1081,7 +1084,29 @@ BEGIN
         RAISE EXCEPTION 'an admin could not close a marked configuration suggestion';
     END IF;
 
-    RAISE NOTICE 'PASS 43.16: a suggestion carrying attrs.settle_gate is closed by its allowed roles or by its author';
+    -- The exception is authorship, not role shape: a person who wrote one
+    -- withdraws it on the same terms, and was refused someone else's above.
+    PERFORM set_config('app.current_role', 'team_member', true);
+    v_m3 := record_assertion(
+        'review_policy', '{"review_policy":"strict"}', v_subject,
+        p_assertion_key := 'third', p_status := 'accepted', p_basis := 'assumed'
+    );
+    SELECT * INTO v_row FROM assertions WHERE id = v_m3;
+    IF v_row.status <> 'candidate'
+       OR NOT (v_row.attrs->'settle_gate'->'allowed_roles' @> '["admin"]'::jsonb)
+       OR v_row.attrs->>'recorded_by' IS DISTINCT FROM 'team_member'
+    THEN
+        RAISE EXCEPTION
+            'Premise broken: the person''s marked suggestion landed % with settle_gate % recorded_by %',
+            v_row.status, v_row.attrs->'settle_gate', v_row.attrs->>'recorded_by';
+    END IF;
+    PERFORM reject_candidate(v_m3, 'the author withdraws its own marked suggestion');
+    PERFORM set_config('app.current_role', 'admin', true);
+    IF (SELECT superseded_at FROM assertions WHERE id = v_m3) IS NULL THEN
+        RAISE EXCEPTION 'the authoring person could not withdraw its own marked suggestion';
+    END IF;
+
+    RAISE NOTICE 'PASS 43.16: a suggestion carrying attrs.settle_gate is closed by its allowed roles or by its own author';
 
     SET CONSTRAINTS ALL IMMEDIATE;
     SET CONSTRAINTS ALL DEFERRED;

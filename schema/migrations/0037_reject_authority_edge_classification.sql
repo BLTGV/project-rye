@@ -224,16 +224,19 @@ BEGIN
             RETURN NEW;
         END IF;
 
-        -- One exception, and only on the marker: an agent may withdraw its
-        -- own. The stored type is ungated, so the row is an ordinary
-        -- suggestion that happened to be written under a gated spelling, and
-        -- withdrawing your own words decides nothing -- the configuration is
-        -- unchanged either way. The correction route the agent-ops guide and
-        -- three skills document (close your own pending suggestion, file a
-        -- corrected one) has to keep working. Closing SOMEBODY ELSE'S is the
-        -- harm, and it is still refused. A row whose stored type is gated has
-        -- no such exception: there, closing is deciding, whoever wrote it.
-        IF v_marked AND v_role LIKE 'agent:%' AND v_author = v_role THEN
+        -- One exception, and only on the marker: the author withdraws its
+        -- own, whatever shape of role it is. The stored type is ungated, so
+        -- the row is an ordinary suggestion that happened to be written under
+        -- a gated spelling, and withdrawing your own words decides nobody
+        -- else's -- the configuration is unchanged either way. The correction
+        -- route the agent-ops guide and three skills document (close your own
+        -- pending suggestion, file a corrected one) has to keep working, and
+        -- a person who wrote one is in exactly the same position. Closing
+        -- SOMEBODY ELSE'S is the harm, and it is still refused. Unknown
+        -- authorship is not own authorship, as everywhere. A row whose stored
+        -- type is gated has no such exception: there, closing is deciding,
+        -- whoever wrote it.
+        IF v_marked AND v_author IS NOT NULL AND v_author = v_role THEN
             RETURN NEW;
         END IF;
 
@@ -278,7 +281,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION assertion_rejection_authority_guard() IS
-    'BEFORE UPDATE on assertions, firing only on the rejection shape (a live candidate ending with no replacement). An admin closes any; a named writing role closes any except a settle-gated configuration type, tested on the stored spelling, on the canonical one, and -- where both are ungated -- on attrs.settle_gate.allowed_roles, the marker 0036 writes when the written name was gated; an agent-shaped session closes only a candidate whose attrs.recorded_by is its own role, and may withdraw its own marked suggestion. Unknown authorship is not own authorship.';
+    'BEFORE UPDATE on assertions, firing only on the rejection shape (a live candidate ending with no replacement). An admin closes any; a named writing role closes any except a settle-gated configuration type, tested on the stored spelling, on the canonical one, and -- where both are ungated -- on attrs.settle_gate.allowed_roles, the marker 0036 writes when the written name was gated, where the author of that row may still withdraw it; an agent-shaped session closes only a candidate whose attrs.recorded_by is its own role. Unknown authorship is not own authorship.';
 
 DROP TRIGGER IF EXISTS trg_assertions_reject_authority ON assertions;
 CREATE TRIGGER trg_assertions_reject_authority
@@ -363,7 +366,7 @@ BEGIN
     IF v_settle_roles IS NOT NULL THEN
         v_author := v_candidate.attrs->>'recorded_by';
         IF NOT (v_role = ANY(v_settle_roles))
-           AND NOT (v_marked AND v_role LIKE 'agent:%' AND v_author = v_role)
+           AND NOT (v_marked AND v_author IS NOT NULL AND v_author = v_role)
         THEN
             IF v_marked THEN
                 RAISE EXCEPTION
@@ -425,7 +428,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION reject_candidate(uuid, text, text, text) IS
-    'Close a live candidate with a reason and an optional outcome label, recording a candidate_rejected event. Refuses before it writes anything: a settle-gated configuration type -- by stored spelling, canonical spelling, or 0036''s attrs.settle_gate marker -- is closed only by its settle roles, an agent may withdraw its own marked suggestion, and an agent-shaped session otherwise closes only a candidate it authored. The rule itself is trg_assertions_reject_authority, which binds the raw route too.';
+    'Close a live candidate with a reason and an optional outcome label, recording a candidate_rejected event. Refuses before it writes anything: a settle-gated configuration type -- by stored spelling, canonical spelling, or 0036''s attrs.settle_gate marker -- is closed only by its settle roles, except that the author of a marked suggestion may withdraw it; an agent-shaped session otherwise closes only a candidate it authored. The rule itself is trg_assertions_reject_authority, which binds the raw route too.';
 
 -- ---------------------------------------------------------------------------
 -- 4. An edge carries its own classification.
