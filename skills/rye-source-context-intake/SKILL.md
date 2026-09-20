@@ -133,12 +133,21 @@ node skills/rye-source-context-intake/scripts/source_context_commit_rye.mts \
 Use `--validate-only` to check record shape without writing.
 
 A committed run prints `{"ok": true, "run_id": ..., "summary": ...,
-"waiting_for_review": [...]}`. `waiting_for_review` lists every replacement the
-area's review policy filed as a suggestion instead: the earlier claim is still
-the current one until a person accepts the new one, and `summary
-.waiting_for_review` counts them. The commit itself still succeeded. Report
-those subjects in the post-commit worklist below rather than describing them as
-updated.
+"waiting_for_review": [...]}`. `waiting_for_review` lists everything the area's
+review policy filed as a suggestion instead of an answer: the earlier claim, if
+there was one, is still the current one until a person accepts the new one, and
+`summary.waiting_for_review` counts them. The commit itself still succeeded.
+Report those subjects in the post-commit worklist below rather than describing
+them as updated.
+
+Rerunning the same input is safe. Before writing, the commit looks for a
+suggestion already waiting with the same claim on the same subject and key; if
+one is there it writes nothing and lists it again with `filed_this_run` false.
+`filed_this_run` true means this run put it there. A different claim still
+files a new suggestion. So the natural next step after a waiting report — fix
+something and run again — does not pile identical suggestions onto one subject.
+It also does not write while one is waiting even if the policy has since been
+opened: accept or decline the waiting suggestion instead.
 
 ## MCP
 

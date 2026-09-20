@@ -332,8 +332,14 @@ ask before you offer to record one:
 SELECT settle_gate('registry_entry');
 ```
 
+```bash
+./scripts/rye settle-gate registry_entry --json
+```
+
 The answer is `{assertion_type, gated, allowed_roles, current_role,
-may_settle}`. It writes nothing and refuses nothing. `gated` `false` means the
+may_settle}`. The CLI opens its own session and sets no role, so read `gated`
+and `allowed_roles` from it and read `may_settle` in the session you will
+write from. It writes nothing and refuses nothing. `gated` `false` means the
 type is ordinary knowledge and the settlement lookup alone decides it.
 `may_settle` `false` means what you are about to record will land as a
 suggestion waiting for a Rye admin — tell the person that before you write it,
@@ -374,6 +380,17 @@ SELECT record_assertion(
     )]
 );
 ```
+
+**One alias can never be recorded, by anyone.** An alias pointing *from* a type
+that is part of how Rye is set up here — a `registry_entry` keyed
+`type_alias:assertion_type:<T>` where `<T>` is a gated type (`registry_entry`,
+`review_policy`, `scope_status` today) — is refused for every caller at every
+status, a Rye admin included. Renaming one of those words would turn the gate
+off for everything written afterwards. An alias pointing *into* a gated type is
+ordinary and still allowed. If a person asks for that rename, do not file it as
+a suggestion: say it cannot be done, in their words — that word is how Rye
+decides what counts here, so it cannot be renamed — and offer the other
+direction if it helps.
 
 The key carries the **canonical** type. An alias is registered as an alias,
 never as a second self-settled entry. Any value but `true` is not a member.
@@ -527,8 +544,26 @@ policies, so it is not yours to run. Do not retry it under another role.
 
 When two records look like the same thing, record what you saw and hand it to
 your person. Write it as a structural proposal with
-`create_knowledge_candidate(...)`, naming both node ids and the evidence that
-they match, and then say one line:
+`create_knowledge_candidate(...)`. The kind is `decision` — `duplicate_node` is
+not a candidate kind and raises:
+
+```sql
+SELECT create_knowledge_candidate(
+    p_candidate_kind  := 'decision',
+    p_statement       := 'Possible duplicate: two records look like the same supplier',
+    p_target_payload  := jsonb_build_object(
+        'action', 'merge_nodes',
+        'duplicate_id', '<duplicate_uuid>'::uuid,
+        'canonical_id', '<canonical_uuid>'::uuid,
+        'supporting_evidence', 'Same legal name and the same two contacts.',
+        'conflicts', 'Different mailing addresses.'
+    ),
+    p_source_node_ids := ARRAY['<duplicate_uuid>', '<canonical_uuid>']::uuid[],
+    p_created_by      := '<agent_key>'
+);
+```
+
+Then say one line:
 
 > "I think that supplier is in here twice. Want me to flag it for someone to
 > merge?"

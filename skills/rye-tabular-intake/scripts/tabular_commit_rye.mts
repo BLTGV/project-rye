@@ -60,6 +60,7 @@ const help: HelpSpec = {
   ],
   options: [
     { flag: "--input <path>", description: "NDJSON file containing source_row, mapped_record, or rye_stage_record objects." },
+    { flag: "--role <name>", description: "Required. The Rye role this commit writes under, or set RYE_SESSION_ROLE. A person with team_member or higher runs this step." },
     { flag: "--db-url <url>", description: "Target PostgreSQL database URL." },
     { flag: "--docker-container <name>", description: "Run psql through docker exec against a running Postgres container." },
     { flag: "--docker-user <name>", description: "Database user for --docker-container. Default: rye." },
@@ -74,14 +75,45 @@ const help: HelpSpec = {
     { flag: "--help", description: "Print command help." },
   ],
   examples: [
-    "node skills/rye-tabular-intake/scripts/tabular_commit_rye.mts --db-url postgresql://rye:rye@127.0.0.1:54329/rye --input /tmp/source_rows.ndjson --run-id customer-import-2026-03-10",
-    "node skills/rye-tabular-intake/scripts/tabular_commit_rye.mts --docker-container rye-fixture-db --input /tmp/stage_rows.ndjson --scenario contacts-basic",
-    "node skills/rye-tabular-intake/scripts/tabular_commit_rye.mts --emit-sql --input /tmp/stage_rows.ndjson --run-id customer-import-2026-03-10",
+    "node skills/rye-tabular-intake/scripts/tabular_commit_rye.mts --role team_member --db-url postgresql://rye:rye@127.0.0.1:54329/rye --input /tmp/source_rows.ndjson --run-id customer-import-2026-03-10",
+    "node skills/rye-tabular-intake/scripts/tabular_commit_rye.mts --role team_member --docker-container rye-fixture-db --input /tmp/stage_rows.ndjson --scenario contacts-basic",
+    "node skills/rye-tabular-intake/scripts/tabular_commit_rye.mts --role team_member --emit-sql --input /tmp/stage_rows.ndjson --run-id customer-import-2026-03-10",
   ],
 };
 
+// The role this commit writes under. There is no default: a session with no
+// role set writes nothing, and picking one for the person would be the script
+// choosing an authority it does not have.
+let sessionRole = "";
+
+function resolveSessionRole(value: string | undefined): string {
+  const role = (value ?? "").trim();
+  if (role === "" || role === "viewer" || role.startsWith("agent:")) {
+    throw new CliError(
+      "session_role_required",
+      "This step needs the role it writes under: pass --role <name> or set RYE_SESSION_ROLE.",
+      role === ""
+        ? "No role was given."
+        : `"${role}" may not write an intake run.`,
+      [
+        `A person with team_member or higher runs this step, and an agent does not set a person's role for them.`,
+        `Ask which role to use, then pass it: --role team_member.`,
+      ],
+    );
+  }
+  return role;
+}
+
+function sessionPreambleSql(): string {
+  // Plain SET, not set_config(): these statements go to psql, where a
+  // set_config() row would corrupt a captured value. The emitted script, which
+  // may be pasted into a tool that rejects SET, uses set_config() instead.
+  return `SET "app.current_role" = ${sqlText(sessionRole)};\nSET "app.current_user_id" = ${sqlText(`rye-tabular-intake:${sessionRole}`)};`;
+}
+
 await runCli(help, async (args) => {
   const inputPath = getRequiredString(args, "input", help.name);
+  sessionRole = resolveSessionRole(getString(args, "role") ?? process.env.RYE_SESSION_ROLE);
   const records: PipelineRecord[] = [];
 
   for await (const value of readNdjson(inputPath)) {
@@ -353,10 +385,11 @@ async function buildSqlOnlyCommit(input: SqlOnlyCommitInput): Promise<string> {
   lines.push("SET LOCAL search_path = rye, public, pg_catalog;");
   lines.push("-- A session with no role set writes nothing. set_config() rather than");
   lines.push("-- SET, because SET app.current_role fails through some SQL tools.");
+  lines.push(`-- The role came from --role; a person with team_member or higher runs this.`);
   lines.push("DO $rye_tabular_intake_session$");
   lines.push("BEGIN");
-  lines.push("  PERFORM set_config('app.current_role', 'admin', false);");
-  lines.push("  PERFORM set_config('app.current_user_id', 'rye-tabular-intake', false);");
+  lines.push(`  PERFORM set_config('app.current_role', ${sqlText(sessionRole)}, false);`);
+  lines.push(`  PERFORM set_config('app.current_user_id', ${sqlText(`rye-tabular-intake:${sessionRole}`)}, false);`);
   lines.push("END");
   lines.push("$rye_tabular_intake_session$;");
   lines.push("");
@@ -672,13 +705,18 @@ SELECT rye.record_assertion(
       jsonb_build_object('kind', 'source', 'event_id', (SELECT id FROM event_ref))
     ]
 )
+-- Live means accepted or waiting for review. current_valid_assertions holds
+-- accepted rows only, so a guard that read it filed a second identical
+-- suggestion every rerun under a policy that demotes this write.
 WHERE NOT EXISTS (
     SELECT 1
-    FROM rye.current_valid_assertions
-    WHERE subject_node_id = (SELECT id FROM node_ref)
-      AND assertion_type = ${sqlText(assertionTypeForRecord(input.record))}
-      AND assertion_key = ${sqlText(assertionKey)}
-      AND claim->>'payload_hash' = ${sqlText(claim.payload_hash)}
+    FROM rye.assertions a
+    WHERE a.subject_node_id = (SELECT id FROM node_ref)
+      AND a.assertion_type = ${sqlText(assertionTypeForRecord(input.record))}
+      AND a.assertion_key = ${sqlText(assertionKey)}
+      AND a.status IN ('accepted', 'candidate')
+      AND a.superseded_at IS NULL
+      AND a.claim->>'payload_hash' = ${sqlText(claim.payload_hash)}
 );`;
 }
 
@@ -735,8 +773,7 @@ function ctxUuid(key: string): string {
 async function rejectDuplicateRun(target: PsqlTarget, runId: string, runContext: RunContext): Promise<void> {
   const sql = `
 SET search_path = rye, public, pg_catalog;
-SET "app.current_role" = 'admin';
-SET "app.current_user_id" = 'rye-tabular-intake';
+${sessionPreambleSql()}
 SELECT external_id
 FROM rye.nodes
 WHERE external_source = ${sqlText(RYE_TABULAR_INTAKE.runExternalSource)}
@@ -783,8 +820,7 @@ async function upsertRunNode(
   );
   const sql = `
 SET search_path = rye, public, pg_catalog;
-SET "app.current_role" = 'admin';
-SET "app.current_user_id" = 'rye-tabular-intake';
+${sessionPreambleSql()}
 WITH existing AS (
     SELECT id FROM rye.nodes
     WHERE external_source = ${sqlText(RYE_TABULAR_INTAKE.runExternalSource)}
@@ -831,8 +867,7 @@ async function recordRunEvent(
   );
   const sql = `
 SET search_path = rye, public, pg_catalog;
-SET "app.current_role" = 'admin';
-SET "app.current_user_id" = 'rye-tabular-intake';
+${sessionPreambleSql()}
 SELECT rye.record_event(
   p_event_type := ${sqlText(eventType)},
   p_summary := ${sqlText(summary)},
@@ -879,8 +914,7 @@ async function ensureSourceArtifacts(
     );
     const sql = `
 SET search_path = rye, public, pg_catalog;
-SET "app.current_role" = 'admin';
-SET "app.current_user_id" = 'rye-tabular-intake';
+${sessionPreambleSql()}
 SELECT rye.record_artifact(
   p_artifact_type := ${sqlText(RYE_TABULAR_INTAKE.sourceFileArtifactType)},
   p_content := ${sqlJson(JSON.stringify(content))},
@@ -940,8 +974,7 @@ async function commitRecord(
 
   const sql = `
 SET search_path = rye, public, pg_catalog;
-SET "app.current_role" = 'admin';
-SET "app.current_user_id" = 'rye-tabular-intake';
+${sessionPreambleSql()}
 WITH existing AS (
     SELECT id FROM rye.nodes
     WHERE external_source = ${sqlText(RYE_TABULAR_INTAKE.rowExternalSource)}
@@ -992,13 +1025,16 @@ SELECT rye.record_assertion(
       jsonb_build_object('kind', 'source', 'event_id', (SELECT id FROM event_ref))
     ]
 )
+-- Live means accepted or waiting for review; see the note on the SQL-only path.
 WHERE NOT EXISTS (
     SELECT 1
-    FROM rye.current_valid_assertions
-    WHERE subject_node_id = (SELECT id FROM node_ref)
-      AND assertion_type = ${sqlText(assertionTypeForRecord(record))}
-      AND assertion_key = ${sqlText(assertionKey)}
-      AND claim->>'payload_hash' = ${sqlText(claim.payload_hash)}
+    FROM rye.assertions a
+    WHERE a.subject_node_id = (SELECT id FROM node_ref)
+      AND a.assertion_type = ${sqlText(assertionTypeForRecord(record))}
+      AND a.assertion_key = ${sqlText(assertionKey)}
+      AND a.status IN ('accepted', 'candidate')
+      AND a.superseded_at IS NULL
+      AND a.claim->>'payload_hash' = ${sqlText(claim.payload_hash)}
 );`;
 
   await runPsql(target, ["-v", "ON_ERROR_STOP=1", "-c", sql], undefined, repoRoot);
@@ -1013,8 +1049,7 @@ async function updateRunNodeSummary(
 ): Promise<void> {
   const inputPathSql = `
 SET search_path = rye, public, pg_catalog;
-SET "app.current_role" = 'admin';
-SET "app.current_user_id" = 'rye-tabular-intake';
+${sessionPreambleSql()}
 SELECT COALESCE(properties->>'input_path', '')
 FROM rye.nodes
 WHERE id = ${sqlText(runNodeId)}::uuid;`;
@@ -1039,8 +1074,7 @@ WHERE id = ${sqlText(runNodeId)}::uuid;`;
   );
   const sql = `
 SET search_path = rye, public, pg_catalog;
-SET "app.current_role" = 'admin';
-SET "app.current_user_id" = 'rye-tabular-intake';
+${sessionPreambleSql()}
 UPDATE rye.nodes
 SET properties = properties || ${sqlJson(JSON.stringify(properties))},
     updated_at = now()
@@ -1059,8 +1093,7 @@ interface ExistingRunProperties {
 async function fetchRunProperties(target: PsqlTarget, runNodeId: string): Promise<ExistingRunProperties> {
   const sql = `
 SET search_path = rye, public, pg_catalog;
-SET "app.current_role" = 'admin';
-SET "app.current_user_id" = 'rye-tabular-intake';
+${sessionPreambleSql()}
 SELECT properties::text
 FROM rye.nodes
 WHERE id = ${sqlText(runNodeId)}::uuid;`;

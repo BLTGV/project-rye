@@ -33,7 +33,7 @@ export DATABASE_URL='postgresql://rye:rye@127.0.0.1:54329/rye'
 3. Run the fixture smoke flow:
 
 ```bash
-node skills/rye-tabular-intake/scripts/tabular_fixture_smoke.mts --db-url "$DATABASE_URL"
+node skills/rye-tabular-intake/scripts/tabular_fixture_smoke.mts --role team_member --db-url "$DATABASE_URL"
 ```
 
 If your environment can run Docker containers but cannot publish host ports cleanly, use a container-only path:
@@ -49,13 +49,14 @@ docker run -d --name rye-fixture-db \
 
 docker exec rye-fixture-db pg_isready -U rye -d rye
 docker exec rye-fixture-db bash -lc "cd /workspace && DATABASE_URL='postgresql://rye:rye@127.0.0.1:5432/rye' ./scripts/install.sh --profiles ''"
-node skills/rye-tabular-intake/scripts/tabular_fixture_smoke.mts --docker-container rye-fixture-db
+node skills/rye-tabular-intake/scripts/tabular_fixture_smoke.mts --role team_member --docker-container rye-fixture-db
 ```
 
 If your environment cannot provide a connection string but can execute SQL, generate a commit script:
 
 ```bash
 node skills/rye-tabular-intake/scripts/tabular_commit_rye.mts \
+  --role team_member \
   --emit-sql \
   --input /tmp/source_rows.ndjson \
   --run-id fixture:sql-only \

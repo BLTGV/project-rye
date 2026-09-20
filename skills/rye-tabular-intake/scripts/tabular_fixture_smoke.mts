@@ -34,6 +34,7 @@ const help: HelpSpec = {
   ],
   options: [
     { flag: "--db-url <url>", description: "Target PostgreSQL database URL. Rye must already be installed." },
+    { flag: "--role <name>", description: "Required. The Rye role the fixture writes under, or set RYE_SESSION_ROLE. A person with team_member or higher runs this step." },
     { flag: "--docker-container <name>", description: "Run psql through docker exec against a running Postgres container." },
     { flag: "--docker-user <name>", description: "Database user for --docker-container. Default: rye." },
     { flag: "--docker-db <name>", description: "Database name for --docker-container. Default: rye." },
@@ -41,12 +42,32 @@ const help: HelpSpec = {
     { flag: "--help", description: "Print command help." },
   ],
   examples: [
-    "node skills/rye-tabular-intake/scripts/tabular_fixture_smoke.mts --db-url postgresql://rye:rye@127.0.0.1:54329/rye",
-    "node skills/rye-tabular-intake/scripts/tabular_fixture_smoke.mts --docker-container rye-fixture-db",
+    "node skills/rye-tabular-intake/scripts/tabular_fixture_smoke.mts --role team_member --db-url postgresql://rye:rye@127.0.0.1:54329/rye",
+    "node skills/rye-tabular-intake/scripts/tabular_fixture_smoke.mts --role team_member --docker-container rye-fixture-db",
   ],
 };
 
+// The role the fixture writes under. No default: see tabular_commit_rye.mts.
+let sessionRole = "";
+
+function resolveSessionRole(value: string | undefined): string {
+  const role = (value ?? "").trim();
+  if (role === "" || role === "viewer" || role.startsWith("agent:")) {
+    throw new CliError(
+      "session_role_required",
+      "This step needs the role it writes under: pass --role <name> or set RYE_SESSION_ROLE.",
+      role === "" ? "No role was given." : `"${role}" may not write an intake run.`,
+      [
+        `A person with team_member or higher runs this step, and an agent does not set a person's role for them.`,
+        `Ask which role to use, then pass it: --role team_member.`,
+      ],
+    );
+  }
+  return role;
+}
+
 await runCli(help, async (args) => {
+  sessionRole = resolveSessionRole(getString(args, "role") ?? process.env.RYE_SESSION_ROLE);
   const dbUrl = getString(args, "db-url");
   const dockerContainer = getString(args, "docker-container");
   const outputDir = path.resolve(getString(args, "output-dir") ?? path.join(repoRoot, "tmp", "rye-tabular-intake-smoke"));
@@ -199,12 +220,17 @@ async function runScenario(config: {
 async function prepareDatabase(target: PsqlTarget): Promise<void> {
   const setupSql = path.join(skillRoot, "assets", "postgres", "setup_demo_tables.sql");
   await runPsqlFile(target, setupSql);
-  await runPsqlCommand(
+  // Rye rows from an earlier fixture run cannot always be removed: evidence is
+  // append-only, so an assertion it references stays, and so does the event
+  // that evidence points at. The cleanup is best effort for that reason and
+  // says which statement it skipped. Nothing depends on it — the commit step
+  // will not write a row that is already there.
+  await runPsqlCommandBestEffort(
     target,
     `DELETE FROM rye.artifacts
      WHERE artifact_type = ${sqlText(RYE_TABULAR_INTAKE.sourceFileArtifactType)};`,
   );
-  await runPsqlCommand(
+  await runPsqlCommandBestEffort(
     target,
     `DELETE FROM rye.assertions
      WHERE assertion_type IN (
@@ -213,25 +239,25 @@ async function prepareDatabase(target: PsqlTarget): Promise<void> {
        ${sqlText(RYE_TABULAR_INTAKE.stageRecordAssertionType)}
      );`,
   );
-  await runPsqlCommand(
+  await runPsqlCommandBestEffort(
     target,
     `DELETE FROM rye.event_participants
      WHERE event_id IN (
        SELECT id FROM rye.events WHERE event_type LIKE 'rye_tabular_intake_%'
      );`,
   );
-  await runPsqlCommand(
+  await runPsqlCommandBestEffort(
     target,
     `DELETE FROM rye.events
      WHERE event_type LIKE 'rye_tabular_intake_%';`,
   );
-  await runPsqlCommand(
+  await runPsqlCommandBestEffort(
     target,
     `DELETE FROM rye.node_source_map
      WHERE source_schema = 'rye'
        AND source_table IN ('tabular_intake_run', 'tabular_intake_row');`,
   );
-  await runPsqlCommand(
+  await runPsqlCommandBestEffort(
     target,
     `DELETE FROM rye.nodes
      WHERE external_source IN (
@@ -239,7 +265,7 @@ async function prepareDatabase(target: PsqlTarget): Promise<void> {
        ${sqlText(RYE_TABULAR_INTAKE.rowExternalSource)}
      );`,
   );
-  await runPsqlCommand(
+  await runPsqlCommandBestEffort(
     target,
     `DELETE FROM rye.node_source_map
      WHERE source_schema = 'public'
@@ -375,6 +401,8 @@ async function runCommitScript(target: PsqlTarget, inputPath: string, scenario: 
     scenario,
     "--run-id",
     runId,
+    "--role",
+    sessionRole,
   ];
 
   if (target.kind === "db_url") {
@@ -391,7 +419,8 @@ async function runCommitScript(target: PsqlTarget, inputPath: string, scenario: 
 async function runPsqlFile(target: PsqlTarget, filePath: string): Promise<void> {
   const sql = await fs.readFile(filePath, "utf8");
   try {
-    await runPsql(target, ["-v", "ON_ERROR_STOP=1", "-f", "-"], sql, repoRoot);
+    // rye_role is read by the assets that write into Rye; the others ignore it.
+    await runPsql(target, ["-v", "ON_ERROR_STOP=1", "-v", `rye_role=${sessionRole}`, "-f", "-"], sql, repoRoot);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown psql error";
     throw new CliError(
@@ -403,10 +432,19 @@ async function runPsqlFile(target: PsqlTarget, filePath: string): Promise<void> 
   }
 }
 
+async function runPsqlCommandBestEffort(target: PsqlTarget, sql: string): Promise<void> {
+  try {
+    await runPsqlCommand(target, sql);
+  } catch (error) {
+    const message = error instanceof CliError ? error.detail ?? error.message : String(error);
+    process.stderr.write(`skipped cleanup statement: ${sql.split("\n")[0].trim()} — ${message.split("\n")[0]}\n`);
+  }
+}
+
 async function runPsqlCommand(target: PsqlTarget, sql: string): Promise<void> {
   // Each psql call is its own session, and a session with no role set may not
   // write. Plain SET rather than set_config(), so no extra row is printed.
-  const scoped = `SET "app.current_role" = 'admin';\nSET "app.current_user_id" = 'rye-tabular-intake';\n${sql}`;
+  const scoped = `SET "app.current_role" = ${sqlText(sessionRole)};\nSET "app.current_user_id" = ${sqlText(`rye-tabular-intake:${sessionRole}`)};\n${sql}`;
   try {
     await runPsql(target, ["-v", "ON_ERROR_STOP=1", "-c", scoped], undefined, repoRoot);
   } catch (error) {

@@ -324,8 +324,10 @@ make one accepted. Normative shape:
 - `settle_gate(p_assertion_type)` answers
   `{assertion_type, gated, allowed_roles, current_role, may_settle}`. It is
   `STABLE`, `SECURITY INVOKER`, and writes nothing. Callers ask before
-  offering to record configuration. `may_settle_assertion_type()` and
-  `assertion_settle_roles()` are the narrower reads.
+  offering to record configuration. `./scripts/rye settle-gate <assertion-type>`
+  is the same answer from the CLI, in a session that sets no role, so read
+  `may_settle` from the session that will write. `may_settle_assertion_type()`
+  and `assertion_settle_roles()` are the narrower reads.
 - `record_assertion()` demotes rather than refuses. A gated accepted write by a
   role that may not settle it becomes a candidate carrying
   `attrs.settle_gate` (`pending`, `requested_status`, `allowed_roles`), visible
@@ -344,6 +346,13 @@ make one accepted. Normative shape:
 - The gated type is the stored spelling, matched with no alias resolution, as
   `registry_value()` and `governing_scope()` match it. `record_assertion()`
   canonicalizes before inserting, so an alias of a gated type is gated.
+- A gated type cannot be aliased away. A `registry_entry` keyed
+  `type_alias:assertion_type:<T>`, where `<T>` is a gated type, is refused for
+  every caller at every status, candidate and admin included: renaming the word
+  would turn the gate off for everything written afterwards. The set follows the
+  `settle` rows, so a type added to the gate is protected with no further
+  migration. An alias pointing *into* a gated type is unaffected — it narrows
+  what a non-admin may do and cannot widen it.
 - An unset `app.current_role` is not an admin. A migration or script that seeds
   configuration sets the role first, as `sync_plugin_metadata.sh` does.
 - A waiting suggestion changes no answer. `registry_value()`,
@@ -501,7 +510,10 @@ Store aliases as `registry_entry` assertions with key
 `claim.value`. `kind` is `node_type`, `edge_type`, or `assertion_type`.
 
 Only a Rye admin may settle an alias, because every type lookup reads it; see
-the Configuration Write Convention.
+the Configuration Write Convention. One alias is refused to everyone, an admin
+included: an alias pointing *from* a gated configuration type
+(`type_alias:assertion_type:registry_entry`, `:review_policy`, `:scope_status`),
+at any status. An alias pointing into one of those types is ordinary.
 
 `canonical_type()` follows alias chains and raises on cycles. New helper writes
 use the canonical value. Existing rows retain their stored spelling. Read

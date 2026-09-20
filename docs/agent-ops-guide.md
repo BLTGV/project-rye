@@ -27,9 +27,12 @@ The role is not decoration. A session with no role set, and a session whose role
 is `viewer`, reads normally and writes nothing at all: every insert, update, and
 delete on `nodes`, `edges`, `events`, `event_participants`, `assertions`,
 `assertion_evidence`, `artifacts`, and `node_source_map` is refused, inside a
-`SECURITY DEFINER` helper as well as outside one. A refusal is `42501` where the
-table owner is a superuser and a write that changed no row where the owner is
-bound by RLS, so check the row rather than one error text. An agent session sets
+`SECURITY DEFINER` helper as well as outside one. **Check the row count, never
+rely on an error.** A refused `INSERT` raises `42501` on every deployment. A
+refused `UPDATE` or `DELETE` by an ordinary session — any session that is not
+the table owner — shows as zero rows and raises nothing, on a superuser-owned
+install as much as anywhere else, because the policy filters the row out before
+the trigger ever sees it. An agent session sets
 its own key — `agent:<key>` — and never `admin` or `system:cdc`, which is
 reserved for Rye's record of a change to a tracked domain table and may insert
 nothing but events and participants. The normative table is "Who may write" in
@@ -214,6 +217,10 @@ Which types are gated is data, not code, so ask before offering to record one:
 SELECT settle_gate('registry_entry');
 ```
 
+```bash
+./scripts/rye settle-gate registry_entry --json
+```
+
 It answers `{assertion_type, gated, allowed_roles, current_role, may_settle}`,
 is `STABLE` and `SECURITY INVOKER`, and writes nothing. `gated` `false` means
 the type is ordinary knowledge and the settlement lookup alone decides it.
@@ -251,6 +258,13 @@ setting it chooses.
 Those refusals belong to this gate alone. On an ordinary type
 `supersede_assertion()` does not raise under a review policy that would demote
 the caller's write; it files a suggestion. See "Assertions" below.
+
+One write has no waiting form at all: an alias pointing *from* a gated
+configuration type — a `registry_entry` keyed
+`type_alias:assertion_type:registry_entry`, `:review_policy`, or
+`:scope_status` — is refused for every caller at every status, an admin
+included, because renaming the word would turn the gate off for everything
+written afterwards. An alias pointing into a gated type is ordinary.
 
 Until an admin accepts it, the suggestion is read by nothing. `registry_value()`,
 `canonical_type()`, and `rye_settlers()` return exactly what they returned
