@@ -1,12 +1,13 @@
 ---
 name: rye-gardener
-description: Audit Rye type vocabulary and duplicate-node signals, then prepare human-reviewable type-alias and merge proposals without rewriting history or calling merge_nodes directly.
+description: Audit Rye type vocabulary, duplicate-node signals, and intake consistency, then prepare human-reviewable type-alias and merge proposals without rewriting history or calling merge_nodes directly.
 ---
 
 # Rye Gardener
 
 Use this skill when Rye vocabulary has drifted, near-duplicate type names have
-appeared, or nodes may represent the same entity.
+appeared, nodes may represent the same entity, or an intake run may have left
+the graph contradicting itself.
 
 ## Hard boundary
 
@@ -50,6 +51,58 @@ Gardening is review-gated.
    decides whether to accept the alias or execute the merge.
 9. Re-read `type_vocabulary_report`, `review_queue`, and the candidate node to
    verify the proposal is visible and no historical row changed.
+10. Run the four intake consistency checks below and report every finding with
+    the rule it breaks and what the check could not decide.
+
+## Intake Consistency Audit
+
+Vocabulary drift is not the only thing that rots. Four intake defects leave
+findable traces, and the four reads that find them are in
+`skills/rye-pattern-library/references/intake-consistency-checks.md`, with an
+executable copy in `eval/intake_consistency/checks.sql` and a fixture that
+violates each one.
+
+Run them as a standing audit. They are reads. Report each finding with the row
+the query returned and the rule it breaks:
+
+1. A person Rye knows to have departed with an `employs` or role edge still
+   open. Recording the departure was meant to end those edges on the same date.
+   **Run both check 1 and check 1s.** Check 1 reads accepted knowledge only, so
+   under a review policy that demotes agent writes it goes quiet while the
+   departure waits for a person and the edges stay open. Check 1s counts live
+   suggestions and has a `departure_status` column that says which case you are
+   looking at. Checks 2, 3 and 4 already see suggestions.
+2. A digest claim key no cited source assertion carries. The digest asserted
+   more than it was given.
+3. A live assertion whose `effective_at` falls outside the window of the edge
+   it is about. The claim and the relationship tell two stories.
+4. A claim carrying a number with no `attrs.source_window`, or with a window
+   that does not contain the sources it cites. Check 4a has no basis filter on
+   purpose, so it lists attributes as well as measurements. Triage by reading
+   the type and say in the report which rows you set aside and why.
+
+What you do with a finding is what you do with every other one: evidence, then
+a proposal, then stop. Specifically:
+
+- Finding 1 needs a person. You cannot close an edge — an agent-shaped session
+  has no `UPDATE` on `edges`, so the statement reports `UPDATE 0`, changes
+  nothing, and raises nothing. Name the edges and the date. A row whose
+  `disposition` is `handoff` — `owns`, `responsible_for` — is not a closing
+  job at all: ask who takes the thing. A row with no departure date cannot be
+  repaired by anyone until the date is found; report that as the finding.
+- Findings 2 and 4 are corrected by replacing the claim. Against an accepted
+  assertion that is `supersede_assertion()`. Against a pending suggestion it is
+  `reject_candidate()` on the wrong one plus a fresh suggestion;
+  `supersede_assertion()` raises on a candidate. Reject only suggestions you
+  wrote.
+- Finding 3 needs a reading first. The claim may be misdated or the edge may
+  be. Say which you believe and why; do not pick silently.
+
+Each check states what it cannot decide, and those limits are part of your
+report. A check returning no rows means the query found nothing, not that the
+graph is consistent. Prose in a digest, an undated claim, a claim on an edge
+with no window at all, a relationship claim that names no edge, and a number
+computed from uncited material are all outside what a query settles.
 
 ## Alias proposal shape
 
