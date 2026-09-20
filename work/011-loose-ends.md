@@ -81,4 +81,4 @@ import, subpath import, aliased client (882eb88). Agent-kit 0d70c5a,
 step requires a person's role. Verifier: FAIL then PASS.
 
 ## Close
-done 2026-09-20. Merged to agent-roles; combined suite passed on b7da6fd under both owner types. Grew past its first six criteria by taking in what the 009, 010, and agent-kit verifiers found: RLS on the last two unprotected tables, the code-width defect, the review_gate marker for new claims, a mention-linking regex that had never matched, two intake commits that duplicated suggestions on rerun, and ten manifests that failed their own schema.
+done 2026-09-20. Merged to agent-roles; combined suite passed on b7da6fd and again on the final tree c0254ac under both owner types, with the manifest validation and check:db both running inside it. Grew past its first six criteria by taking in what the 009, 010, and agent-kit verifiers found: RLS on the last two unprotected tables, the code-width defect, the review_gate marker for new claims, a mention-linking regex that had never matched, two intake commits that duplicated suggestions on rerun, and ten manifests that failed their own schema.
