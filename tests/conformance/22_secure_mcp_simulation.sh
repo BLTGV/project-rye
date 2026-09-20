@@ -10,6 +10,13 @@ if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
   exit 0
 fi
 
+# Every skill and plugin manifest against the schema beside it.
+# contracts/plugin-manifest.md calls a manifest that fails its schema a build
+# failure, so it fails the suite here. Needs no database and no server, which
+# is why it runs before either is set up. Runs standalone as:
+# node skills/validate_manifests.mjs
+npm --prefix skills/rye-source-context-intake run --silent check
+
 pick_port() {
   node -e "const net = require('node:net'); const server = net.createServer(); server.listen(0, '127.0.0.1', () => { console.log(server.address().port); server.close(); });"
 }
