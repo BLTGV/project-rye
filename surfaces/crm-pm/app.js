@@ -209,13 +209,27 @@ function renderReviewInbox() {
   els.decisionPanel.innerHTML = active ? decisionDetail(active) : emptyDecision();
 }
 
+function crmFreshnessLabel() {
+  const freshness = state.crm?.freshness ?? null;
+  if (freshness?.snapshot_at) {
+    const prefix = freshness.stale ? "possibly out of date · " : "";
+    return `${prefix}deals as of ${formatDate(freshness.snapshot_at)}`;
+  }
+  if (freshness && !freshness.snapshot_at) return "deals not yet gathered";
+  return state.crm?.generated_at ? `updated ${formatDate(state.crm.generated_at)}` : "";
+}
+
 function renderCrm() {
   const opportunities = state.crm?.opportunities ?? [];
   const plansBySubject = groupBy(state.crm?.plans ?? [], "subject_id");
   const businessPlansBySubject = Object.fromEntries(
     Object.entries(plansBySubject).map(([key, rows]) => [key, rows.filter((plan) => !isSmokePlan(plan))])
   );
-  els.crmUpdated.textContent = state.crm?.generated_at ? `updated ${formatDate(state.crm.generated_at)}` : "";
+  // "updated now" would be a lie: the deal list comes from a snapshot that is
+  // only as fresh as the last refresh. Say when the snapshot was taken, and
+  // say so louder when it is older than this instance allows. An age marker,
+  // not change detection.
+  els.crmUpdated.textContent = crmFreshnessLabel();
   els.crmPipeline.innerHTML = opportunities.length
     ? `<div class="business-list cols-3">
         ${businessListHeader(["Opportunity", "Today", "Next planned change"])}

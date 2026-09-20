@@ -13,6 +13,7 @@ import {
 import {
   useCrmWorkspace,
   type CrmOpportunity,
+  type MatviewFreshness,
   type WorkspaceCandidate,
   type WorkspacePlan,
   type WorkspaceRelatedItem,
@@ -85,9 +86,12 @@ export function SalesWorkspacePage() {
             gathered from connected business sources.
           </p>
         </div>
-        <Link to="/review" className="btn h-9 text-xs">
-          <MessageSquareWarning size={14} /> Review suggested updates
-        </Link>
+        <div className="flex flex-col items-end gap-2">
+          <Link to="/review" className="btn h-9 text-xs">
+            <MessageSquareWarning size={14} /> Review suggested updates
+          </Link>
+          <FreshnessMarker freshness={crm.data.freshness ?? null} />
+        </div>
       </header>
 
       <section className="grid grid-cols-2 gap-3 lg:grid-cols-5">
@@ -308,6 +312,44 @@ function SalesDetailPanel({
       </DetailBlock>
     </aside>
   );
+}
+
+// When the deal snapshot was taken. opportunities_active is a materialized
+// view: it is as fresh as the last refresh and nothing else. An age marker, not
+// change detection — "stale" false does not promise the underlying records are
+// unchanged, so the marker always says as of when.
+function FreshnessMarker({ freshness }: { freshness: MatviewFreshness | null }) {
+  if (!freshness) return null;
+  if (!freshness.snapshot_at) {
+    return (
+      <span className="chip text-amber-300" title="No snapshot has been taken yet.">
+        <CalendarClock size={11} /> deals not yet gathered
+      </span>
+    );
+  }
+  const limit =
+    freshness.stale_after_seconds === null
+      ? null
+      : describeSeconds(freshness.stale_after_seconds);
+  return (
+    <span
+      className={freshness.stale ? "chip text-amber-300" : "chip"}
+      title={
+        freshness.stale
+          ? `These deals were gathered more than ${limit ?? "the allowed age"} ago. Newer changes may not be shown yet.`
+          : "How old this snapshot is. It does not promise the underlying records are unchanged."
+      }
+    >
+      <CalendarClock size={11} />
+      {freshness.stale ? "possibly out of date · " : ""}as of {fmtDate(freshness.snapshot_at)}
+    </span>
+  );
+}
+
+function describeSeconds(seconds: number): string {
+  if (seconds < 90) return `${Math.round(seconds)} seconds`;
+  if (seconds < 5400) return `${Math.round(seconds / 60)} minutes`;
+  return `${Math.round(seconds / 3600)} hours`;
 }
 
 function SummaryMetric({
