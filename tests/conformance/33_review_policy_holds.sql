@@ -6,7 +6,7 @@
 --
 -- The obligations from section H of the decision. Obligation 12 (test 31 no
 -- longer pins scope ids) lives in tests/conformance/31_assertion_lifecycle_gate.sql
--- where the case already is; obligations 15 and 16 are run-level and are
+-- where the case already is; obligations 18 and 19 are run-level and are
 -- recorded in the work item, not here.
 --
 -- Every case runs under a non-superuser role, forges the helper-owned session
@@ -1020,6 +1020,366 @@ BEGIN
     IF (SELECT status FROM assertions WHERE id = v_cand) <> 'accepted' THEN
         RAISE EXCEPTION
             'An agent holding promote for the strictest governing scope could not accept';
+    END IF;
+
+    SET CONSTRAINTS ALL IMMEDIATE;
+END
+$$;
+
+-- --------------------------------------------------------------------------
+-- Obligations 15, 16 and 17. The witness-versus-DEFAULT_SCOPE fixture: a helper
+-- takes the stricter of its two resolutions.
+--
+-- This block is last on purpose. It sets DEFAULT_SCOPE, which is the final
+-- fallback for every subject with no coverage, so nothing after it would be
+-- reading the same instance the earlier blocks read.
+-- --------------------------------------------------------------------------
+DO $$
+DECLARE
+    v_answer     uuid;
+    v_blind      uuid;
+    v_cand       uuid;
+    v_core       uuid;
+    v_digest     uuid;
+    v_digest_two uuid;
+    v_event      uuid;
+    v_evidence   jsonb[];
+    v_gap        uuid;
+    v_gate       jsonb;
+    v_incumbent  uuid;
+    v_open       uuid;
+    v_new_gap    uuid;
+    v_remedy     uuid;
+    v_repl       uuid;
+    v_source     uuid;
+    v_strict     uuid;
+    v_subject    uuid;
+    v_witness    uuid;
+    v_witnessed  uuid;
+BEGIN
+    -- The block before this one left the deferred triggers IMMEDIATE, and an
+    -- immediate trg_assertion_evidence_required fires on the INSERT inside
+    -- record_assertion() before the helper has written the evidence row.
+    SET CONSTRAINTS ALL DEFERRED;
+
+    PERFORM set_config('app.current_role', 'admin', true);
+    PERFORM set_config('app.current_user_id', 'test:review-policy', true);
+    PERFORM set_config('app.current_teams', '', true);
+
+    SELECT id INTO v_core
+    FROM nodes WHERE node_type = 'registry' AND external_id = 'core' LIMIT 1;
+    IF v_core IS NULL THEN
+        RAISE EXCEPTION 'Premise broken: the core registry node is missing';
+    END IF;
+
+    INSERT INTO nodes (node_type, label) VALUES ('onboarding_scope', 'Witness open scope')
+    RETURNING id INTO v_open;
+    PERFORM record_assertion('review_policy', '{"review_policy":"open"}', v_open, p_basis := 'assumed');
+    PERFORM record_assertion('scope_status', '{"status":"active"}', v_open, p_basis := 'assumed');
+
+    INSERT INTO nodes (node_type, label) VALUES ('onboarding_scope', 'Fallback strict scope')
+    RETURNING id INTO v_strict;
+    PERFORM record_assertion('review_policy', '{"review_policy":"strict"}', v_strict, p_basis := 'assumed');
+    PERFORM record_assertion('scope_status', '{"status":"active"}', v_strict, p_basis := 'assumed');
+
+    -- The core registry node gets the open scope, so the fixture can keep
+    -- rewriting DEFAULT_SCOPE after the fallback becomes strict. Without it
+    -- the second DEFAULT_SCOPE write would itself be demoted and never take
+    -- effect, and obligation 16 would silently test nothing.
+    INSERT INTO edges (edge_type, source_id, target_id)
+    VALUES ('scope_governs_subject', v_open, v_core);
+
+    -- The witness, reached by a scope_governs_source edge from the open scope.
+    INSERT INTO nodes (node_type, label, properties)
+    VALUES ('person', 'Marsh witness', '{"suite":"review_policy"}')
+    RETURNING id INTO v_witness;
+    INSERT INTO edges (edge_type, source_id, target_id)
+    VALUES ('scope_governs_source', v_open, v_witness);
+
+    -- A subject with no direct, has_step or type coverage.
+    INSERT INTO nodes (node_type, label, properties)
+    VALUES ('thing', 'Tobin witnessed subject', '{"suite":"review_policy"}')
+    RETURNING id INTO v_subject;
+
+    v_event := record_event(
+        'witness_fixture', 'Marsh said so',
+        p_participant_ids := ARRAY[v_witness, v_subject],
+        p_participant_roles := ARRAY['witness', 'subject']
+    );
+    v_evidence := ARRAY[jsonb_build_object(
+        'kind', 'source', 'event_id', v_event, 'witness_node_id', v_witness
+    )];
+
+    -- Everything accepted here is recorded while the fallback is still open,
+    -- so each case really has an accepted incumbent to lose.
+    v_incumbent := record_assertion(
+        'witness_probe', '{"value":"standing"}', v_subject,
+        p_assertion_key := 'default', p_basis := 'reported', p_evidence := v_evidence
+    );
+    v_witnessed := record_assertion(
+        'witness_probe', '{"value":"standing"}', v_subject,
+        p_assertion_key := 'record_case', p_basis := 'reported', p_evidence := v_evidence
+    );
+    v_gap := record_assertion(
+        'knowledge_gap', '{"question":"who owns this","status":"open"}', v_subject,
+        p_assertion_key := 'witness_gap', p_basis := 'reported', p_evidence := v_evidence
+    );
+    v_answer := record_assertion(
+        'witness_answer', '{"value":"Marsh"}', v_subject,
+        p_assertion_key := 'witness_gap_answer', p_basis := 'reported', p_evidence := v_evidence
+    );
+    v_source := record_assertion(
+        'witness_source', '{"value":"raw"}', v_subject,
+        p_assertion_key := 'default', p_basis := 'reported', p_evidence := v_evidence
+    );
+    v_digest := record_distillation(
+        p_subject_node_id := v_subject, p_subject_edge_id := NULL,
+        p_assertion_key := 'witness_digest', p_claim := '{"summary":"first"}',
+        p_source_assertion_ids := ARRAY[v_source], p_source_event_ids := '{}'::uuid[],
+        p_agent := 'test:review-policy'
+    );
+    IF (SELECT count(*) FROM assertions
+        WHERE id IN (v_incumbent, v_witnessed, v_gap, v_answer, v_source, v_digest)
+          AND status = 'accepted' AND superseded_at IS NULL) <> 6
+    THEN
+        RAISE EXCEPTION 'Premise broken: the witness fixture did not start with six accepted rows';
+    END IF;
+
+    -- Now the fallback becomes strict. This is the whole fixture.
+    PERFORM record_assertion(
+        'registry_entry', jsonb_build_object('value', v_strict::text), v_core,
+        p_assertion_key := 'DEFAULT_SCOPE', p_basis := 'assumed'
+    );
+
+    -- Anti-vacuity: the two resolutions must be different scopes with
+    -- different policies, or none of this proves anything.
+    IF governing_scope(v_subject, NULL, 'witness_probe', v_witness) IS DISTINCT FROM v_open THEN
+        RAISE EXCEPTION
+            'Premise broken: the witness resolution is %, not the open scope',
+            governing_scope(v_subject, NULL, 'witness_probe', v_witness);
+    END IF;
+    v_blind := governing_scope(v_subject, NULL, 'witness_probe', NULL);
+    IF v_blind IS DISTINCT FROM v_strict THEN
+        RAISE EXCEPTION
+            'Premise broken: the witness-free resolution is %, not the strict DEFAULT_SCOPE', v_blind;
+    END IF;
+    IF scope_review_policy(v_open) <> 'open' OR scope_review_policy(v_blind) <> 'strict' THEN
+        RAISE EXCEPTION 'Premise broken: the two resolutions do not carry different policies';
+    END IF;
+    IF effective_review_policy(v_subject, NULL, 'witness_probe', v_witness) <> 'strict' THEN
+        RAISE EXCEPTION
+            'effective_review_policy() did not take the stricter of the two resolutions: %',
+            effective_review_policy(v_subject, NULL, 'witness_probe', v_witness);
+    END IF;
+
+    -- ==================================================================
+    -- Obligation 15a. supersede_assertion() commits. Before the fix it
+    -- resolved open, ended the incumbent, inserted the replacement
+    -- accepted, and the deferred check refused the transaction.
+    -- ==================================================================
+    PERFORM set_config('app.current_role', 'team_member', true);
+    v_repl := supersede_assertion(
+        v_incumbent, 'witness_probe', v_subject, NULL, '{"value":"correction"}',
+        p_new_assertion_key := 'default', p_new_basis := 'reported',
+        p_new_evidence := v_evidence
+    );
+    SET CONSTRAINTS ALL IMMEDIATE;
+    SET CONSTRAINTS ALL DEFERRED;
+
+    PERFORM set_config('app.current_role', 'admin', true);
+    IF (SELECT status FROM assertions WHERE id = v_repl) <> 'candidate' THEN
+        RAISE EXCEPTION
+            'supersede_assertion() landed % where the witness-free resolution is strict',
+            (SELECT status FROM assertions WHERE id = v_repl);
+    END IF;
+    SELECT attrs->'review_gate' INTO v_gate FROM assertions WHERE id = v_repl;
+    IF v_gate->>'review_policy' <> 'strict' THEN
+        RAISE EXCEPTION 'The review_gate does not name the stricter policy: %', v_gate;
+    END IF;
+    IF (SELECT superseded_at FROM assertions WHERE id = v_incumbent) IS NOT NULL THEN
+        RAISE EXCEPTION 'supersede_assertion() ended the incumbent in the witness fixture';
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM current_valid_assertions
+        WHERE id = v_incumbent AND claim->>'value' = 'standing'
+    ) THEN
+        RAISE EXCEPTION 'The witness fixture left the key empty';
+    END IF;
+
+    -- ==================================================================
+    -- Obligation 15b. record_assertion() with an incumbent on the tuple.
+    -- ==================================================================
+    PERFORM set_config('app.current_role', 'team_member', true);
+    v_cand := record_assertion(
+        'witness_probe', '{"value":"second"}', v_subject,
+        p_assertion_key := 'record_case', p_status := 'accepted',
+        p_basis := 'reported', p_evidence := v_evidence
+    );
+    SET CONSTRAINTS ALL IMMEDIATE;
+    SET CONSTRAINTS ALL DEFERRED;
+    PERFORM set_config('app.current_role', 'admin', true);
+    IF (SELECT status FROM assertions WHERE id = v_cand) <> 'candidate' THEN
+        RAISE EXCEPTION
+            'record_assertion() with an incumbent landed % in the witness fixture',
+            (SELECT status FROM assertions WHERE id = v_cand);
+    END IF;
+    IF (SELECT superseded_at FROM assertions WHERE id = v_witnessed) IS NOT NULL THEN
+        RAISE EXCEPTION 'record_assertion() ended the incumbent it demoted around';
+    END IF;
+
+    -- ==================================================================
+    -- Obligation 15c. record_assertion() with no incumbent. Before the fix
+    -- the helper called this accepted and the guard wrote candidate, which
+    -- is the divergence that pre-dates 0027.
+    -- ==================================================================
+    PERFORM set_config('app.current_role', 'team_member', true);
+    v_cand := record_assertion(
+        'witness_fresh', '{"value":"first"}', v_subject,
+        p_assertion_key := 'default', p_status := 'accepted',
+        p_basis := 'reported', p_evidence := v_evidence
+    );
+    SET CONSTRAINTS ALL IMMEDIATE;
+    SET CONSTRAINTS ALL DEFERRED;
+    PERFORM set_config('app.current_role', 'admin', true);
+    IF (SELECT status FROM assertions WHERE id = v_cand) <> 'candidate' THEN
+        RAISE EXCEPTION
+            'record_assertion() with no incumbent landed % in the witness fixture',
+            (SELECT status FROM assertions WHERE id = v_cand);
+    END IF;
+
+    -- ==================================================================
+    -- Obligation 15d. resolve_knowledge_gap() commits, the resolution is a
+    -- candidate, and the gap is still open.
+    -- ==================================================================
+    PERFORM set_config('app.current_role', 'team_member', true);
+    PERFORM resolve_knowledge_gap(v_gap, v_answer, 'test:review-policy');
+    SET CONSTRAINTS ALL IMMEDIATE;
+    SET CONSTRAINTS ALL DEFERRED;
+    PERFORM set_config('app.current_role', 'admin', true);
+    SELECT id INTO v_new_gap
+    FROM assertions
+    WHERE subject_node_id = v_subject
+      AND assertion_type = 'knowledge_gap'
+      AND assertion_key = 'witness_gap'
+      AND id <> v_gap;
+    IF v_new_gap IS NULL OR (SELECT status FROM assertions WHERE id = v_new_gap) <> 'candidate' THEN
+        RAISE EXCEPTION 'resolve_knowledge_gap() did not file a candidate in the witness fixture';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM open_gaps WHERE id = v_gap) THEN
+        RAISE EXCEPTION 'The gap closed in the witness fixture';
+    END IF;
+
+    -- ==================================================================
+    -- Obligation 15e. record_distillation() commits, the digest is a
+    -- candidate, and the digest incumbent is still accepted.
+    -- ==================================================================
+    PERFORM set_config('app.current_role', 'team_member', true);
+    v_digest_two := record_distillation(
+        p_subject_node_id := v_subject, p_subject_edge_id := NULL,
+        p_assertion_key := 'witness_digest', p_claim := '{"summary":"second"}',
+        p_source_assertion_ids := ARRAY[v_source], p_source_event_ids := '{}'::uuid[],
+        p_agent := 'test:review-policy'
+    );
+    SET CONSTRAINTS ALL IMMEDIATE;
+    SET CONSTRAINTS ALL DEFERRED;
+    PERFORM set_config('app.current_role', 'admin', true);
+    IF (SELECT status FROM assertions WHERE id = v_digest_two) <> 'candidate' THEN
+        RAISE EXCEPTION
+            'record_distillation() landed % in the witness fixture',
+            (SELECT status FROM assertions WHERE id = v_digest_two);
+    END IF;
+    IF (SELECT superseded_at FROM assertions WHERE id = v_digest) IS NOT NULL THEN
+        RAISE EXCEPTION 'record_distillation() ended the digest incumbent it filed for review';
+    END IF;
+
+    -- ==================================================================
+    -- Obligation 17. The remedy works: give the subject its own
+    -- scope_governs_subject edge to the open scope and both resolutions
+    -- agree again, so the same calls land accepted.
+    -- ==================================================================
+    INSERT INTO edges (edge_type, source_id, target_id)
+    VALUES ('scope_governs_subject', v_open, v_subject);
+    IF effective_review_policy(v_subject, NULL, 'witness_probe', v_witness) <> 'open' THEN
+        RAISE EXCEPTION
+            'The documented remedy does not work: the effective policy is still %',
+            effective_review_policy(v_subject, NULL, 'witness_probe', v_witness);
+    END IF;
+
+    v_remedy := record_assertion(
+        'remedy_probe', '{"value":"standing"}', v_subject,
+        p_assertion_key := 'default', p_basis := 'reported', p_evidence := v_evidence
+    );
+    IF (SELECT status FROM assertions WHERE id = v_remedy) <> 'accepted' THEN
+        RAISE EXCEPTION 'After the remedy, record_assertion() still demotes';
+    END IF;
+
+    PERFORM set_config('app.current_role', 'team_member', true);
+    v_repl := supersede_assertion(
+        v_remedy, 'remedy_probe', v_subject, NULL, '{"value":"replaced"}',
+        p_new_assertion_key := 'default', p_new_basis := 'reported',
+        p_new_evidence := v_evidence
+    );
+    SET CONSTRAINTS ALL IMMEDIATE;
+    SET CONSTRAINTS ALL DEFERRED;
+    PERFORM set_config('app.current_role', 'admin', true);
+    IF (SELECT status FROM assertions WHERE id = v_repl) <> 'accepted' THEN
+        RAISE EXCEPTION 'After the remedy, supersede_assertion() still demotes';
+    END IF;
+    IF (SELECT superseded_by FROM assertions WHERE id = v_remedy) IS DISTINCT FROM v_repl THEN
+        RAISE EXCEPTION 'After the remedy, supersede_assertion() did not end the incumbent';
+    END IF;
+
+    -- ==================================================================
+    -- Obligation 16. The same shape with the stricter scope on the other
+    -- side: a strict scope_governs_source witness and an open
+    -- DEFAULT_SCOPE. The answer is the same, so the rule is a maximum and
+    -- not a preference for one resolution.
+    -- ==================================================================
+    PERFORM record_assertion(
+        'registry_entry', jsonb_build_object('value', v_open::text), v_core,
+        p_assertion_key := 'DEFAULT_SCOPE', p_basis := 'assumed'
+    );
+
+    INSERT INTO nodes (node_type, label) VALUES ('person', 'Wren strict witness')
+    RETURNING id INTO v_witness;
+    INSERT INTO edges (edge_type, source_id, target_id)
+    VALUES ('scope_governs_source', v_strict, v_witness);
+    INSERT INTO nodes (node_type, label) VALUES ('thing', 'Reversed witness subject')
+    RETURNING id INTO v_subject;
+
+    v_event := record_event(
+        'witness_fixture', 'Wren said so',
+        p_participant_ids := ARRAY[v_witness, v_subject],
+        p_participant_roles := ARRAY['witness', 'subject']
+    );
+    v_evidence := ARRAY[jsonb_build_object(
+        'kind', 'source', 'event_id', v_event, 'witness_node_id', v_witness
+    )];
+
+    IF governing_scope(v_subject, NULL, 'reversed_probe', v_witness) IS DISTINCT FROM v_strict
+       OR governing_scope(v_subject, NULL, 'reversed_probe', NULL) IS DISTINCT FROM v_open
+    THEN
+        RAISE EXCEPTION 'Premise broken: the reversed fixture does not resolve strict/open';
+    END IF;
+    IF effective_review_policy(v_subject, NULL, 'reversed_probe', v_witness) <> 'strict' THEN
+        RAISE EXCEPTION
+            'The reversed fixture answered %, so the rule prefers one resolution instead of taking the maximum',
+            effective_review_policy(v_subject, NULL, 'reversed_probe', v_witness);
+    END IF;
+
+    PERFORM set_config('app.current_role', 'team_member', true);
+    v_cand := record_assertion(
+        'reversed_probe', '{"value":"first"}', v_subject,
+        p_assertion_key := 'default', p_status := 'accepted',
+        p_basis := 'reported', p_evidence := v_evidence
+    );
+    SET CONSTRAINTS ALL IMMEDIATE;
+    SET CONSTRAINTS ALL DEFERRED;
+    PERFORM set_config('app.current_role', 'admin', true);
+    IF (SELECT status FROM assertions WHERE id = v_cand) <> 'candidate' THEN
+        RAISE EXCEPTION
+            'The reversed fixture landed % where the witness scope is strict',
+            (SELECT status FROM assertions WHERE id = v_cand);
     END IF;
 
     SET CONSTRAINTS ALL IMMEDIATE;

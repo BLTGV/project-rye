@@ -251,6 +251,28 @@ BEGIN
     RAISE EXCEPTION 'scope_review_policy_rank function missing';
   END IF;
 
+  IF to_regprocedure('rye.effective_review_policy(uuid,uuid,text,uuid)') IS NULL THEN
+    RAISE EXCEPTION 'effective_review_policy function missing';
+  END IF;
+
+  -- Every helper that inserts an assertion takes the stricter of its two
+  -- scope resolutions, or the insert guard can demote a row the helper meant
+  -- to keep accepted and the commit-time check then refuses the transaction.
+  IF EXISTS (
+      SELECT required.name
+      FROM (VALUES ('record_assertion'), ('supersede_assertion'), ('record_distillation'))
+           required(name)
+      WHERE NOT EXISTS (
+          SELECT 1 FROM pg_proc p
+          JOIN pg_namespace n ON n.oid = p.pronamespace
+          WHERE n.nspname = v_schema
+            AND p.proname = required.name
+            AND p.prosrc LIKE '%effective_review_policy%'
+      )
+  ) THEN
+    RAISE EXCEPTION 'an assertion-inserting helper does not take the stricter of its two scope resolutions';
+  END IF;
+
   IF NOT EXISTS (
       SELECT 1 FROM pg_proc p
       JOIN pg_namespace n ON n.oid = p.pronamespace

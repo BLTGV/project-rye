@@ -17,17 +17,20 @@
 -- so after a cross-scope merge two scopes govern it and the lowest uuid won. A
 -- node in a strict area could silently become open.
 --
--- What this migration does, in four parts:
+-- What this migration does, in five parts:
 --   1. scope_review_policy_rank(), a read-only ranking that never raises.
 --   2. governing_scope() orders candidate scopes by that rank, most restrictive
 --      first, with scope.id only as a tie-break.
---   3. supersede_assertion() applies the same predicate record_assertion()
+--   3. effective_review_policy(), the one place the stricter-of-two-resolutions
+--      comparison lives, and every helper that inserts an assertion uses it:
+--      record_assertion(), supersede_assertion(), record_distillation().
+--   4. supersede_assertion() applies the same predicate record_assertion()
 --      applies. Where that predicate demotes, the replacement lands as a
 --      candidate, the incumbent stays accepted and unsuperseded, and the row
 --      carries attrs.review_gate. resolve_knowledge_gap() follows it.
---   4. assertions_insert_review_guard() loses 0025's insert exemption, because
---      the helper it existed for no longer ends an incumbent it is about to
---      replace with a candidate.
+--   5. assertions_insert_review_guard() loses 0025's insert exemption, because
+--      with part 3 no helper ends an incumbent it is about to replace with a
+--      candidate.
 --
 -- Signatures are unchanged, no table is added, and every function declares its
 -- own search_path. Authorization is session variables only: nothing here reads
@@ -78,6 +81,93 @@ $$ LANGUAGE sql STABLE;
 
 COMMENT ON FUNCTION scope_review_policy_rank(uuid) IS
     'How restrictive a scope''s review policy is, for ordering only: 0 strict, 1 candidates_only, 2 everything else. Never raises, so one scope carrying an unsupported review_policy value cannot refuse writes on a neighbouring subject; scope_review_policy() still raises on that scope if it is the one selected.';
+
+-- --------------------------------------------------------------------------
+-- 1b. A helper's policy is the stricter of two resolutions
+-- --------------------------------------------------------------------------
+--
+-- Corrected 2026-09-20, after verification. An earlier draft of this migration
+-- claimed the insert guard could never be stricter than a helper, because the
+-- guard resolves with a null witness and the witness branch of
+-- governing_scope() runs only after the subject, inheritance and type branches
+-- produce nothing. That is false: the witness branch runs BEFORE DEFAULT_SCOPE,
+-- so a witness-free resolution does not stop at nothing -- it falls through to
+-- DEFAULT_SCOPE, which can be stricter than the witness scope.
+--
+-- The Verifier reproduced it on both owner types as team_member: a subject with
+-- no direct, has_step or type coverage; an accepted incumbent whose evidence
+-- carries witness_node_id = W; a scope_governs_source edge from an OPEN scope
+-- to W; and a STRICT DEFAULT_SCOPE. supersede_assertion() resolved open, ended
+-- the incumbent and inserted the replacement accepted; the guard resolved
+-- strict and demoted it; trg_assertions_transition_complete refused the commit
+-- with the key holding nothing.
+--
+-- The rule: every helper that inserts an assertion resolves the governing scope
+-- twice -- once with its primary witness, once with none -- and takes the
+-- STRICTER of the two review policies. The scope id a helper reports and passes
+-- on is unchanged and is still the witness-resolved one, because that is what
+-- the capability check, the scoped type resolution, the scoped registry read
+-- and the p_scope_node_id mismatch test are about. Only the policy is the
+-- maximum. A helper's policy is then always at least as demoting as the
+-- guard's, so the guard can never demote a row a helper meant to keep accepted.
+--
+-- Rejected: restoring a narrow exemption in the guard. It would have to express
+-- the helper's witness resolution inside a trigger with no evidence to read,
+-- and any exemption reopens the raw supersede-and-replace route under strict.
+-- Rejected: giving the guard the witness. Evidence is written after the
+-- assertion, so at BEFORE INSERT there is nothing to read; that asymmetry is
+-- why the fix belongs on the helper's side.
+--
+-- Behaviour change, stated: a scope_governs_source edge from an open scope no
+-- longer opens a source on an instance whose witness-free resolution is
+-- stricter -- in practice one with a strict or candidates_only DEFAULT_SCOPE.
+-- Writes witnessed through that source land as candidates where they used to
+-- land accepted. A deployment keeps the exception by giving those subjects
+-- their own scope_governs_subject edge to the open scope, because direct
+-- subject coverage resolves identically with and without a witness.
+--
+-- scope_review_policy() is called on the second scope only when it ranks
+-- stricter, so a neighbouring scope carrying an unsupported stored value still
+-- cannot refuse a write.
+CREATE OR REPLACE FUNCTION effective_review_policy(
+    p_subject_node_id uuid,
+    p_subject_edge_id uuid,
+    p_assertion_type text,
+    p_witness_node_id uuid
+) RETURNS text
+SET search_path = rye, pg_catalog
+AS $$
+DECLARE
+    v_blind_scope uuid;
+    v_witness_scope uuid;
+BEGIN
+    v_witness_scope := governing_scope(
+        p_subject_node_id, p_subject_edge_id, p_assertion_type, p_witness_node_id
+    );
+
+    -- With no witness there is only one resolution, and it is the guard's.
+    IF p_witness_node_id IS NULL THEN
+        RETURN scope_review_policy(v_witness_scope);
+    END IF;
+
+    v_blind_scope := governing_scope(
+        p_subject_node_id, p_subject_edge_id, p_assertion_type, NULL
+    );
+    IF v_blind_scope IS NOT DISTINCT FROM v_witness_scope THEN
+        RETURN scope_review_policy(v_witness_scope);
+    END IF;
+
+    IF scope_review_policy_rank(v_blind_scope)
+       < scope_review_policy_rank(v_witness_scope)
+    THEN
+        RETURN scope_review_policy(v_blind_scope);
+    END IF;
+    RETURN scope_review_policy(v_witness_scope);
+END;
+$$ LANGUAGE plpgsql STABLE;
+
+COMMENT ON FUNCTION effective_review_policy(uuid,uuid,text,uuid) IS
+    'The review policy a helper that inserts an assertion must apply: the stricter of the policy of the scope resolved with the primary witness and the policy of the scope resolved without one, ranked by scope_review_policy_rank(). The witness-free resolution is what assertions_insert_review_guard() sees, and it can fall through to a stricter DEFAULT_SCOPE, so taking the maximum is what keeps helper and guard from disagreeing in the accepting direction. With a null witness there is one resolution and this is scope_review_policy(governing_scope(...)). The scope id a helper reports is unaffected: only the policy is a maximum.';
 
 -- --------------------------------------------------------------------------
 -- 2. The most restrictive governing scope wins
@@ -394,10 +484,15 @@ BEGIN
     ORDER BY CASE ae.kind WHEN 'source' THEN 0 ELSE 1 END, ae.recorded_at, ae.id
     LIMIT 1;
 
+    -- The scope id reported in attrs.review_gate is the witness-resolved one;
+    -- the policy applied is the stricter of that resolution and the
+    -- witness-free one the insert guard will use. See section 1b.
     v_scope := governing_scope(
         v_old.subject_node_id, v_old.subject_edge_id, v_old.assertion_type, v_witness
     );
-    v_policy := scope_review_policy(v_scope);
+    v_policy := effective_review_policy(
+        v_old.subject_node_id, v_old.subject_edge_id, v_old.assertion_type, v_witness
+    );
     v_basis := lower(coalesce(nullif(trim(p_new_basis), ''), v_old.basis));
     v_attrs := coalesce(p_new_attrs, v_old.attrs, '{}'::jsonb);
 
@@ -521,9 +616,9 @@ BEGIN
       AND ae.witness_node_id IS NOT NULL
     ORDER BY CASE ae.kind WHEN 'source' THEN 0 ELSE 1 END, ae.recorded_at, ae.id
     LIMIT 1;
-    v_policy := scope_review_policy(governing_scope(
+    v_policy := effective_review_policy(
         v_gap.subject_node_id, v_gap.subject_edge_id, v_gap.assertion_type, v_witness
-    ));
+    );
 
     v_new_id := supersede_assertion(
         p_old_assertion_id := v_gap.id,
@@ -582,7 +677,446 @@ COMMENT ON FUNCTION resolve_knowledge_gap(uuid,uuid,text) IS
     'Close a knowledge gap on its own tuple with the answer that resolves it. Under a demoting review policy the resolution is filed as a candidate, the gap stays open and stays in open_gaps until a settler accepts, and the knowledge_gap_resolved event carries pending_review true with the policy that applied. Because the resolution is written with basis inferred, accept_assertion() will not let it displace a non-inferred accepted gap: record gaps with basis inferred, or reject the candidate and record the resolved gap with record_assertion().';
 
 -- --------------------------------------------------------------------------
--- 4. The insert exemption follows the helper, which means it goes
+-- 4. The other two helpers that insert an assertion
+-- --------------------------------------------------------------------------
+--
+-- record_assertion() is carried forward from 0023 unchanged except for the
+-- policy resolution, including 0023's settle-gate demotion, which still runs
+-- before the review-policy demotion and before the block that supersedes the
+-- incumbent. Demoting after supersession would leave the key with no accepted
+-- value at all, which is how a non-admin would erase an alias by proposing one.
+--
+-- record_distillation() is carried forward from 0018 the same way. It applies
+-- the policy itself and supersedes the digest incumbent only when its own write
+-- is accepted, so with the stricter-of-two policy it never ends a digest it is
+-- about to file for review.
+--
+-- accept_assertion() is deliberately not here. It performs no INSERT, so it
+-- cannot produce a helper-versus-guard disagreement; its only use of the policy
+-- is the agent:* promotion gate, and the witness asymmetry there is the
+-- pre-existing stated limit, neither closed nor widened.
+
+CREATE OR REPLACE FUNCTION record_assertion(
+    p_assertion_type text,
+    p_claim jsonb,
+    p_subject_node_id uuid DEFAULT NULL,
+    p_subject_edge_id uuid DEFAULT NULL,
+    p_assertion_key text DEFAULT 'default',
+    p_effective_at timestamptz DEFAULT NULL,
+    p_effective_to timestamptz DEFAULT NULL,
+    p_confidence numeric DEFAULT NULL,
+    p_status text DEFAULT 'accepted',
+    p_basis text DEFAULT 'unknown',
+    p_evidence jsonb[] DEFAULT NULL,
+    p_classification text DEFAULT NULL,
+    p_attrs jsonb DEFAULT '{}'::jsonb,
+    p_scope_node_id uuid DEFAULT NULL
+) RETURNS uuid
+SET search_path = rye, pg_catalog
+AS $$
+DECLARE
+    v_assertion_type text;
+    v_attrs jsonb := coalesce(p_attrs, '{}'::jsonb);
+    v_existing assertions;
+    v_governing_scope uuid;
+    v_settle_roles text[];
+    v_key text := coalesce(nullif(trim(p_assertion_key), ''), 'default');
+    v_new_effective_to timestamptz := p_effective_to;
+    v_new_id uuid := gen_random_uuid();
+    v_next_future_at timestamptz;
+    v_policy text;
+    v_resolved_scope uuid;
+    v_status text := lower(coalesce(nullif(trim(p_status), ''), 'accepted'));
+    v_basis text := lower(coalesce(nullif(trim(p_basis), ''), 'unknown'));
+    v_subject_ref text;
+    v_witness uuid;
+BEGIN
+    IF (p_subject_node_id IS NULL) = (p_subject_edge_id IS NULL) THEN
+        RAISE EXCEPTION 'Exactly one of subject_node_id or subject_edge_id is required';
+    END IF;
+    IF nullif(trim(p_assertion_type), '') IS NULL THEN
+        RAISE EXCEPTION 'assertion_type is required';
+    END IF;
+    v_assertion_type := canonical_type_in_scope('assertion_type', p_assertion_type, p_scope_node_id);
+    IF p_claim IS NULL THEN
+        RAISE EXCEPTION 'claim is required';
+    END IF;
+    IF v_status NOT IN ('candidate', 'accepted') THEN
+        RAISE EXCEPTION 'Unsupported assertion status: %', p_status;
+    END IF;
+    IF v_basis NOT IN ('observed', 'reported', 'inferred', 'assumed', 'unknown') THEN
+        RAISE EXCEPTION 'Unsupported assertion basis: %', p_basis;
+    END IF;
+    IF v_assertion_type = 'pattern_claim' AND v_status = 'accepted' THEN
+        RAISE EXCEPTION 'pattern_claim assertions must be recorded as candidates and promoted with accept_assertion()';
+    END IF;
+    IF v_basis <> 'assumed'
+       AND cardinality(coalesce(p_evidence, '{}'::jsonb[])) = 0
+    THEN
+        RAISE EXCEPTION 'Non-assumed assertions require evidence';
+    END IF;
+    IF p_effective_at IS NOT NULL
+       AND p_effective_to IS NOT NULL
+       AND p_effective_to <= p_effective_at
+    THEN
+        RAISE EXCEPTION 'effective_to must be after effective_at';
+    END IF;
+
+    SELECT nullif(evidence->>'witness_node_id', '')::uuid
+    INTO v_witness
+    FROM unnest(coalesce(p_evidence, '{}'::jsonb[])) WITH ORDINALITY item(evidence, ordinality)
+    WHERE evidence->>'kind' IN ('source', 'corroboration')
+      AND nullif(evidence->>'witness_node_id', '') IS NOT NULL
+    ORDER BY ordinality
+    LIMIT 1;
+
+    v_governing_scope := governing_scope(
+        p_subject_node_id,
+        p_subject_edge_id,
+        v_assertion_type,
+        v_witness
+    );
+    v_resolved_scope := v_governing_scope;
+    IF p_scope_node_id IS NOT NULL
+       AND v_resolved_scope IS NOT NULL
+       AND p_scope_node_id <> v_resolved_scope
+    THEN
+        RAISE EXCEPTION 'Explicit scope % does not match governing scope %', p_scope_node_id, v_resolved_scope;
+    END IF;
+    v_resolved_scope := coalesce(v_resolved_scope, p_scope_node_id);
+    v_assertion_type := canonical_type_in_scope(
+        'assertion_type', v_assertion_type, v_resolved_scope
+    );
+    IF v_assertion_type = 'pattern_claim' AND v_status = 'accepted' THEN
+        RAISE EXCEPTION 'pattern_claim assertions must be recorded as candidates and promoted with accept_assertion()';
+    END IF;
+    -- 0027: the policy is the stricter of the two resolutions, because the
+    -- insert guard resolves without a witness and its answer can fall through
+    -- to a stricter DEFAULT_SCOPE. The scope id above is unchanged. When
+    -- nothing governs the subject, an explicit p_scope_node_id still supplies
+    -- the policy exactly as before.
+    IF v_governing_scope IS NULL THEN
+        v_policy := scope_review_policy(v_resolved_scope);
+    ELSE
+        v_policy := effective_review_policy(
+            p_subject_node_id, p_subject_edge_id, v_assertion_type, v_witness
+        );
+    END IF;
+
+    -- Configuration writes need an admin. A gated type is Rye's own
+    -- configuration, and only the roles named in the assertion_type_access
+    -- `settle` row may make it accepted. Demote rather than refuse, so
+    -- nothing the person said is lost: the write lands as a candidate an
+    -- admin can accept from review_queue, marked so the caller can see why.
+    --
+    -- This runs before the review policy demotion and before the block that
+    -- supersedes the incumbent. Demoting after supersession would leave the
+    -- key with no accepted value at all, which is how a non-admin would erase
+    -- an alias by proposing one. It is independent of the review policy: it
+    -- applies under open, candidates_only, strict, and with no policy at all,
+    -- so the requested status, not the post-policy status, is what is tested.
+    v_settle_roles := assertion_settle_roles(v_assertion_type);
+    IF v_status = 'accepted'
+       AND v_settle_roles IS NOT NULL
+       AND NOT (
+           coalesce(nullif(current_setting('app.current_role', true), ''), '')
+           = ANY(v_settle_roles)
+       )
+    THEN
+        v_status := 'candidate';
+        v_attrs := v_attrs || jsonb_build_object(
+            'settle_gate', jsonb_build_object(
+                'pending', true,
+                'requested_status', 'accepted',
+                'assertion_type', v_assertion_type,
+                'allowed_roles', to_jsonb(v_settle_roles)
+            )
+        );
+    END IF;
+
+    IF v_status = 'accepted'
+       AND (v_policy = 'strict' OR (v_policy = 'candidates_only' AND v_basis <> 'observed'))
+    THEN
+        v_status := 'candidate';
+    END IF;
+
+    v_subject_ref := coalesce('n:' || p_subject_node_id::text, 'e:' || p_subject_edge_id::text);
+
+    IF v_status = 'accepted' THEN
+        PERFORM pg_advisory_xact_lock(hashtextextended(
+            v_subject_ref || ':' || v_assertion_type || ':' || v_key, 0
+        ));
+
+        IF p_effective_at IS NOT NULL AND p_effective_at > now() THEN
+            SELECT * INTO v_existing
+            FROM assertions
+            WHERE subject_ref = v_subject_ref
+              AND assertion_type = v_assertion_type
+              AND assertion_key = v_key
+              AND status = 'accepted'
+              AND superseded_at IS NULL
+              AND effective_at IS NOT DISTINCT FROM p_effective_at
+            LIMIT 1;
+
+            IF FOUND
+               AND v_existing.claim = p_claim
+               AND v_existing.basis = v_basis
+               AND v_existing.confidence IS NOT DISTINCT FROM p_confidence
+            THEN
+                PERFORM append_assertion_evidence(v_existing.id, p_evidence);
+                RETURN v_existing.id;
+            ELSIF FOUND THEN
+                PERFORM mark_assertion_superseded(v_existing.id, v_new_id);
+            END IF;
+
+            SELECT min(effective_at) INTO v_next_future_at
+            FROM assertions
+            WHERE subject_ref = v_subject_ref
+              AND assertion_type = v_assertion_type
+              AND assertion_key = v_key
+              AND status = 'accepted'
+              AND superseded_at IS NULL
+              AND effective_at > p_effective_at;
+
+            IF v_next_future_at IS NOT NULL
+               AND (v_new_effective_to IS NULL OR v_new_effective_to > v_next_future_at)
+            THEN
+                v_new_effective_to := v_next_future_at;
+            END IF;
+
+            SELECT * INTO v_existing
+            FROM assertions
+            WHERE subject_ref = v_subject_ref
+              AND assertion_type = v_assertion_type
+              AND assertion_key = v_key
+              AND status = 'accepted'
+              AND superseded_at IS NULL
+              AND (effective_at IS NULL OR effective_at < p_effective_at)
+              AND (effective_to IS NULL OR effective_to > p_effective_at)
+            ORDER BY effective_at DESC NULLS LAST, asserted_at DESC
+            LIMIT 1;
+
+            IF FOUND AND (v_existing.effective_to IS NULL OR v_existing.effective_to > p_effective_at) THEN
+                PERFORM set_config('app.write_path', 'assertion_effective_window', true);
+                PERFORM set_config('app.effective_window_assertion_id', v_existing.id::text, true);
+                UPDATE assertions SET effective_to = p_effective_at WHERE id = v_existing.id;
+                PERFORM set_config('app.write_path', '', true);
+                PERFORM set_config('app.effective_window_assertion_id', '', true);
+            END IF;
+        ELSIF p_effective_to IS NULL OR p_effective_to > now() THEN
+            SELECT * INTO v_existing
+            FROM assertions
+            WHERE subject_ref = v_subject_ref
+              AND assertion_type = v_assertion_type
+              AND assertion_key = v_key
+              AND status = 'accepted'
+              AND superseded_at IS NULL
+              AND (effective_at IS NULL OR effective_at <= now())
+              AND (effective_to IS NULL OR effective_to > now())
+            ORDER BY effective_at DESC NULLS LAST, asserted_at DESC
+            LIMIT 1;
+
+            IF FOUND
+               AND v_existing.claim = p_claim
+               AND v_existing.basis = v_basis
+               AND v_existing.confidence IS NOT DISTINCT FROM p_confidence
+            THEN
+                PERFORM append_assertion_evidence(v_existing.id, p_evidence);
+                RETURN v_existing.id;
+            END IF;
+            IF FOUND THEN
+                PERFORM mark_assertion_superseded(v_existing.id, v_new_id);
+            END IF;
+        END IF;
+    END IF;
+
+    INSERT INTO assertions (
+        id, assertion_type, assertion_key, status, basis, classification,
+        subject_node_id, subject_edge_id, claim, effective_at, effective_to,
+        confidence, attrs
+    ) VALUES (
+        v_new_id, v_assertion_type, v_key, v_status, v_basis, p_classification,
+        p_subject_node_id, p_subject_edge_id, p_claim, p_effective_at,
+        v_new_effective_to, p_confidence, v_attrs
+    );
+
+    PERFORM append_assertion_evidence(v_new_id, p_evidence);
+    RETURN v_new_id;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION record_distillation(
+    p_subject_node_id uuid,
+    p_subject_edge_id uuid,
+    p_assertion_key text,
+    p_claim jsonb,
+    p_source_assertion_ids uuid[],
+    p_source_event_ids uuid[],
+    p_status text DEFAULT 'accepted',
+    p_agent text DEFAULT NULL,
+    p_scope_node_id uuid DEFAULT NULL,
+    p_confidence numeric DEFAULT NULL,
+    p_attrs jsonb DEFAULT '{}'::jsonb
+) RETURNS uuid
+SET search_path = rye, pg_catalog
+AS $$
+DECLARE
+    v_catalog jsonb;
+    v_event_id uuid;
+    v_evidence jsonb[] := '{}'::jsonb[];
+    v_id uuid;
+    v_incumbent assertions;
+    v_key text := coalesce(nullif(trim(p_assertion_key), ''), 'default');
+    v_new_id uuid := gen_random_uuid();
+    v_node_type text;
+    v_governing_scope uuid;
+    v_participant_ids uuid[];
+    v_participant_roles text[];
+    v_policy text;
+    v_resolved_scope uuid;
+    v_status text := lower(coalesce(nullif(trim(p_status), ''), 'accepted'));
+    v_subject_ref text;
+    v_watermark timestamptz;
+    v_witness uuid;
+BEGIN
+    IF (p_subject_node_id IS NULL) = (p_subject_edge_id IS NULL) THEN
+        RAISE EXCEPTION 'Exactly one distillation subject is required';
+    END IF;
+    IF cardinality(coalesce(p_source_assertion_ids, '{}'::uuid[])) = 0 THEN
+        RAISE EXCEPTION 'record_distillation requires at least one source assertion';
+    END IF;
+    IF v_status NOT IN ('candidate', 'accepted') THEN
+        RAISE EXCEPTION 'Unsupported distillation status: %', p_status;
+    END IF;
+
+    SELECT max(asserted_at) INTO v_watermark
+    FROM assertions WHERE id = ANY(p_source_assertion_ids);
+    IF v_watermark IS NULL
+       OR (SELECT count(*) FROM assertions WHERE id = ANY(p_source_assertion_ids))
+          <> cardinality(p_source_assertion_ids)
+    THEN
+        RAISE EXCEPTION 'Every distillation source assertion must exist and be visible';
+    END IF;
+
+    SELECT ae.witness_node_id INTO v_witness
+    FROM assertion_evidence ae
+    WHERE ae.assertion_id = ANY(p_source_assertion_ids)
+      AND ae.kind IN ('source', 'corroboration')
+      AND ae.witness_node_id IS NOT NULL
+    ORDER BY array_position(p_source_assertion_ids, ae.assertion_id), ae.recorded_at, ae.id
+    LIMIT 1;
+
+    v_governing_scope := governing_scope(p_subject_node_id, p_subject_edge_id, 'digest', v_witness);
+    v_resolved_scope := v_governing_scope;
+    IF p_scope_node_id IS NOT NULL
+       AND v_resolved_scope IS NOT NULL
+       AND p_scope_node_id <> v_resolved_scope
+    THEN
+        RAISE EXCEPTION 'Explicit scope % does not match governing scope %', p_scope_node_id, v_resolved_scope;
+    END IF;
+    v_resolved_scope := coalesce(v_resolved_scope, p_scope_node_id);
+    -- 0027: the stricter of the two resolutions, for the same reason
+    -- record_assertion() takes it. The scope id above is unchanged, so the
+    -- digest facet catalogue and the event still name the witness-resolved
+    -- scope.
+    IF v_governing_scope IS NULL THEN
+        v_policy := scope_review_policy(v_resolved_scope);
+    ELSE
+        v_policy := effective_review_policy(
+            p_subject_node_id, p_subject_edge_id, 'digest', v_witness
+        );
+    END IF;
+    IF v_status = 'accepted' AND v_policy IN ('candidates_only', 'strict') THEN
+        v_status := 'candidate';
+    END IF;
+
+    IF p_subject_node_id IS NOT NULL THEN
+        SELECT node_type INTO v_node_type FROM nodes WHERE id = p_subject_node_id;
+        IF NOT FOUND THEN
+            RAISE EXCEPTION 'Distillation subject node % not found', p_subject_node_id;
+        END IF;
+        v_catalog := registry_value('digest_facets:' || v_node_type, v_resolved_scope);
+        IF v_catalog IS NOT NULL
+           AND NOT ((jsonb_typeof(v_catalog) = 'array' AND v_catalog ? v_key)
+                    OR (jsonb_typeof(v_catalog) = 'object' AND v_catalog ? v_key))
+        THEN
+            RAISE EXCEPTION 'Digest facet % is not registered for node type %', v_key, v_node_type;
+        END IF;
+        v_participant_ids := ARRAY[p_subject_node_id];
+        v_participant_roles := ARRAY['subject'];
+    ELSE
+        SELECT ARRAY[source_id, target_id], ARRAY['edge_source', 'edge_target']
+        INTO v_participant_ids, v_participant_roles
+        FROM edges WHERE id = p_subject_edge_id;
+        IF NOT FOUND THEN
+            RAISE EXCEPTION 'Distillation subject edge % not found', p_subject_edge_id;
+        END IF;
+    END IF;
+
+    PERFORM derived_assertion_classification(p_source_assertion_ids);
+    v_subject_ref := coalesce('n:' || p_subject_node_id::text, 'e:' || p_subject_edge_id::text);
+    PERFORM pg_advisory_xact_lock(hashtextextended(v_subject_ref || ':digest:' || v_key, 0));
+
+    v_event_id := record_event(
+        p_event_type := 'distillation',
+        p_summary := format('Distilled %s source assertions into digest %s', cardinality(p_source_assertion_ids), v_key),
+        p_properties := jsonb_build_object(
+            'digest_assertion_id', v_new_id,
+            'subject_edge_id', p_subject_edge_id,
+            'source_assertion_ids', to_jsonb(p_source_assertion_ids),
+            'source_event_ids', to_jsonb(coalesce(p_source_event_ids, '{}'::uuid[])),
+            'watermark', v_watermark,
+            'scope_node_id', v_resolved_scope
+        ),
+        p_participant_ids := v_participant_ids,
+        p_participant_roles := v_participant_roles,
+        p_actor := p_agent
+    );
+
+    v_evidence := array_append(v_evidence, jsonb_build_object(
+        'kind', 'source', 'event_id', v_event_id,
+        'attrs', jsonb_build_object('role', 'distillation_record')
+    ));
+    FOREACH v_id IN ARRAY p_source_assertion_ids LOOP
+        v_evidence := array_append(v_evidence, jsonb_build_object(
+            'kind', 'derivation', 'source_assertion_id', v_id
+        ));
+    END LOOP;
+    FOREACH v_id IN ARRAY coalesce(p_source_event_ids, '{}'::uuid[]) LOOP
+        v_evidence := array_append(v_evidence, jsonb_build_object('kind', 'source', 'event_id', v_id));
+    END LOOP;
+
+    IF v_status = 'accepted' THEN
+        SELECT * INTO v_incumbent
+        FROM current_valid_assertions
+        WHERE subject_ref = v_subject_ref
+          AND assertion_type = 'digest'
+          AND assertion_key = v_key
+        LIMIT 1;
+        IF FOUND THEN
+            PERFORM mark_assertion_superseded(v_incumbent.id, v_new_id);
+        END IF;
+    END IF;
+
+    INSERT INTO assertions (
+        id, assertion_type, assertion_key, status, basis,
+        subject_node_id, subject_edge_id, claim, confidence, attrs
+    ) VALUES (
+        v_new_id, 'digest', v_key, v_status, 'inferred',
+        p_subject_node_id, p_subject_edge_id, p_claim, p_confidence,
+        coalesce(p_attrs, '{}'::jsonb) || jsonb_build_object(
+            'watermark', v_watermark,
+            'distillation_event_id', v_event_id,
+            'agent', p_agent
+        )
+    );
+    PERFORM append_assertion_evidence(v_new_id, v_evidence);
+    RETURN v_new_id;
+END;
+$$ LANGUAGE plpgsql;
+
+-- --------------------------------------------------------------------------
+-- 5. The insert exemption follows the helper, which means it goes
 -- --------------------------------------------------------------------------
 --
 -- 0025 left a row accepted when an assertion on the same subject_ref,
@@ -607,11 +1141,17 @@ COMMENT ON FUNCTION resolve_knowledge_gap(uuid,uuid,text) IS
 --   * accept_assertion() does not insert.
 --
 -- The one direction that could strand a key is this guard being stricter than
--- the helper. It resolves the scope with a null witness while the helpers pass
--- one, and the witness branch of governing_scope() runs only after the subject,
--- inheritance and type branches have produced nothing, so the guard's scope is
--- the helper's scope or a witness-free fallback. That asymmetry is unchanged
--- from 0025 and is still a stated limit in the contract.
+-- the helper, and section 1b is how that is prevented. An earlier draft of this
+-- comment said it could not happen, because the guard resolves with a null
+-- witness while the helpers pass one; that was wrong, because a witness-free
+-- resolution falls through to DEFAULT_SCOPE, which can be stricter. Every
+-- helper that inserts now takes the stricter of both resolutions through
+-- effective_review_policy(), so the guard's policy is never more demoting than
+-- the helper's and the exemption has nothing left to do.
+--
+-- The guard itself still resolves without a witness, because evidence is
+-- written after the assertion. A RAW insert is therefore judged by the
+-- witness-free policy alone, which remains a stated limit in the contract.
 --
 -- The consequence for a raw supersede-and-replace under a demoting policy is a
 -- refusal rather than a demotion: the incumbent was ended, the replacement is

@@ -664,7 +664,7 @@ BEGIN
     -- whichever uuid the generator hands out; the ids are generated rather
     -- than pinned, and the policy is re-probed after the merge rather than
     -- assumed. Both id orders are covered in
-    -- tests/conformance/32_review_policy_holds.sql.
+    -- tests/conformance/33_review_policy_holds.sql.
     -- ==================================================================
     INSERT INTO nodes (node_type, label)
     VALUES ('onboarding_scope', 'Lifecycle gate open scope')
@@ -780,7 +780,7 @@ BEGIN
     -- at the deferred check. Nothing is lost -- the incumbent still stands
     -- after the rollback, and supersede_assertion() records the same
     -- statement as a suggestion beside it, which
-    -- tests/conformance/32_review_policy_holds.sql asserts. The same shape
+    -- tests/conformance/33_review_policy_holds.sql asserts. The same shape
     -- under a non-demoting policy still commits accepted, which is
     -- obligation 8 below and obligation 9 of decision 0010.
     PERFORM set_config('app.current_role', 'admin', true);

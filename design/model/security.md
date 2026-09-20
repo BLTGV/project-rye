@@ -306,11 +306,27 @@ incumbent then. `resolve_knowledge_gap()` follows, and its
 `knowledge_gap_resolved` event carries `pending_review` and `review_policy`.
 The signatures and return types do not change.
 
-With the helper demoting, `0025`'s insert exemption is removed. A raw
+Every helper that inserts an assertion — `record_assertion()`,
+`supersede_assertion()`, `record_distillation()` — resolves the governing scope
+**twice**, with its primary witness and with none, and applies the stricter of
+the two policies through `effective_review_policy()`. The scope id it reports is
+still the witness-resolved one. `assertions_insert_review_guard()` can only
+resolve without a witness, because evidence is written after the assertion, and
+a witness-free resolution falls through to `DEFAULT_SCOPE`, which can be
+stricter than the witness scope; taking the maximum is what stops helper and
+guard from disagreeing in the accepting direction. `accept_assertion()` is
+unchanged: it inserts nothing.
+
+With that in place, `0025`'s insert exemption is removed. A raw
 supersede-and-replace under a demoting policy is refused at `COMMIT` by
 `trg_assertions_transition_complete` instead of landing accepted; the incumbent
 still stands after the rollback. Under a non-demoting policy that shape commits
 accepted exactly as before.
+
+The behaviour change to know: a `scope_governs_source` edge from an `open` scope
+no longer opens a source on an instance whose `DEFAULT_SCOPE` is `strict` or
+`candidates_only`. Give those subjects their own `scope_governs_subject` edge to
+the open scope and both resolutions agree again.
 
 `governing_scope()` no longer breaks a tie with the lowest uuid. Within the
 branch that matched, the most restrictive review policy wins — `strict` over

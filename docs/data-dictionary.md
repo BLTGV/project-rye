@@ -1026,13 +1026,27 @@ refuses that shape, so nothing legitimate writes it. Nothing said is lost.
 **There is no exemption.** Migration `0025` left a row accepted when an already
 superseded, formerly accepted assertion on the same tuple named it as its
 replacement, so that the helpers' supersede-then-insert order would not strand
-the key. Migration `0027` removed it: `supersede_assertion()` now applies the
-review policy itself and never ends an incumbent it is about to replace with a
-candidate, so no helper needs it. A raw supersede-and-replace under a demoting
-policy is therefore refused at commit by `trg_assertions_transition_complete`
-rather than landing accepted — the incumbent still stands after the rollback.
-A `merge_nodes()` copy is judged by the canonical node's review policy, as
-before.
+the key. Migration `0027` removed it, and replaced it with the rule below: every
+helper that inserts an assertion takes the stricter of its two scope
+resolutions, so no helper ends an incumbent the guard is about to demote. A raw
+supersede-and-replace under a demoting policy is therefore refused at commit by
+`trg_assertions_transition_complete` rather than landing accepted — the
+incumbent still stands after the rollback. A `merge_nodes()` copy is judged by
+the canonical node's review policy, as before.
+
+**A helper's policy is the stricter of two resolutions.** This guard resolves
+the governing scope with no witness, because evidence is written after the
+assertion. A witness-free resolution does not merely lose the witness scope: the
+witness branch of `governing_scope()` runs *before* `DEFAULT_SCOPE`, so it falls
+through to `DEFAULT_SCOPE`, which can be stricter. So
+`record_assertion()`, `supersede_assertion()` and `record_distillation()` each
+resolve twice — with their primary witness and with none — and apply the
+stricter policy, through `effective_review_policy()`. The scope *id* they report
+is still the witness-resolved one. Without this, a subject whose only coverage is
+a `scope_governs_source` edge from an `open` scope, on an instance with a
+`strict` `DEFAULT_SCOPE`, had the helper insert accepted and this guard demote
+the same row. A raw `INSERT` is still judged by the witness-free policy alone,
+which is a stated limit in the contract.
 
 **Why it exists:** Rye cannot tell `record_assertion()`'s insert from a raw one,
 so it judges the row. Refusing instead would break `merge_nodes()` and throw
