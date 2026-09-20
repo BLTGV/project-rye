@@ -13,6 +13,13 @@ import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 
+// Declared here, not below with the other helpers: the top-level scoring pass
+// runs before the bottom of the module is evaluated, and a class in its
+// temporal dead zone would fail as a ReferenceError instead of as the message
+// it carries. That message is already a complete sentence about one file and
+// one field, so the handler prints it and adds nothing.
+class TraceError extends Error {}
+
 const root = new URL(".", import.meta.url).pathname;
 const scenarioRoot = path.join(root, "scenarios");
 const traceRoot = path.join(root, "traces");
@@ -20,8 +27,14 @@ const traceRoot = path.join(root, "traces");
 const argv = process.argv.slice(2);
 const writeReport = argv.includes("--write");
 const traceArg = argv.indexOf("--trace");
+
+if (traceArg !== -1 && !argv[traceArg + 1]) {
+  process.stderr.write("score_retrieval: --trace needs a path to a trace file\n");
+  process.exit(1);
+}
+
 const tracePaths =
-  traceArg !== -1 && argv[traceArg + 1]
+  traceArg !== -1
     ? [path.resolve(argv[traceArg + 1])]
     : fs
         .readdirSync(traceRoot)
@@ -34,7 +47,16 @@ const tracePaths =
 // silently counted as a win.
 const CALL_BUDGET = 3;
 
-const reports = tracePaths.map(scoreTrace);
+let reports;
+try {
+  reports = tracePaths.map(scoreTrace);
+} catch (err) {
+  // One plain line, naming the file and the field. A trace is hand-written
+  // often enough that a node stack trace over a missing key is the wrong
+  // answer: it names an internal function instead of the thing to fix.
+  process.stderr.write(`${err instanceof TraceError ? err.message : `score_retrieval: ${err.message}`}\n`);
+  process.exit(1);
+}
 
 if (writeReport) {
   fs.writeFileSync(path.join(root, "report.md"), renderReport(reports), "utf8");
@@ -44,21 +66,74 @@ console.log(JSON.stringify(reports, null, 2));
 
 // ---------------------------------------------------------------------------
 
+function fail(tracePath, field, problem) {
+  throw new TraceError(`${path.relative(process.cwd(), tracePath)}: ${field}: ${problem}`);
+}
+
+// Everything the scorer dereferences, checked before it dereferences any of
+// it. The order matters: the field named in the error should be the first one
+// a reader has to fix, not the last one that happened to throw.
+function validateTrace(trace, tracePath) {
+  if (trace === null || typeof trace !== "object" || Array.isArray(trace)) {
+    fail(tracePath, "(whole file)", "a trace is a JSON object; see trace_format.md");
+  }
+  if (typeof trace.scenario !== "string" || trace.scenario.trim() === "") {
+    fail(tracePath, "scenario", "required, and must name a directory under scenarios/");
+  }
+  if (typeof trace.arm !== "string" || trace.arm.trim() === "") {
+    fail(tracePath, "arm", "required: which system produced this trace");
+  }
+  if (trace.results !== undefined && !Array.isArray(trace.results)) {
+    fail(tracePath, "results", "must be an array, one entry per question attempted");
+  }
+
+  (trace.results ?? []).forEach((result, i) => {
+    const at = `results[${i}]`;
+    if (result === null || typeof result !== "object" || Array.isArray(result)) {
+      fail(tracePath, at, "must be an object");
+    }
+    if (typeof result.question_id !== "string" || result.question_id.trim() === "") {
+      fail(tracePath, `${at}.question_id`, "required, and must match a question id in the scenario");
+    }
+    if (result.steps !== undefined && !Array.isArray(result.steps)) {
+      fail(tracePath, `${at}.steps`, "must be an array of steps");
+    }
+    if (result.answer !== undefined && (result.answer === null || typeof result.answer !== "object" || Array.isArray(result.answer))) {
+      fail(tracePath, `${at}.answer`, "must be an object");
+    }
+
+    (result.steps ?? []).forEach((step, j) => {
+      const stepAt = `${at}.steps[${j}]`;
+      if (step === null || typeof step !== "object" || Array.isArray(step)) {
+        fail(tracePath, stepAt, "must be an object");
+      }
+      if (!Number.isInteger(step.seq) || step.seq < 1) {
+        fail(tracePath, `${stepAt}.seq`, "required: a whole number of at least 1, ordering this step within the loop");
+      }
+      if (step.results !== undefined && !Array.isArray(step.results)) {
+        fail(tracePath, `${stepAt}.results`, "must be an array; write [] for a step that found nothing");
+      }
+    });
+  });
+}
+
 function scoreTrace(tracePath) {
   const trace = readJson(tracePath);
+  validateTrace(trace, tracePath);
+
   const questionsPath = path.join(scenarioRoot, trace.scenario, "questions.json");
   if (!fs.existsSync(questionsPath)) {
-    throw new Error(`Trace ${path.basename(tracePath)} names unknown scenario '${trace.scenario}'`);
+    fail(tracePath, "scenario", `names '${trace.scenario}', which has no directory under scenarios/`);
   }
   const spec = readJson(questionsPath);
   const byId = new Map(spec.questions.map((q) => [q.id, q]));
   const seen = new Set();
 
   const scored = [];
-  for (const result of trace.results ?? []) {
+  for (const [i, result] of (trace.results ?? []).entries()) {
     const question = byId.get(result.question_id);
     if (!question) {
-      throw new Error(`Trace references unknown question '${result.question_id}'`);
+      fail(tracePath, `results[${i}].question_id`, `names '${result.question_id}', which is not a question in scenario '${trace.scenario}'`);
     }
     seen.add(question.id);
     scored.push(scoreQuestion(question, result));
@@ -302,7 +377,17 @@ function pct(v) {
 }
 
 function readJson(p) {
-  return JSON.parse(fs.readFileSync(p, "utf8"));
+  let text;
+  try {
+    text = fs.readFileSync(p, "utf8");
+  } catch {
+    throw new TraceError(`${path.relative(process.cwd(), p)}: cannot be read`);
+  }
+  try {
+    return JSON.parse(text);
+  } catch (err) {
+    throw new TraceError(`${path.relative(process.cwd(), p)}: not valid JSON: ${err.message}`);
+  }
 }
 
 function renderReport(reports) {
