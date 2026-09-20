@@ -80,7 +80,7 @@ Same format as CRM codes (see [CRM Conventions](/docs/layers/crm/)):
 **Cross-domain references:** Codes are designed to appear in text. When a comment says "Blocked on TSK-2403-0187" or a task description says "Follow up from OPP-2403-0042", these are parseable references. The code reference pattern for extraction:
 
 ```
-(?:OPP|TSK|PRJ|CON|MIL|SPR)-\d{4}-\d{4}
+(?:OPP|TSK|PRJ|CON|MIL|SPR)-\d{4}-\d{4,}
 ```
 
 ---
@@ -287,7 +287,7 @@ CREATE FUNCTION add_comment(
 DECLARE
     v_event_id uuid;
     v_task_code text;
-    v_code_pattern text := '(?:OPP|TSK|PRJ|CON|MIL|SPR)-\d{4}-\d{4}';
+    v_code_pattern text := '(?:OPP|TSK|PRJ|CON|MIL|SPR)-\d{4}-\d{4,}';
     v_match text;
     v_mentioned_id uuid;
 BEGIN

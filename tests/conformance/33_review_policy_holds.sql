@@ -1386,4 +1386,236 @@ BEGIN
 END
 $$;
 
+-- --------------------------------------------------------------------------
+-- A demoted write says so (migration 0030).
+--
+-- supersede_assertion() has carried attrs.review_gate and raised a NOTICE
+-- since 0027. record_assertion() and record_distillation() demote in the same
+-- circumstances and said nothing, so a caller that did not re-read the row
+-- believed it had recorded a fact. Both now write the same five-key marker and
+-- raise the same NOTICE, on the review-policy demotion only.
+--
+-- Negative control: without 0030 the first case fails, because the candidate
+-- carries no review_gate.
+-- --------------------------------------------------------------------------
+DO $$
+DECLARE
+    v_digest    uuid;
+    v_evidence  jsonb[];
+    v_event     uuid;
+    v_gate      jsonb;
+    v_id        uuid;
+    v_open      uuid;
+    v_policy    text;
+    v_role      text;
+    v_scope     uuid;
+    v_source    uuid;
+    v_subject   uuid;
+    v_witness   uuid;
+BEGIN
+    SET CONSTRAINTS ALL DEFERRED;
+    PERFORM set_config('app.current_role', 'admin', true);
+    PERFORM set_config('app.current_user_id', 'test:review-policy', true);
+    PERFORM set_config('app.current_teams', '', true);
+
+    INSERT INTO nodes (node_type, label, properties)
+    VALUES ('person', 'Marsh marker witness', '{"suite":"review_policy"}')
+    RETURNING id INTO v_witness;
+    v_event := record_event(
+        p_event_type := 'review_gate_marker_note',
+        p_summary := 'Evidence for the marker cases',
+        p_participant_ids := ARRAY[v_witness],
+        p_participant_roles := ARRAY['subject'::text]
+    );
+    v_evidence := ARRAY[jsonb_build_object('kind', 'source', 'event_id', v_event)];
+
+    -- One subject per policy, plus an open one for the negative half.
+    FOREACH v_policy IN ARRAY ARRAY['strict', 'candidates_only'] LOOP
+        PERFORM set_config('app.current_role', 'admin', true);
+        INSERT INTO nodes (node_type, label)
+        VALUES ('onboarding_scope', 'Marker scope ' || v_policy)
+        RETURNING id INTO v_scope;
+        PERFORM record_assertion('review_policy',
+            jsonb_build_object('review_policy', v_policy), v_scope, p_basis := 'assumed');
+        PERFORM record_assertion('scope_status', '{"status":"active"}', v_scope, p_basis := 'assumed');
+
+        INSERT INTO nodes (node_type, label, properties)
+        VALUES ('thing', 'Marker subject ' || v_policy, '{"suite":"review_policy"}')
+        RETURNING id INTO v_subject;
+        INSERT INTO edges (edge_type, source_id, target_id)
+        VALUES ('scope_governs_subject', v_scope, v_subject);
+        IF scope_review_policy(governing_scope(v_subject, NULL, 'marker_probe', NULL))
+           IS DISTINCT FROM v_policy THEN
+            RAISE EXCEPTION 'Premise broken: the % marker fixture resolves to %',
+                v_policy, scope_review_policy(governing_scope(v_subject, NULL, 'marker_probe', NULL));
+        END IF;
+        PERFORM record_assertion('registry_entry',
+            jsonb_build_object('value', jsonb_build_array('marker_digest')),
+            v_scope, p_assertion_key := 'digest_facets:thing', p_basis := 'assumed');
+
+        FOREACH v_role IN ARRAY ARRAY['agent:t', 'team_member'] LOOP
+            PERFORM set_config('app.current_role', v_role, true);
+
+            -- record_assertion(): basis reported, so candidates_only demotes
+            -- it too.
+            v_id := record_assertion(
+                'marker_probe', '{"value":"new claim"}', v_subject,
+                p_assertion_key := 'k_' || v_role, p_status := 'accepted',
+                p_basis := 'reported', p_evidence := v_evidence
+            );
+            PERFORM set_config('app.current_role', 'admin', true);
+            SELECT status, attrs->'review_gate' INTO v_policy, v_gate
+            FROM assertions WHERE id = v_id;
+            IF v_policy <> 'candidate' THEN
+                RAISE EXCEPTION
+                    'Premise broken: role "%" landed % instead of a candidate', v_role, v_policy;
+            END IF;
+            SELECT scope_review_policy(governing_scope(v_subject, NULL, 'marker_probe', NULL))
+            INTO v_policy;
+            IF v_gate IS NULL THEN
+                RAISE EXCEPTION
+                    'record_assertion() demoted role "%" under % and wrote no review_gate marker',
+                    v_role, v_policy;
+            END IF;
+            IF (v_gate->>'pending')::boolean IS DISTINCT FROM true
+               OR v_gate->>'requested_status' <> 'accepted'
+               OR v_gate->>'review_policy' <> v_policy
+               OR v_gate->>'scope_node_id' IS DISTINCT FROM v_scope::text
+               OR v_gate->'incumbent_assertion_id' <> 'null'::jsonb
+            THEN
+                RAISE EXCEPTION
+                    'record_assertion() wrote the wrong marker for role "%" under %: %',
+                    v_role, v_policy, v_gate;
+            END IF;
+            -- It reaches a reviewer the way every other candidate does.
+            IF NOT EXISTS (
+                SELECT 1 FROM review_queue rq,
+                     jsonb_array_elements(rq.candidates) AS candidate(value)
+                WHERE candidate.value->>'assertion_id' = v_id::text
+                  AND (candidate.value->'attrs'->'review_gate'->>'pending')::boolean
+            ) THEN
+                RAISE EXCEPTION
+                    'The marked candidate from role "%" is not in review_queue with its marker', v_role;
+            END IF;
+
+            -- record_distillation(): the same marker.
+            PERFORM set_config('app.current_role', v_role, true);
+            v_source := record_assertion(
+                'marker_probe', '{"value":"source"}', v_subject,
+                p_assertion_key := 'src_' || v_role, p_status := 'candidate',
+                p_basis := 'reported', p_evidence := v_evidence
+            );
+            v_digest := record_distillation(
+                p_subject_node_id := v_subject,
+                p_subject_edge_id := NULL,
+                p_assertion_key := 'marker_digest',
+                p_claim := '{"summary":"digest under review"}',
+                p_source_assertion_ids := ARRAY[v_source],
+                p_source_event_ids := ARRAY[v_event],
+                p_agent := 'test:review-policy'
+            );
+            PERFORM set_config('app.current_role', 'admin', true);
+            SELECT status, attrs->'review_gate' INTO v_policy, v_gate
+            FROM assertions WHERE id = v_digest;
+            IF v_policy <> 'candidate' THEN
+                RAISE EXCEPTION
+                    'Premise broken: record_distillation() landed % for role "%"', v_policy, v_role;
+            END IF;
+            IF v_gate IS NULL
+               OR (v_gate->>'pending')::boolean IS DISTINCT FROM true
+               OR v_gate->>'scope_node_id' IS DISTINCT FROM v_scope::text
+               OR v_gate->'incumbent_assertion_id' <> 'null'::jsonb
+            THEN
+                RAISE EXCEPTION
+                    'record_distillation() wrote no marker, or the wrong one, for role "%": %',
+                    v_role, v_gate;
+            END IF;
+            -- The keys it already wrote are still there.
+            IF NOT (SELECT attrs ? 'watermark' AND attrs ? 'distillation_event_id'
+                    FROM assertions WHERE id = v_digest) THEN
+                RAISE EXCEPTION 'The digest lost its own attrs keys to the marker';
+            END IF;
+        END LOOP;
+
+        SELECT scope_review_policy(v_scope) INTO v_policy;
+    END LOOP;
+
+    -- ==================================================================
+    -- Absent when the write lands accepted. A marker on an accepted row
+    -- would tell a caller to wait for a settler who has nothing to do.
+    -- ==================================================================
+    PERFORM set_config('app.current_role', 'admin', true);
+    INSERT INTO nodes (node_type, label) VALUES ('onboarding_scope', 'Marker open scope')
+    RETURNING id INTO v_open;
+    PERFORM record_assertion('review_policy', '{"review_policy":"open"}', v_open, p_basis := 'assumed');
+    PERFORM record_assertion('scope_status', '{"status":"active"}', v_open, p_basis := 'assumed');
+    INSERT INTO nodes (node_type, label, properties)
+    VALUES ('thing', 'Marker open subject', '{"suite":"review_policy"}')
+    RETURNING id INTO v_subject;
+    INSERT INTO edges (edge_type, source_id, target_id)
+    VALUES ('scope_governs_subject', v_open, v_subject);
+    PERFORM record_assertion('registry_entry', '{"value":["marker_digest"]}',
+        v_open, p_assertion_key := 'digest_facets:thing', p_basis := 'assumed');
+
+    PERFORM set_config('app.current_role', 'team_member', true);
+    v_id := record_assertion(
+        'marker_probe', '{"value":"accepted claim"}', v_subject,
+        p_assertion_key := 'open', p_status := 'accepted',
+        p_basis := 'reported', p_evidence := v_evidence
+    );
+    v_source := record_assertion(
+        'marker_probe', '{"value":"open source"}', v_subject,
+        p_assertion_key := 'open_src', p_status := 'candidate',
+        p_basis := 'reported', p_evidence := v_evidence
+    );
+    v_digest := record_distillation(
+        p_subject_node_id := v_subject,
+        p_subject_edge_id := NULL,
+        p_assertion_key := 'marker_digest',
+        p_claim := '{"summary":"accepted digest"}',
+        p_source_assertion_ids := ARRAY[v_source],
+        p_source_event_ids := ARRAY[v_event],
+        p_agent := 'test:review-policy'
+    );
+    PERFORM set_config('app.current_role', 'admin', true);
+    IF (SELECT status FROM assertions WHERE id = v_id) <> 'accepted'
+       OR (SELECT status FROM assertions WHERE id = v_digest) <> 'accepted' THEN
+        RAISE EXCEPTION
+            'Premise broken: the open-policy writes landed % and %',
+            (SELECT status FROM assertions WHERE id = v_id),
+            (SELECT status FROM assertions WHERE id = v_digest);
+    END IF;
+    IF (SELECT attrs ? 'review_gate' FROM assertions WHERE id = v_id)
+       OR (SELECT attrs ? 'review_gate' FROM assertions WHERE id = v_digest) THEN
+        RAISE EXCEPTION 'An accepted write carries a review_gate marker';
+    END IF;
+
+    -- ==================================================================
+    -- The settle gate keeps its behaviour exactly. A configuration write
+    -- by a non-admin is demoted by the settle gate first, so the review
+    -- branch never runs: the row carries settle_gate and no review_gate,
+    -- which is what 0023 wrote and test 30 pins.
+    -- ==================================================================
+    PERFORM set_config('app.current_role', 'team_member', true);
+    v_id := record_assertion(
+        'registry_entry', '{"value":"probe"}', v_subject,
+        p_assertion_key := 'marker:settle_first', p_status := 'accepted',
+        p_basis := 'assumed'
+    );
+    PERFORM set_config('app.current_role', 'admin', true);
+    IF (SELECT status FROM assertions WHERE id = v_id) <> 'candidate'
+       OR NOT (SELECT (attrs->'settle_gate'->>'pending')::boolean
+               FROM assertions WHERE id = v_id)
+    THEN
+        RAISE EXCEPTION 'The settle gate no longer marks its own demotion';
+    END IF;
+    IF (SELECT attrs ? 'review_gate' FROM assertions WHERE id = v_id) THEN
+        RAISE EXCEPTION
+            'A settle-gate demotion also carries a review_gate marker; 0023''s behaviour changed';
+    END IF;
+
+    SET CONSTRAINTS ALL IMMEDIATE;
+END
+$$;
+
 ROLLBACK;

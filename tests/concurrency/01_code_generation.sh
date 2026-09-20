@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Drawing a code is a write: migration 0029 puts crm_code_counters under RLS
+# and a role that may not write cannot move a counter. A session with no
+# app.current_role could draw a code before, and could never create the task
+# or opportunity the code names, so the honest fix is for this test to say
+# which role is asking -- as tests/concurrency/02_record_distillation.sh
+# already does. team_member rather than admin, because an ordinary writing
+# role is the one that has to keep working.
+export PGOPTIONS="${PGOPTIONS:+$PGOPTIONS }-c app.current_role=team_member"
+
 DB_URL="${DATABASE_URL:-}"
 TEST_ROLE="${RYE_TEST_ROLE:-}"
 if [[ -z "$DB_URL" ]]; then

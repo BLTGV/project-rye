@@ -293,6 +293,21 @@ BEGIN
     RAISE EXCEPTION 'supersede_assertion does not apply the review policy';
   END IF;
 
+  -- 0030: the other two helpers that demote say so, in the same marker.
+  IF EXISTS (
+      SELECT required.name
+      FROM (VALUES ('record_assertion'), ('record_distillation')) required(name)
+      WHERE NOT EXISTS (
+          SELECT 1 FROM pg_proc p
+          JOIN pg_namespace n ON n.oid = p.pronamespace
+          WHERE n.nspname = v_schema
+            AND p.proname = required.name
+            AND p.prosrc LIKE '%review_gate%'
+      )
+  ) THEN
+    RAISE EXCEPTION 'record_assertion or record_distillation does not mark a review-policy demotion';
+  END IF;
+
   IF EXISTS (
       SELECT 1 FROM pg_proc p
       JOIN pg_namespace n ON n.oid = p.pronamespace
@@ -325,6 +340,53 @@ BEGIN
         AND c.relforcerowsecurity = true
   ) THEN
     RAISE EXCEPTION 'assertion_evidence RLS is not enabled+forced';
+  END IF;
+
+  -- The last two supporting tables to get RLS (0029). AGENTS.md promises it
+  -- on all of them, and these two were the exceptions.
+  IF EXISTS (
+      SELECT 1
+      FROM (VALUES ('crm_code_counters'), ('node_merges')) AS t(relname)
+      WHERE NOT EXISTS (
+          SELECT 1
+          FROM pg_class c
+          JOIN pg_namespace n ON n.oid = c.relnamespace
+          WHERE n.nspname = v_schema
+            AND c.relname = t.relname
+            AND c.relrowsecurity = true
+            AND c.relforcerowsecurity = true
+      )
+  ) THEN
+    RAISE EXCEPTION 'crm_code_counters and node_merges must both have RLS enabled+forced';
+  END IF;
+
+  IF to_regprocedure('rye.rye_may_write_table(text)') IS NULL THEN
+    RAISE EXCEPTION 'rye_may_write_table function missing';
+  END IF;
+  IF to_regprocedure('rye.rye_crm_code_counter_gate()') IS NULL THEN
+    RAISE EXCEPTION 'rye_crm_code_counter_gate function missing';
+  END IF;
+  IF to_regprocedure('rye.rye_node_merge_gate()') IS NULL THEN
+    RAISE EXCEPTION 'rye_node_merge_gate function missing';
+  END IF;
+  IF EXISTS (
+      SELECT 1
+      FROM (VALUES
+          ('trg_crm_code_counters_gate', 'crm_code_counters'),
+          ('trg_node_merges_gate', 'node_merges')
+      ) AS t(tgname, relname)
+      WHERE NOT EXISTS (
+          SELECT 1
+          FROM pg_trigger tg
+          JOIN pg_class c ON c.oid = tg.tgrelid
+          JOIN pg_namespace n ON n.oid = c.relnamespace
+          WHERE n.nspname = v_schema
+            AND c.relname = t.relname
+            AND tg.tgname = t.tgname
+            AND NOT tg.tgisinternal
+      )
+  ) THEN
+    RAISE EXCEPTION 'trg_crm_code_counters_gate or trg_node_merges_gate is missing';
   END IF;
 
   -- Who may write: the role list is the write list, and the governance

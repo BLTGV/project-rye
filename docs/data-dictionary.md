@@ -118,6 +118,8 @@ Records which nodes were merged into which canonical nodes, and by whom.
 
 **Key columns:** `duplicate_id` (absorbed node), `canonical_id` (surviving node), `merged_by`, `confidence`.
 
+**RLS (0029):** enabled and forced. Readable by an `admin`, or by a caller who can see both nodes — node visibility is the anchor here as it is for edges. Insertable by a role that may write this table (`rye_may_write_table()`), which is the role test `merge_nodes()` itself applies, less `system:cdc`, and it is `SECURITY INVOKER` so its insert runs as the caller. Never updated and never deleted, by anyone: it is history. `trg_node_merges_gate` repeats the rule as a trigger so it also binds a superuser owner and any `SECURITY DEFINER` helper.
+
 #### `assertion_type_access` — Assertion Type Gating
 
 Controls which roles can read, write, or settle specific assertion types. An assertion type with no row for an operation is unrestricted for that operation.
@@ -322,6 +324,8 @@ Counters for generating sequential codes in the format `{PREFIX}-{YYMM}-{SEQ}`.
 **Why it exists:** UUIDs are unambiguous but unfriendly. People say "OPP-2403-0042", not a UUID. This table provides concurrency-safe, human-readable codes that reset per month per prefix.
 
 **Key columns:** `prefix`, `year_month`, `next_val`. Used by `generate_crm_code()`.
+
+**RLS (0029):** enabled and forced. Readable by every role. Written only by a role that may write this table (`rye_may_write_table()`, which is `rye_role_may_write()` plus the rule that `system:cdc` only ever writes `events` and `event_participants`), and `trg_crm_code_counters_gate` holds the row to the shape `generate_crm_code()` writes: a new counter starts at `next_val = 2` for the current month and nowhere else, `prefix` and `year_month` never change, `next_val` may only become `next_val + 1`, and no counter is ever deleted — not by an `admin` either, because a restarted series re-issues codes that already name a node. Before this a `viewer` could rewind or delete a counter and jam every code-issuing helper. Drawing a code is therefore a write: a session with no `app.current_role` is refused, and it could not create the task or opportunity the code names anyway.
 
 ---
 
@@ -859,6 +863,17 @@ evidence unless `basis = 'assumed'`. New assertion types are normalized with
 `canonical_type()`. When a governing scope exists, its review policy may force
 the row to candidate status.
 
+**A demoted write says so (0030).** Where the review policy demotes the write,
+the candidate carries `attrs.review_gate = {"pending": true,
+"requested_status": "accepted", "review_policy": ..., "scope_node_id": ...,
+"incumbent_assertion_id": null}` — the shape `supersede_assertion()` writes,
+with a null incumbent because this write replaces nothing — and a `NOTICE`
+names the policy and the scope. The return type does not change, so read
+`status` or `attrs->'review_gate'`, or find the row in `review_queue`. Where
+the **settle gate** demotes the write first, the row carries `attrs.settle_gate`
+alone and no `NOTICE` is raised: a configuration write is waiting for an admin,
+not for a settler.
+
 #### `accept_assertion()` / `reject_candidate()`
 
 Accepts a candidate on its existing tuple or rejects it with an audit event.
@@ -879,7 +894,11 @@ closes the predecessor's effective window. Profile schedulers are thin wrappers.
 Creates an inferred `digest`, its derivation/source evidence, a validated
 watermark, and a `distillation` event. It propagates maximum source
 classification, rejects empty or mixed-access sources, and validates a digest
-facet against `digest_facets:<node_type>` when configured.
+facet against `digest_facets:<node_type>` when configured. Where the review
+policy demotes the digest to a candidate it carries the same
+`attrs.review_gate` marker `record_assertion()` writes, beside its own
+`watermark` and `distillation_event_id` keys, and raises the same `NOTICE`
+(0030).
 
 #### `resolve_knowledge_gap()`
 
@@ -1061,7 +1080,7 @@ Refreshes all profile materialized views (`opportunities_active`, `contacts_dire
 generate_crm_code(p_prefix) → text
 ```
 
-Generates a human-readable code like `OPP-2403-0042`. Uses `INSERT ... ON CONFLICT DO UPDATE` on `crm_code_counters` for concurrency safety.
+Generates a human-readable code like `OPP-2403-0042`. Uses `INSERT ... ON CONFLICT DO UPDATE` on `crm_code_counters` for concurrency safety. `SECURITY INVOKER`: the counter moves as the caller, so the caller must be a role that may write (0029). The sequence is zero-padded to four digits and **widens** past 9999 (`TSK-2609-10000`) rather than truncating, which used to re-issue the 1000th code of the month.
 
 **Why it exists:** UUIDs are identifiers for machines. Codes like `TSK-2403-0187` are identifiers for humans. This function provides sequential, collision-free codes without a global sequence lock.
 
