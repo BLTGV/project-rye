@@ -292,7 +292,12 @@ demote a raw insert. Both are in the contract.
   and `superseded_at` null. Requiring the *named* row to be live would break a
   legitimate pattern — two `record_assertion()` calls on one key in one
   transaction leave `I -> B -> C`, where `B` is superseded by commit — so the
-  chain may pass through anything as long as it ends somewhere current.
+  chain may pass through anything as long as it ends on a row that is accepted
+  and not superseded. The test is deliberately blind to the window: the
+  surviving row may be past or future, and `current_valid_assertions` can be
+  empty for the key afterwards, exactly as `supersede_assertion()` with a future
+  effective date leaves it. Obligation 19 pins this so it is not mistaken for a
+  bug: a stale or future-only accepted survivor satisfies the test.
 
   A replacement on a different `subject_ref` is the merge shape and keeps the
   named-row test: readable, same type and key, and live at commit, candidate
