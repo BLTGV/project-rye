@@ -206,7 +206,10 @@ SELECT rye.log_agent_query(
 ```
 
 Read the loop back from `rye.agent_query_trace`, ordered by `trace_id` then
-`seq`.
+`seq`. RLS applies there as everywhere: an event is visible through its
+participants, so a step logged with no node ids is readable only by an admin.
+A step that found nothing is exactly that step, which is one more reason the
+scorer reads files. A short trace never means a short loop.
 
 Two things keep the halves apart, and both are deliberate. Tracing is a write,
 so a `viewer`, a role-less session, and any role that may not write are refused

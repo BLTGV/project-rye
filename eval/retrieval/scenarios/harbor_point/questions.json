@@ -229,7 +229,7 @@
         "difficulty": "trigram"
       },
       "expected_behavior": "report_gap",
-      "notes": "The entity exists and is easy to find; the fact does not exist. Finding the node and then answering anyway is the failure mode."
+      "notes": "The entity exists and is found on the first call; no assertion states payment terms for it. Finding the node and then answering anyway is the failure mode."
     },
     {
       "id": "q-unanswerable-02",
