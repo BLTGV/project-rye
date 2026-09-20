@@ -899,10 +899,13 @@ BEFORE UPDATE trigger on `assertions` (`trg_assertions_immutable`). Decides per
 column from `OLD`, `NEW`, rows that already exist, and `app.current_role`.
 `claim`, `assertion_type`, `assertion_key`, the subject columns, `asserted_at`,
 `effective_at`, `basis`, `confidence` and `created_at` never change. `status`
-moves `candidate` to `accepted` and never back, only on a live candidate with no
-currently valid accepted rival on the same tuple, and an `agent:*` caller under
+moves `candidate` to `accepted` and never back, only on a live candidate that no
+other accepted unsuperseded assertion on the same tuple already covers at
+`greatest(coalesce(effective_at, now()), now())`, and an `agent:*` caller under
 `candidates_only` or `strict`, or on a `pattern_claim`, additionally needs
-`rye.authoritative.promote` for the governing scope. `superseded_at` is set once
+`rye.authoritative.promote` for the governing scope. Only `agent:*` callers are
+policy-gated on promotion, because that is the rule `accept_assertion()` applies.
+`superseded_at` is set once
 and, on a row that was accepted, only together with a `superseded_by` naming a
 row of the same type and key. `effective_to` narrows only, to a future instant
 inside the old window. `attrs` changes only as an outcome label: no key dropped,
@@ -923,10 +926,12 @@ so the rules are about the row rather than the route.
 BEFORE INSERT trigger on `assertions` (`trg_assertions_insert_review`). A direct
 `INSERT` of an `accepted` row is judged by the same review policy
 `record_assertion()` applies, and lands as a `candidate` where that policy
-demotes. Nothing said is lost. A row that an already superseded, previously
-accepted assertion names as its replacement is exempt, so the
-supersede-then-insert order the helpers use does not strand a key with no
-accepted value.
+demotes. Nothing said is lost. One exemption, confined to a single tuple: a row
+is left accepted when an already superseded, formerly accepted assertion **on
+the same `subject_ref`, `assertion_type` and `assertion_key`** names it as its
+replacement, so the supersede-then-insert order the helpers use does not strand
+that key with no accepted value. The exemption does not carry across subjects,
+so a `merge_nodes()` copy is judged by the canonical node's review policy.
 
 **Why it exists:** Rye cannot tell `record_assertion()`'s insert from a raw one,
 so it judges the row. Refusing instead would break `merge_nodes()` and throw

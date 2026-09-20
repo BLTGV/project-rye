@@ -91,16 +91,25 @@ DECLARE
     v_duplicate    uuid;
     v_failed       boolean;
     v_free         uuid;
+    v_future       timestamptz := now() + interval '14 days';
+    v_future_subject uuid;
+    v_instant      timestamptz;
     v_gov          uuid;
+    v_honest_subject uuid;
     v_id           uuid;
+    v_incumbent    uuid;
     v_msg          text;
     v_narrow_id    uuid;
+    v_open_scope   uuid;
     v_other        uuid;
     v_path         text;
     v_role         text;
     v_row          assertions;
     v_rows         integer;
+    v_scheduled    uuid;
     v_scope        uuid;
+    v_smuggled     uuid;
+    v_strict_scope uuid;
     v_target       uuid;
     v_paths        text[] := ARRAY[
         'accept_assertion', 'supersede_assertion', 'assertion_effective_window',
@@ -222,6 +231,14 @@ BEGIN
             IF current_setting('app.current_role', true) IS DISTINCT FROM v_role THEN
                 RAISE EXCEPTION 'app.current_role did not read back as "%"', v_role;
             END IF;
+            -- assertion_read_policy hides classified rows from viewer, agent
+            -- and no-role, and a refusal on a row the caller cannot see proves
+            -- nothing. Every target below must be visible first.
+            IF NOT EXISTS (SELECT 1 FROM assertions WHERE id = v_cand) THEN
+                RAISE EXCEPTION
+                    'Refusing to pass vacuously: role "%" cannot see the candidate it is about to attack',
+                    v_role;
+            END IF;
             PERFORM set_config('app.write_path', v_path, true);
             PERFORM set_config('app.accept_assertion_id', v_cand::text, true);
             PERFORM set_config('app.supersede_assertion_id', v_cand::text, true);
@@ -271,6 +288,10 @@ BEGIN
             END IF;
 
             PERFORM set_config('app.current_role', v_role, true);
+            IF NOT EXISTS (SELECT 1 FROM assertions WHERE id = v_target) THEN
+                RAISE EXCEPTION
+                    'Refusing to pass vacuously: role "%" cannot see the erase target', v_role;
+            END IF;
             PERFORM set_config('app.write_path', v_path, true);
             PERFORM set_config('app.accept_assertion_id', v_target::text, true);
             PERFORM set_config('app.supersede_assertion_id', v_target::text, true);
@@ -305,6 +326,10 @@ BEGIN
     -- ==================================================================
     -- Obligation 5. No raw narrowing, no attrs rewrite, no classification
     -- change. Each refused, each row unchanged afterwards.
+    --
+    -- Attempt 5 is the Verifier's finding: an attrs rewrite that never
+    -- mentions an outcome at all. `NOT (NULL = ANY(...))` is NULL, not
+    -- true, so that one used to fall straight through the guard.
     -- ==================================================================
     FOREACH v_role IN ARRAY v_roles LOOP
         PERFORM set_config('app.current_role', 'admin', true);
@@ -322,6 +347,10 @@ BEGIN
         END IF;
 
         PERFORM set_config('app.current_role', v_role, true);
+        IF NOT EXISTS (SELECT 1 FROM assertions WHERE id = v_target) THEN
+            RAISE EXCEPTION
+                'Refusing to pass vacuously: role "%" cannot see the shape target', v_role;
+        END IF;
         FOREACH v_path IN ARRAY v_paths LOOP
             PERFORM set_config('app.write_path', v_path, true);
             PERFORM set_config('app.accept_assertion_id', v_target::text, true);
@@ -330,7 +359,7 @@ BEGIN
             PERFORM set_config('app.classification_assertion_id', v_target::text, true);
             PERFORM set_config('app.outcome_assertion_id', v_target::text, true);
 
-            FOR v_attempt IN 1..4 LOOP
+            FOR v_attempt IN 1..5 LOOP
                 v_failed := false;
                 v_rows := -1;
                 BEGIN
@@ -345,6 +374,10 @@ BEGIN
                             WHERE id = v_target;
                         WHEN 4 THEN
                             UPDATE assertions SET classification = 'public' WHERE id = v_target;
+                        WHEN 5 THEN
+                            UPDATE assertions
+                            SET attrs = attrs || '{"pinned":true,"salience":9.9,"teams":["ghost"]}'::jsonb
+                            WHERE id = v_target;
                     END CASE;
                     GET DIAGNOSTICS v_rows = ROW_COUNT;
                     -- The successor of a narrowed window is a commit-time
@@ -396,6 +429,11 @@ BEGIN
         );
 
         PERFORM set_config('app.current_role', v_role, true);
+        IF NOT EXISTS (SELECT 1 FROM assertions WHERE id = v_target)
+           OR NOT EXISTS (SELECT 1 FROM assertions WHERE id = v_other) THEN
+            RAISE EXCEPTION
+                'Refusing to pass vacuously: role "%" cannot see the decoy fixtures', v_role;
+        END IF;
         PERFORM set_config('app.write_path', 'supersede_assertion', true);
         PERFORM set_config('app.supersede_assertion_id', v_target::text, true);
 
@@ -562,9 +600,10 @@ BEGIN
     END IF;
 
     -- ==================================================================
-    -- Obligation 11. merge_nodes() under a strict scope: the copied
-    -- assertion lands as a candidate and appears in review_queue. The
-    -- content is preserved; an admin accepts it from review.
+    -- Obligation 11a. merge_nodes() with both subjects under the same
+    -- strict scope: the copied assertion lands as a candidate and appears
+    -- in review_queue. The content is preserved; an admin accepts it from
+    -- review.
     -- ==================================================================
     INSERT INTO nodes (node_type, label, properties)
     VALUES ('thing', 'Tobin duplicate', '{"suite":"lifecycle_gate"}') RETURNING id INTO v_duplicate;
@@ -609,6 +648,260 @@ BEGIN
     END IF;
     IF (SELECT superseded_by FROM assertions WHERE id = v_id) IS DISTINCT FROM v_copied.id THEN
         RAISE EXCEPTION 'The duplicate''s assertion does not name its replacement';
+    END IF;
+
+    -- ==================================================================
+    -- Obligation 11b. The cross-scope merge, which is what the too-wide
+    -- exemption broke: the duplicate's subject in an OPEN scope, the
+    -- canonical's in a STRICT one. The duplicate's policy must not carry
+    -- across; the copy is judged by the canonical node's.
+    --
+    -- merge_nodes() redirects the duplicate's scope_governs_subject edge
+    -- onto the canonical, so after the merge both scopes govern it and
+    -- governing_scope() picks the lowest scope id. The fixture ids are
+    -- pinned so the strict scope wins, and the policy is re-probed after
+    -- the merge rather than assumed.
+    -- ==================================================================
+    INSERT INTO nodes (id, node_type, label)
+    VALUES ('d1e51fe0-0025-4000-8000-0000000000f0', 'onboarding_scope', 'Lifecycle gate open scope')
+    RETURNING id INTO v_open_scope;
+    PERFORM record_assertion('review_policy', '{"review_policy":"open"}', v_open_scope, p_basis := 'assumed');
+    PERFORM record_assertion('scope_status', '{"status":"active"}', v_open_scope, p_basis := 'assumed');
+
+    INSERT INTO nodes (id, node_type, label)
+    VALUES ('d1e51fe0-0025-4000-8000-000000000001', 'onboarding_scope', 'Lifecycle gate low-id strict scope')
+    RETURNING id INTO v_strict_scope;
+    PERFORM record_assertion('review_policy', '{"review_policy":"strict"}', v_strict_scope, p_basis := 'assumed');
+    PERFORM record_assertion('scope_status', '{"status":"active"}', v_strict_scope, p_basis := 'assumed');
+
+    INSERT INTO nodes (node_type, label) VALUES ('thing', 'Cross merge duplicate')
+    RETURNING id INTO v_duplicate;
+    INSERT INTO nodes (node_type, label) VALUES ('thing', 'Cross merge canonical')
+    RETURNING id INTO v_canonical;
+    INSERT INTO edges (edge_type, source_id, target_id) VALUES ('scope_governs_subject', v_open_scope, v_duplicate);
+    INSERT INTO edges (edge_type, source_id, target_id) VALUES ('scope_governs_subject', v_strict_scope, v_canonical);
+
+    IF scope_review_policy(governing_scope(v_duplicate, NULL, 'cross_probe', NULL)) <> 'open'
+       OR scope_review_policy(governing_scope(v_canonical, NULL, 'cross_probe', NULL)) <> 'strict'
+    THEN
+        RAISE EXCEPTION 'Premise broken: the cross-scope fixture is not open/strict';
+    END IF;
+
+    v_id := record_assertion(
+        'cross_probe', '{"value":"open side"}', v_duplicate,
+        p_assertion_key := 'default', p_basis := 'assumed'
+    );
+    IF (SELECT status FROM assertions WHERE id = v_id) <> 'accepted' THEN
+        RAISE EXCEPTION 'Premise broken: the open-scope source assertion is not accepted';
+    END IF;
+
+    PERFORM merge_nodes(v_duplicate, v_canonical, 'test:lifecycle-gate');
+
+    IF scope_review_policy(governing_scope(v_canonical, NULL, 'cross_probe', NULL)) <> 'strict' THEN
+        RAISE EXCEPTION
+            'Premise broken: after the merge the canonical resolves to a % policy, so the case proves nothing',
+            scope_review_policy(governing_scope(v_canonical, NULL, 'cross_probe', NULL));
+    END IF;
+
+    SELECT * INTO v_copied
+    FROM assertions
+    WHERE subject_node_id = v_canonical AND assertion_type = 'cross_probe';
+    IF v_copied.id IS NULL THEN
+        RAISE EXCEPTION 'The cross-scope merge did not carry the assertion across';
+    END IF;
+    IF v_copied.status <> 'candidate' THEN
+        RAISE EXCEPTION
+            'A cross-scope merge landed the copy as %, so the duplicate''s open policy carried across',
+            v_copied.status;
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM review_queue
+        WHERE subject_node_id = v_canonical AND assertion_type = 'cross_probe'
+    ) THEN
+        RAISE EXCEPTION 'The cross-scope copy is not waiting in review_queue';
+    END IF;
+
+    -- ==================================================================
+    -- Obligation 15. The exemption attack directly. As agent:t, end an
+    -- accepted row in an open scope naming a fresh id, then insert that id
+    -- as accepted on a subject in a strict scope. It must not stay
+    -- accepted: the exemption is confined to one tuple.
+    -- ==================================================================
+    PERFORM set_config('app.current_role', 'admin', true);
+    INSERT INTO nodes (node_type, label) VALUES ('thing', 'Exemption open subject')
+    RETURNING id INTO v_other;
+    v_incumbent := record_assertion(
+        'exemption_probe', '{"value":"open side"}', v_other,
+        p_assertion_key := 'default', p_basis := 'assumed'
+    );
+
+    PERFORM set_config('app.current_role', 'agent:t', true);
+    IF NOT EXISTS (SELECT 1 FROM assertions WHERE id = v_incumbent) THEN
+        RAISE EXCEPTION 'Refusing to pass vacuously: agent:t cannot see the exemption incumbent';
+    END IF;
+    v_smuggled := gen_random_uuid();
+    PERFORM set_config('app.write_path', 'supersede_assertion', true);
+    PERFORM set_config('app.supersede_assertion_id', v_incumbent::text, true);
+    UPDATE assertions SET superseded_at = now(), superseded_by = v_smuggled
+    WHERE id = v_incumbent;
+    GET DIAGNOSTICS v_rows = ROW_COUNT;
+    PERFORM set_config('app.write_path', '', true);
+    IF v_rows <> 1 THEN
+        RAISE EXCEPTION
+            'Premise broken: agent:t could not end its own accepted row in an open scope, so the attack never starts';
+    END IF;
+
+    -- Same type and key, so the deferred replacement check is satisfied and
+    -- the transaction can commit; only the subject differs, which is the
+    -- whole attack.
+    INSERT INTO assertions (id, assertion_type, assertion_key, status, basis, subject_node_id, claim)
+    VALUES (v_smuggled, 'exemption_probe', 'default', 'accepted', 'assumed', v_gov,
+            '{"value":"smuggled"}');
+    IF (SELECT status FROM assertions WHERE id = v_smuggled) <> 'candidate' THEN
+        RAISE EXCEPTION
+            'The cross-tuple exemption let an accepted row into a strict scope: status %',
+            (SELECT status FROM assertions WHERE id = v_smuggled);
+    END IF;
+    SET CONSTRAINTS ALL IMMEDIATE;
+    SET CONSTRAINTS ALL DEFERRED;
+    IF (SELECT status FROM assertions WHERE id = v_smuggled) <> 'candidate' THEN
+        RAISE EXCEPTION 'The smuggled row became accepted at the deferred checks';
+    END IF;
+
+    -- The honest version must still commit accepted, or supersede-then-insert
+    -- would strand the key with no accepted value at all. Same subject, type
+    -- and key, on a strict subject where the demotion would otherwise bite.
+    PERFORM set_config('app.current_role', 'admin', true);
+    INSERT INTO nodes (node_type, label) VALUES ('thing', 'Exemption honest subject')
+    RETURNING id INTO v_honest_subject;
+    v_incumbent := record_assertion(
+        'exemption_probe', '{"value":"standing"}', v_honest_subject,
+        p_assertion_key := 'default', p_basis := 'assumed'
+    );
+    INSERT INTO edges (edge_type, source_id, target_id)
+    VALUES ('scope_governs_subject', v_scope, v_honest_subject);
+    IF scope_review_policy(governing_scope(v_honest_subject, NULL, 'exemption_probe', NULL)) <> 'strict' THEN
+        RAISE EXCEPTION 'Premise broken: the honest exemption subject is not under a strict policy';
+    END IF;
+
+    PERFORM set_config('app.current_role', 'agent:t', true);
+    v_smuggled := gen_random_uuid();
+    PERFORM set_config('app.write_path', 'supersede_assertion', true);
+    PERFORM set_config('app.supersede_assertion_id', v_incumbent::text, true);
+    UPDATE assertions SET superseded_at = now(), superseded_by = v_smuggled
+    WHERE id = v_incumbent;
+    PERFORM set_config('app.write_path', '', true);
+    INSERT INTO assertions (id, assertion_type, assertion_key, status, basis, subject_node_id, claim)
+    VALUES (v_smuggled, 'exemption_probe', 'default', 'accepted', 'assumed', v_honest_subject,
+            '{"value":"replaced"}');
+    IF (SELECT status FROM assertions WHERE id = v_smuggled) <> 'accepted' THEN
+        RAISE EXCEPTION
+            'The honest same-tuple replacement was demoted to %, stranding the key with no accepted value',
+            (SELECT status FROM assertions WHERE id = v_smuggled);
+    END IF;
+
+    -- ==================================================================
+    -- Obligation 16. A future-effective promotion into an instant a
+    -- scheduled accepted row already holds is refused, and afterwards
+    -- exactly one accepted unsuperseded row covers that instant.
+    --
+    -- Two cases, and only the second says anything new. A candidate whose
+    -- window is IDENTICAL to the scheduled row's is already refused by
+    -- idx_assertions_active_unique. A candidate whose window merely
+    -- OVERLAPS it -- effective_at inside the scheduled row's open window --
+    -- is not, and before the instant test it promoted cleanly and left two
+    -- accepted rows covering one instant on one tuple.
+    -- ==================================================================
+    PERFORM set_config('app.current_role', 'admin', true);
+    INSERT INTO nodes (node_type, label) VALUES ('thing', 'Future promotion subject')
+    RETURNING id INTO v_future_subject;
+
+    PERFORM record_assertion(
+        'future_probe', '{"value":"now"}', v_future_subject,
+        p_assertion_key := 'default', p_basis := 'assumed'
+    );
+    v_scheduled := record_assertion(
+        'future_probe', '{"value":"later"}', v_future_subject,
+        p_assertion_key := 'default', p_effective_at := v_future, p_basis := 'assumed'
+    );
+    IF (SELECT status FROM assertions WHERE id = v_scheduled) <> 'accepted' THEN
+        RAISE EXCEPTION 'Premise broken: the scheduled row is not accepted';
+    END IF;
+    IF (SELECT count(*) FROM assertions
+        WHERE subject_node_id = v_future_subject AND assertion_type = 'future_probe'
+          AND status = 'accepted' AND superseded_at IS NULL
+          AND (effective_at IS NULL OR effective_at <= v_future)
+          AND (effective_to IS NULL OR effective_to > v_future)) <> 1
+    THEN
+        RAISE EXCEPTION 'Premise broken: the fixture does not have exactly one row covering the instant';
+    END IF;
+
+    FOR v_attempt IN 1..2 LOOP
+        v_instant := CASE v_attempt WHEN 1 THEN v_future ELSE v_future + interval '1 day' END;
+        FOREACH v_role IN ARRAY v_roles LOOP
+            PERFORM set_config('app.current_role', 'admin', true);
+            v_cand := record_assertion(
+                'future_probe', '{"value":"rival"}', v_future_subject,
+                p_assertion_key := 'default', p_effective_at := v_instant,
+                p_status := 'candidate', p_basis := 'assumed'
+            );
+
+            PERFORM set_config('app.current_role', v_role, true);
+            IF NOT EXISTS (SELECT 1 FROM assertions WHERE id = v_cand) THEN
+                RAISE EXCEPTION
+                    'Refusing to pass vacuously: role "%" cannot see the future candidate', v_role;
+            END IF;
+            v_failed := false;
+            v_rows := -1;
+            BEGIN
+                PERFORM set_config('app.write_path', 'accept_assertion', true);
+                PERFORM set_config('app.accept_assertion_id', v_cand::text, true);
+                UPDATE assertions SET status = 'accepted' WHERE id = v_cand;
+                GET DIAGNOSTICS v_rows = ROW_COUNT;
+            EXCEPTION WHEN OTHERS THEN
+                v_failed := true;
+                v_msg := SQLERRM;
+            END;
+            PERFORM set_config('app.write_path', '', true);
+            IF NOT v_failed AND v_rows <> 0 THEN
+                RAISE EXCEPTION
+                    'Role "%" promoted a candidate effective % into an instant a scheduled accepted row already holds',
+                    v_role, v_instant;
+            END IF;
+            IF (SELECT status FROM assertions WHERE id = v_cand) <> 'candidate' THEN
+                RAISE EXCEPTION 'Role "%" left the future candidate accepted', v_role;
+            END IF;
+
+            IF (SELECT count(*) FROM assertions
+                WHERE subject_node_id = v_future_subject AND assertion_type = 'future_probe'
+                  AND status = 'accepted' AND superseded_at IS NULL
+                  AND (effective_at IS NULL OR effective_at <= v_instant)
+                  AND (effective_to IS NULL OR effective_to > v_instant)) <> 1
+            THEN
+                RAISE EXCEPTION
+                    'After role "%" was refused, % accepted rows cover %',
+                    v_role,
+                    (SELECT count(*) FROM assertions
+                     WHERE subject_node_id = v_future_subject AND assertion_type = 'future_probe'
+                       AND status = 'accepted' AND superseded_at IS NULL
+                       AND (effective_at IS NULL OR effective_at <= v_instant)
+                       AND (effective_to IS NULL OR effective_to > v_instant)),
+                    v_instant;
+            END IF;
+        END LOOP;
+    END LOOP;
+
+    -- accept_assertion() still promotes a candidate covering now while the
+    -- scheduled row stands, which is the case the instant test must not break.
+    PERFORM set_config('app.current_role', 'admin', true);
+    v_cand := record_assertion(
+        'future_probe', '{"value":"now, better"}', v_future_subject,
+        p_assertion_key := 'default', p_status := 'candidate', p_basis := 'assumed'
+    );
+    PERFORM accept_assertion(v_cand, NULL, 'Reviewed', 'test:lifecycle-gate');
+    IF (SELECT status FROM assertions WHERE id = v_cand) <> 'accepted' THEN
+        RAISE EXCEPTION
+            'accept_assertion could not promote a candidate covering now while a scheduled row stands';
     END IF;
 
     -- This suite rolls back, so the deferred checks would never fire and

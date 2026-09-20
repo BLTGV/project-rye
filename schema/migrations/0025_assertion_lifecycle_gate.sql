@@ -123,14 +123,25 @@ $$ LANGUAGE sql STABLE;
 -- cannot be. It does not need to be: record_assertion() has already applied the
 -- same rule, so this is a no-op on its own writes.
 --
--- One exemption. A row that an ALREADY superseded, previously accepted
--- assertion names as its replacement stays accepted. supersede_assertion(),
--- record_distillation() and record_assertion() all mark the incumbent before
--- inserting its replacement, and demoting the replacement would leave the key
--- with no accepted value at all, which is the erasure this migration exists to
--- prevent. The exemption is a fact in the table, not a setting, and it needs an
--- incumbent that was accepted, so a caller cannot manufacture it by superseding
--- a candidate it just wrote.
+-- One exemption, confined to one tuple. A row stays accepted when an assertion
+-- ON THE SAME subject_ref, assertion_type AND assertion_key is already
+-- superseded, was accepted, and names this row as its replacement.
+-- supersede_assertion(), record_distillation() and record_assertion() all mark
+-- that incumbent before inserting its replacement, and demoting the replacement
+-- would leave that key with no accepted value at all, which is the erasure this
+-- migration exists to prevent.
+--
+-- The tuple test is load-bearing, not tidiness. Without it a caller supersedes
+-- a row in an open scope, names a fresh id, and inserts that id as accepted on
+-- a subject in a strict scope; and merge_nodes() reaches the same result by
+-- accident when the duplicate is in an open scope and the canonical in a strict
+-- one. With it, a merge_nodes() copy is judged by the canonical node's review
+-- policy, which is the answer obligation 11 asks for.
+--
+-- There is no "the incumbent pre-dates the transaction" test, because nothing
+-- in the row records when it was written that a caller could not also write.
+-- What the exemption leaves open is exactly what supersede_assertion() already
+-- lets the same caller do on that same tuple, so it adds nothing.
 --
 -- Two consequences, both stated in the contract. A merge under a strict scope
 -- moves the copied assertions into review instead of carrying them across
@@ -142,8 +153,14 @@ CREATE OR REPLACE FUNCTION assertions_insert_review_guard() RETURNS trigger
 SET search_path = rye, pg_catalog
 AS $$
 DECLARE
-    v_policy text;
-    v_scope  uuid;
+    v_policy      text;
+    v_scope       uuid;
+    -- subject_ref is a STORED generated column, and PostgreSQL computes it
+    -- AFTER BEFORE triggers run, so NEW.subject_ref is null here. Compute it
+    -- with the same expression the column uses.
+    v_subject_ref text := coalesce(
+        'n:' || NEW.subject_node_id::text, 'e:' || NEW.subject_edge_id::text
+    );
 BEGIN
     IF NEW.status IS DISTINCT FROM 'accepted' THEN
         RETURN NEW;
@@ -171,6 +188,9 @@ BEGIN
         WHERE incumbent.superseded_by = NEW.id
           AND incumbent.superseded_at IS NOT NULL
           AND incumbent.status = 'accepted'
+          AND incumbent.subject_ref = v_subject_ref
+          AND incumbent.assertion_type = NEW.assertion_type
+          AND incumbent.assertion_key = NEW.assertion_key
     ) THEN
         RETURN NEW;
     END IF;
@@ -191,7 +211,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION assertions_insert_review_guard() IS
-    'Judge a direct INSERT of an accepted assertion by the same review policy record_assertion() applies, and demote it to candidate where that policy demotes. Nothing said is lost. Exempts a row an already superseded accepted assertion names as its replacement, so supersede-then-insert does not strand a key with no accepted value.';
+    'Judge a direct INSERT of an accepted assertion by the same review policy record_assertion() applies, and demote it to candidate where that policy demotes. Nothing said is lost. Exempts a row that an already superseded, formerly accepted assertion on the same subject_ref, assertion_type and assertion_key names as its replacement, so supersede-then-insert does not strand that key with no accepted value. The exemption does not carry across tuples, so a merge_nodes() copy is judged by the canonical node''s policy.';
 
 DROP TRIGGER IF EXISTS trg_assertions_insert_review ON assertions;
 CREATE TRIGGER trg_assertions_insert_review
@@ -221,10 +241,17 @@ SET search_path = rye, pg_catalog
 AS $$
 DECLARE
     v_derived text;
+    v_instant timestamptz;
     v_policy  text;
     v_replacement assertions;
     v_role    text := lower(coalesce(current_setting('app.current_role', true), ''));
     v_scope   uuid;
+    -- subject_ref is a STORED generated column, computed after BEFORE triggers
+    -- run, so NEW.subject_ref is null here. OLD's is populated, but the subject
+    -- columns are immutable below, so the two agree. Compute it anyway.
+    v_subject_ref text := coalesce(
+        'n:' || NEW.subject_node_id::text, 'e:' || NEW.subject_edge_id::text
+    );
     v_witness uuid;
 BEGIN
     -- ----------------------------------------------------------------------
@@ -259,26 +286,32 @@ BEGIN
                 'Assertion % is not a live candidate and cannot be promoted', NEW.id;
         END IF;
 
-        -- An accepted rival that covers now, on the same tuple, is what
-        -- accept_assertion() supersedes before it promotes. If one is still
-        -- standing, this promotion did not go through acceptance.
-        IF (NEW.effective_at IS NULL OR NEW.effective_at <= now())
-           AND (NEW.effective_to IS NULL OR NEW.effective_to > now())
-           AND EXISTS (
-               SELECT 1 FROM assertions rival
-               WHERE rival.id <> NEW.id
-                 AND rival.subject_ref = NEW.subject_ref
-                 AND rival.assertion_type = NEW.assertion_type
-                 AND rival.assertion_key = NEW.assertion_key
-                 AND rival.status = 'accepted'
-                 AND rival.superseded_at IS NULL
-                 AND (rival.effective_at IS NULL OR rival.effective_at <= now())
-                 AND (rival.effective_to IS NULL OR rival.effective_to > now())
-           )
-        THEN
+        -- The rival test is taken at one instant: the one this row takes
+        -- effect at, never earlier than now. It is never skipped.
+        --
+        -- accept_assertion() takes its incumbent from current_valid_assertions,
+        -- which is accepted, unsuperseded and covering now, and supersedes it
+        -- before the promotion whatever the candidate's own effective_at, so it
+        -- still passes here: an incumbent with an open effective_to covers the
+        -- future instant too and is already gone by the time this runs. What is
+        -- refused is a promotion into an instant a SCHEDULED accepted row holds,
+        -- which accept_assertion() does not supersede and which would leave two
+        -- accepted rows covering one instant on one tuple.
+        v_instant := greatest(coalesce(NEW.effective_at, now()), now());
+        IF EXISTS (
+            SELECT 1 FROM assertions rival
+            WHERE rival.id <> NEW.id
+              AND rival.subject_ref = v_subject_ref
+              AND rival.assertion_type = NEW.assertion_type
+              AND rival.assertion_key = NEW.assertion_key
+              AND rival.status = 'accepted'
+              AND rival.superseded_at IS NULL
+              AND (rival.effective_at IS NULL OR rival.effective_at <= v_instant)
+              AND (rival.effective_to IS NULL OR rival.effective_to > v_instant)
+        ) THEN
             RAISE EXCEPTION
-                'Assertion % cannot be promoted while an accepted assertion still holds %/%. Use accept_assertion(), which supersedes the incumbent.',
-                NEW.id, NEW.assertion_type, NEW.assertion_key;
+                'Assertion % cannot be promoted while an accepted assertion already covers % on %/%. Use accept_assertion(), which supersedes the incumbent.',
+                NEW.id, v_instant, NEW.assertion_type, NEW.assertion_key;
         END IF;
 
         -- accept_assertion() refuses an inferred candidate that would displace
@@ -301,8 +334,12 @@ BEGIN
 
         -- Acceptance follows authority. This re-derives the rule
         -- accept_assertion() applies, from the same witness query, and it reads
-        -- the role only in order to refuse.
-        IF v_role LIKE 'agent:%' THEN
+        -- the role only in order to refuse. Only agent:* callers are
+        -- policy-gated on promotion, because that is the rule the helper
+        -- applies; this guard does not invent a wider role model.
+        IF v_role LIKE 'agent:%'
+           AND (NEW.subject_node_id IS NULL) <> (NEW.subject_edge_id IS NULL)
+        THEN
             SELECT ae.witness_node_id INTO v_witness
             FROM assertion_evidence ae
             WHERE ae.assertion_id = NEW.id
@@ -348,7 +385,7 @@ BEGIN
         RAISE EXCEPTION
             'Assertion % names a replacement without ending; superseded_by requires superseded_at', NEW.id;
     END IF;
-    IF NEW.superseded_by = NEW.id THEN
+    IF NEW.superseded_by IS NOT NULL AND NEW.superseded_by = NEW.id THEN
         RAISE EXCEPTION 'Assertion % cannot supersede itself', NEW.id;
     END IF;
 
@@ -421,7 +458,9 @@ BEGIN
             RAISE EXCEPTION
                 'Assertion attrs may only change as an outcome label; an existing key keeps its value';
         END IF;
-        IF NOT ((NEW.attrs->>'outcome') = ANY(assertion_outcome_values())) THEN
+        -- Null-safe on purpose. `NOT (NULL = ANY(...))` is NULL, not true, so
+        -- an attrs rewrite with no `outcome` key at all would fall through.
+        IF coalesce(NEW.attrs->>'outcome', '') <> ALL(assertion_outcome_values()) THEN
             RAISE EXCEPTION
                 'Assertion attrs may only change as an outcome label; the result must name an outcome in %',
                 array_to_string(assertion_outcome_values(), ', ');
