@@ -437,20 +437,45 @@ trigger only sees rows RLS admitted. Where the owner is bound by RLS a refused
 is a superuser the rows are visited and the trigger raises `42501`. An `INSERT`
 raises on both. A test asserts "the row is unchanged", not one error text.
 
-**The CDC path never refuses, because the domain table is the system of
-record.** `capture_domain_change()` runs inside the application's own
-transaction on a tracked domain table, in whatever session that application
-uses, and that session may set no `app.current_role` at all. If its
-`record_event()` were refused, the application's own `INSERT` would fail, and
-Rye would be getting in the way of the system of record — the one thing the
-overlay promises it never does. So `capture_domain_change()` asks
-`rye_role_may_write()` first and **returns without recording an event** when the
-answer is false, the same way it already returns silently when the row maps to
-no node. The domain write always succeeds. The cost is stated plainly: **a
-tracked table written by a session with no role produces no CDC event**, and the
-fix is for that session to set one. It reads the same helper the gate reads, so
-it can only make Rye record less, never more, and it is not a bypass anyone can
-set.
+**The CDC path records under a system role, because the domain table is the
+system of record.** `capture_domain_change()` runs inside the application's own
+transaction on a tracked domain table, and an application that does not know Rye
+exists sets no `app.current_role` at all. That is the normal overlay
+deployment. Refusing its `record_event()` would fail the application's own
+`INSERT`; skipping the event would turn off the feature `track_table()` exists
+for. So the trigger does neither. It looks the node up under the calling
+session's own visibility, exactly as before, then sets `app.current_role` to the
+reserved value `system:cdc` with `set_config(..., true)` **around its own
+`record_event()` call only**, and restores the caller's value on every exit path
+including the exception one. A tracked table's writes never fail because of Rye,
+and a tracked table always produces its CDC event.
+
+`system:cdc` is a row in `role_classification_access` like any other role, with
+`may_write` true and `classifications` `ARRAY['public']` — the narrowest there
+is, and all it needs. `record_event()` generates the event id before inserting,
+so it never reads `events` back, and `event_participants` admits an insert
+without reading the node. Node visibility is untouched: the source lookup runs
+before the swap, under the application's own role and `app.current_teams`, so a
+mapped node the session cannot see still skips silently, exactly as it does
+today.
+
+**`system:cdc` can do strictly less than any other writing role.**
+`rye_gate_may_write()` admits it for `INSERT` on `events` and
+`event_participants` and refuses it everywhere else, which is one branch in a
+function that already knows its own table and needs no new column.
+`merge_nodes()` names it in its refusals, and the governance structure is
+admin-only, so it is excluded there by the rule that already exists. A caller who
+sets `app.current_role = 'system:cdc'` by hand therefore gains **less** than by
+setting `team_member`, which any caller with a raw connection can already do.
+That is the stated session-variable boundary and not a new hole: this is a role
+in the role list, not a forgeable named gate like `app.write_path`, which is why
+it was accepted here and rejected there.
+
+**The audit trail keeps the real caller.** `events.actor_system` stays
+`system:cdc`, as it already was before this migration, and the event's
+`properties` gain `session_role`: the caller's `app.current_role` as it was
+before the swap, or null when none was set. A reader can always tell which
+session caused the change.
 
 **Maintenance and install.** `refresh_materialized_views()` and
 `log_agent_query()` write no core table and are unaffected. `migrate.sh` runs
@@ -468,6 +493,9 @@ still a `no`.
 
 | table | operation | admin | named role with `may_write` (incl. `team_member`) | `agent:*` | `viewer` | unset or unknown |
 |---|---|---|---|---|---|---|
+`system:cdc` is not in the table below and is not a general writing role: it may
+`INSERT` into `events` and `event_participants` and do nothing else, anywhere.
+
 | `nodes` | INSERT | yes | yes | yes | no | no |
 | `nodes` | UPDATE | yes | yes, except governance rows | only with `app.write_path = 'update_node_properties'`, and never a governance row | no | no |
 | `nodes` | DELETE | yes | yes, except governance rows | no | no | no |
@@ -574,6 +602,7 @@ takes any lock:
 |---|---|
 | `rye_role_may_write()` false — `viewer`, unset, an unknown role | `merge_nodes requires a role that may write; "%" may only read. A Rye admin or a team member merges.` |
 | agent-shaped | `merge_nodes is not available to an agent ("%"). Record the duplicate and ask a person; a Rye admin or a team member merges.` |
+| `system:cdc` | `merge_nodes is not available to system:cdc, which only records domain changes. A Rye admin or a team member merges.` |
 
 Every other writing named role may merge, which is the item's default — `admin`
 and `team_member` both may — expressed through the role list rather than two

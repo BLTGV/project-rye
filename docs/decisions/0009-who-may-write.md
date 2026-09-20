@@ -107,21 +107,70 @@ admitted, so a refused `UPDATE` or `DELETE` raises where the owner is a
 superuser and affects zero rows where the owner is bound by RLS. Both are
 refusals. Every test below asserts the row, not the error text.
 
-**The CDC path must not refuse.** `capture_domain_change()` runs inside the
-application's own transaction on its own domain table, in a session that may set
-no role at all. Refusing its `record_event()` would fail the application's
-`INSERT`, and Rye would be getting in the way of the system of record — the
-overlay promise, and the one thing that must not break. So
-`capture_domain_change()` asks `rye_role_may_write()` and returns without
-recording an event when the answer is false, exactly as it already returns
-silently for a row that maps to no node. The domain write always succeeds and
-the event is not written. Rejected: exempting the CDC insert with a named
-`app.write_path`, which any caller can set and which would therefore be a
-general bypass of this whole record. Rejected: letting the refusal propagate and
-telling operators to set a role on every application connection, which is the
-overlay promise traded for a rule about Rye's own bookkeeping. The cost is
-stated in the contract: a tracked table written by a session with no role
-produces no CDC event.
+**The CDC path records under a system role.** `capture_domain_change()` runs
+inside the application's own transaction on its own domain table, in a session
+that may set no role at all. Refusing its `record_event()` would fail the
+application's `INSERT`, and Rye would be getting in the way of the system of
+record — the overlay promise, and the one thing that must not break.
+
+*Overturned by the Lead, 2026-09-20.* The first ruling here was that the trigger
+skips the event when `rye_role_may_write()` is false. That is wrong, and the
+reason is the deployment it describes: an application that does not know Rye
+exists writes its domain tables in sessions with no Rye role, which is the
+**normal** overlay case, so the rule silently turned CDC off for most tracked
+tables. "A tracked table written by a session with no role produces no CDC
+event" is a customer-visible loss of the feature `track_table()` exists for. The
+domain write already happened under the application's own authority; recording
+it is Rye's bookkeeping, not a write by that session's role.
+
+**The rule.** `capture_domain_change()` looks the source node up first, under
+the calling session's own role and `app.current_teams`, so node visibility is
+exactly what it is today and a mapped node the session cannot see still skips
+silently. It then saves `current_setting('app.current_role', true)`, sets
+`app.current_role` to `system:cdc` with `set_config(..., true)` around its
+`record_event()` call only, and restores the saved value — with
+`set_config('app.current_role', coalesce(v_prev, ''), true)`, since an unset
+variable restores as the empty string, which matches no role row and is
+therefore the same "unknown" shape it was. The restore happens on the normal
+path and in an `EXCEPTION WHEN OTHERS` block that re-raises; the block is belt
+and braces, because rolling the subtransaction back restores the variable
+anyway. `PERFORM set_config` resets `FOUND`, so nothing after the swap may test
+`FOUND` from before it.
+
+`system:cdc` is a row in `role_classification_access` with `may_write` true and
+`classifications` `ARRAY['public']`, the narrowest value, and that is all it
+needs. Checked against the path rather than assumed: `record_event()` generates
+the event id before inserting, so it never reads `events` back and the
+`event_read_policy` never applies; `ep_insert_policy` admits a participant
+without reading the node; and no assertion, artifact, or `redact_properties()`
+read happens, which is the only thing `classifications` governs.
+
+**Narrowed, because it was cheap.** `rye_gate_may_write()` already knows
+`TG_TABLE_NAME` and `TG_OP`, so one branch admits `system:cdc` for `INSERT` on
+`events` and `event_participants` and refuses it on everything else, with no new
+column and no new table. `merge_nodes()` names it in a third refusal, and the
+governance structure is admin-only, which excludes it by the rule that already
+exists. The consequence is the argument: a caller who sets
+`app.current_role = 'system:cdc'` by hand can do **strictly less** than by
+setting `team_member`, which any caller with a raw connection can already do.
+That is the stated session-variable boundary and not a new hole. It is also why
+this is not the `app.write_path` bypass rejected above: a named write path is a
+gate that grants a permission nobody holds, while this is a role in the role
+list, holding the smallest permission in it.
+
+**The audit trail keeps the real caller.** `events.actor_system` stays
+`system:cdc`, which is what `capture_domain_change()` already passed as
+`p_actor` before this migration, so no consumer changes. The event's
+`properties` gain one additive key, `session_role`, carrying the caller's
+`app.current_role` as it was before the swap, or null when none was set. Rejected:
+putting the original role in `actor_system`, which changes a field consumers
+already read and would make an unset session write a null actor.
+
+Rejected, still: exempting the CDC insert with a named `app.write_path`, which
+any caller can set and which would be a general bypass of this whole record.
+Rejected: letting the refusal propagate and telling operators to set a role on
+every application connection, which trades the overlay promise for a rule about
+Rye's own bookkeeping.
 
 `refresh_materialized_views()` and `log_agent_query()` write no core table and
 need nothing. Migrations set `admin` themselves, as D already required.
@@ -356,22 +405,37 @@ and suites run as `rye_owner` with no `SET ROLE`.
     afterwards, under both owner types. Tests 30 and 31 keep their `agent:t` and
     `team_member` cases unmodified, and test 30's `%is Rye configuration%`
     assertions still pass for `viewer` because the settle gate sorts first.
-13. **The CDC path under an unset application session.** `track_table()` a
-    domain table, then write it with `app.current_role` unset: the domain
-    `INSERT`, `UPDATE`, and `DELETE` all succeed, and no `domain_change` event
-    is written. Then set `admin` and repeat: the domain write succeeds and the
-    event is written. Anti-vacuity is the second half — a suite that only
-    asserts "no event" passes on a broken trigger that never fires.
-    `tests/conformance/07_domain_integration.sh` is the file, and this replaces
-    the plain "set `admin`" fix listed for it in D.
-14. Every existing suite passes unmodified except the eight files in D, and each
+13. **The CDC path keeps working for every session.** `track_table()` a domain
+    table, then write it — `INSERT`, `UPDATE`, and `DELETE` — with
+    `app.current_role` unset, as `viewer`, and as `agent:t`, under both owner
+    types. In all nine cases the domain write succeeds and **exactly one**
+    `domain_change` event is recorded, with `actor_system` `system:cdc` and
+    `properties->>'session_role'` equal to the role that was set, or null when
+    none was. Assert the count, not existence: a trigger that fires twice is
+    also a bug. `tests/conformance/07_domain_integration.sh` is the file, and
+    this replaces the plain "set `admin`" fix listed for it in D.
+14. **The role is restored.** After each write in 13,
+    `coalesce(current_setting('app.current_role', true), '')` reads back the
+    value it had before, including after a CDC insert that raises — force one by
+    writing a tracked row whose mapped node was deleted out from under the
+    mapping, or by any other failure the builder can produce, and assert the
+    role afterwards. An unset role restores as the empty string, which is the
+    same "unknown" shape; the assertion must allow it.
+15. **`system:cdc` can do less than `team_member`.** A session that sets
+    `app.current_role = 'system:cdc'` by hand: may `INSERT` into `events` and
+    `event_participants`; is refused on `nodes`, `edges`, `assertions`,
+    `assertion_evidence`, and `artifacts` for every operation, and on `UPDATE`
+    and `DELETE` of `events` and `event_participants`; cannot touch an
+    `onboarding_scope` node or a governance edge; and is refused by
+    `merge_nodes()` with its own sentence. Both owner types.
+16. Every existing suite passes unmodified except the eight files in D, and each
     of those changes is one added `set_config` line. The report lists them.
-15. The suite fails on a tree without `0026`. Run it once against the previous
+17. The suite fails on a tree without `0026`. Run it once against the previous
     migration set and record that it fails, before running it against the new
     one, under both owner types. Obligation 11 in particular must fail on the
     superuser-owned database without `0026`, because that is the case the
     policy-only version passed.
-16. `./scripts/test-all.sh` passes, on the builder's own `COMPOSE_PROJECT_NAME`
+18. `./scripts/test-all.sh` passes, on the builder's own `COMPOSE_PROJECT_NAME`
     and an unused `RYE_POSTGRES_PORT`.
 
 ## What `0026` replaces, and what it must not touch
