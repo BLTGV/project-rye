@@ -19,7 +19,7 @@
     "plugins": [],
     "db_functions": ["rye_catalog", "rye_categories", "rye_settlers", "settle_gate", "agent_node_summary", "assertions_as_of", "link_record", "track_table", "record_event", "record_assertion", "schedule_deal_stage_change", "schedule_task_status_change", "schedule_milestone_status_change"],
     "db_views": ["current_valid_assertions"],
-    "cli_commands": ["./scripts/rye status", "./scripts/rye catalog capabilities", "./scripts/rye categories --json", "./scripts/rye settlers --json"]
+    "cli_commands": ["./scripts/rye status", "./scripts/rye catalog capabilities", "./scripts/rye categories --json", "./scripts/rye settlers --json", "./scripts/rye settle-gate <assertion-type>"]
   },
   "capabilities": [
     {
@@ -37,7 +37,8 @@
         { "type": "db_function", "name": "rye_settlers" },
         { "type": "db_function", "name": "settle_gate" },
         { "type": "cli_command", "command": "./scripts/rye categories --json" },
-        { "type": "cli_command", "command": "./scripts/rye settlers --json" }
+        { "type": "cli_command", "command": "./scripts/rye settlers --json" },
+        { "type": "cli_command", "command": "./scripts/rye settle-gate <assertion-type>" }
       ]
     }
   ]
