@@ -26,8 +26,8 @@ import {
 import { readNdjson } from "./lib/ndjson.mts";
 import {
   buildPsqlTarget,
-  runPsql,
-  runPsqlCapture,
+  runPsql as rawRunPsql,
+  runPsqlCapture as rawRunPsqlCapture,
   sqlJson,
   sqlText,
   type PsqlTarget,
@@ -102,6 +102,53 @@ function resolveSessionRole(value: string | undefined): string {
     );
   }
   return role;
+}
+
+// The database decides whether a role may write; this script does not guess.
+// When it refuses with 42501 -- the write gate's own sentence, or the policy's
+// -- say so in the same plain shape as a missing role rather than leaking a
+// trigger message under "unexpected_error".
+function asRoleRefusal(error: unknown): unknown {
+  const text = error instanceof Error ? error.message : String(error);
+  const refused =
+    text.includes("42501") ||
+    text.includes("A session that may not write attempted to") ||
+    text.includes("violates row-level security policy");
+
+  if (!refused) {
+    return error;
+  }
+
+  return new CliError(
+    "session_role_refused",
+    `The database refused this write under the role "${sessionRole}".`,
+    text.split("\n").slice(0, 2).join(" ").trim(),
+    [
+      `A person with team_member or higher runs this step, and an agent does not set a person's role for them.`,
+      `Ask which role to use in this instance, then pass it: --role team_member.`,
+      `Roles that may write are rows in role_classification_access; a Rye admin adds one.`,
+    ],
+  );
+}
+
+async function runPsql(
+  ...args: Parameters<typeof rawRunPsql>
+): Promise<Awaited<ReturnType<typeof rawRunPsql>>> {
+  try {
+    return await rawRunPsql(...args);
+  } catch (error) {
+    throw asRoleRefusal(error);
+  }
+}
+
+async function runPsqlCapture(
+  ...args: Parameters<typeof rawRunPsqlCapture>
+): Promise<string> {
+  try {
+    return await rawRunPsqlCapture(...args);
+  } catch (error) {
+    throw asRoleRefusal(error);
+  }
 }
 
 function sessionPreambleSql(): string {
