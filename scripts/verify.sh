@@ -327,6 +327,188 @@ BEGIN
     RAISE EXCEPTION 'assertion_evidence RLS is not enabled+forced';
   END IF;
 
+  -- Who may write: the role list is the write list, and the governance
+  -- structure is admin-only. One column, one function, and one conjunct on
+  -- every write policy of the seven core tables.
+  IF to_regprocedure('rye.rye_role_may_write()') IS NULL THEN
+    RAISE EXCEPTION 'rye_role_may_write function missing';
+  END IF;
+  IF to_regprocedure('rye.rye_gate_may_write()') IS NULL THEN
+    RAISE EXCEPTION 'rye_gate_may_write function missing';
+  END IF;
+
+  -- The gate is a trigger, because an RLS conjunct does not run inside a
+  -- SECURITY DEFINER function owned by a superuser. One on each core table.
+  IF EXISTS (
+      SELECT required.tablename
+      FROM (VALUES
+          ('nodes', 'trg_nodes_gate_may_write'),
+          ('edges', 'trg_edges_gate_may_write'),
+          ('events', 'trg_events_gate_may_write'),
+          ('event_participants', 'trg_event_participants_gate_may_write'),
+          ('assertions', 'trg_assertions_gate_may_write'),
+          ('assertion_evidence', 'trg_assertion_evidence_gate_may_write'),
+          ('artifacts', 'trg_artifacts_gate_may_write'),
+          ('node_source_map', 'trg_node_source_map_gate_may_write')
+      ) required(tablename, tgname)
+      WHERE NOT EXISTS (
+          SELECT 1
+          FROM pg_trigger t
+          JOIN pg_class c ON c.oid = t.tgrelid
+          JOIN pg_namespace ns ON ns.oid = c.relnamespace
+          WHERE ns.nspname = v_schema
+            AND c.relname = required.tablename
+            AND t.tgname = required.tgname
+            AND NOT t.tgisinternal
+            AND t.tgtype & 1 = 1   -- FOR EACH ROW
+            AND t.tgtype & 2 = 2   -- BEFORE
+            AND t.tgtype & 28 = 28 -- INSERT, DELETE, UPDATE
+      )
+  ) THEN
+    RAISE EXCEPTION 'one or more who-may-write gate triggers are missing or are not BEFORE INSERT OR UPDATE OR DELETE FOR EACH ROW';
+  END IF;
+
+  -- On assertions the order is load-bearing: the settle gate's message is
+  -- asserted by tests/conformance/30_configuration_gate.sql, and the shape
+  -- guards must run after the role is settled.
+  IF NOT (
+      (SELECT string_agg(t.tgname, ',' ORDER BY t.tgname)
+       FROM pg_trigger t
+       JOIN pg_class c ON c.oid = t.tgrelid
+       JOIN pg_namespace ns ON ns.oid = c.relnamespace
+       WHERE ns.nspname = v_schema
+         AND c.relname = 'assertions'
+         AND NOT t.tgisinternal
+         AND t.tgname IN ('trg_assertion_settle_gate', 'trg_assertions_gate_may_write',
+                          'trg_assertions_immutable', 'trg_assertions_insert_review'))
+      = 'trg_assertion_settle_gate,trg_assertions_gate_may_write,trg_assertions_immutable,trg_assertions_insert_review'
+  ) THEN
+    RAISE EXCEPTION 'the assertions triggers do not sort settle gate, may-write gate, immutable, insert review';
+  END IF;
+
+  -- The reserved CDC role, so a tracked domain table still records its event
+  -- when the application's session sets no Rye role.
+  IF NOT EXISTS (
+      SELECT 1 FROM rye.role_classification_access
+      WHERE role_name = 'system:cdc'
+        AND may_write = true
+        AND classifications = ARRAY['public']
+  ) THEN
+    RAISE EXCEPTION 'the system:cdc role row is missing or is not may_write true with public classification only';
+  END IF;
+
+  IF NOT EXISTS (
+      SELECT 1
+      FROM information_schema.columns c
+      WHERE c.table_schema = v_schema
+        AND c.table_name = 'role_classification_access'
+        AND c.column_name = 'may_write'
+  ) THEN
+    RAISE EXCEPTION 'role_classification_access.may_write column missing';
+  END IF;
+
+  IF NOT EXISTS (
+      SELECT 1 FROM rye.role_classification_access
+      WHERE role_name = 'viewer' AND may_write = false
+  ) THEN
+    RAISE EXCEPTION 'the viewer role is not seeded read-only (may_write false)';
+  END IF;
+
+  IF EXISTS (
+      SELECT required.tablename, required.cmd
+      FROM (VALUES
+          ('nodes', 'INSERT'), ('nodes', 'UPDATE'), ('nodes', 'DELETE'),
+          ('edges', 'INSERT'), ('edges', 'UPDATE'), ('edges', 'DELETE'),
+          ('events', 'INSERT'), ('events', 'UPDATE'), ('events', 'DELETE'),
+          ('event_participants', 'INSERT'),
+          ('event_participants', 'UPDATE'),
+          ('event_participants', 'DELETE'),
+          ('assertions', 'INSERT'), ('assertions', 'UPDATE'), ('assertions', 'DELETE'),
+          ('assertion_evidence', 'INSERT'),
+          ('assertion_evidence', 'UPDATE'),
+          ('assertion_evidence', 'DELETE'),
+          ('artifacts', 'INSERT'), ('artifacts', 'UPDATE'), ('artifacts', 'DELETE'),
+          ('node_source_map', 'INSERT'), ('node_source_map', 'UPDATE'), ('node_source_map', 'DELETE')
+      ) required(tablename, cmd)
+      WHERE NOT EXISTS (
+          SELECT 1
+          FROM pg_policies p
+          WHERE p.schemaname = v_schema
+            AND p.tablename = required.tablename
+            AND p.cmd = required.cmd
+            AND (coalesce(p.qual, '') || coalesce(p.with_check, '')) LIKE '%rye_role_may_write%'
+      )
+  ) THEN
+    RAISE EXCEPTION
+      'one or more core write policies do not carry the rye_role_may_write conjunct: %',
+      (SELECT string_agg(required.tablename || ' ' || required.cmd, ', ')
+       FROM (VALUES
+           ('nodes', 'INSERT'), ('nodes', 'UPDATE'), ('nodes', 'DELETE'),
+           ('edges', 'INSERT'), ('edges', 'UPDATE'), ('edges', 'DELETE'),
+           ('events', 'INSERT'), ('events', 'UPDATE'), ('events', 'DELETE'),
+           ('event_participants', 'INSERT'),
+           ('event_participants', 'UPDATE'),
+           ('event_participants', 'DELETE'),
+           ('assertions', 'INSERT'), ('assertions', 'UPDATE'), ('assertions', 'DELETE'),
+           ('assertion_evidence', 'INSERT'),
+           ('assertion_evidence', 'UPDATE'),
+           ('assertion_evidence', 'DELETE'),
+           ('artifacts', 'INSERT'), ('artifacts', 'UPDATE'), ('artifacts', 'DELETE'),
+           ('node_source_map', 'INSERT'), ('node_source_map', 'UPDATE'), ('node_source_map', 'DELETE')
+       ) required(tablename, cmd)
+       WHERE NOT EXISTS (
+           SELECT 1
+           FROM pg_policies p
+           WHERE p.schemaname = v_schema
+             AND p.tablename = required.tablename
+             AND p.cmd = required.cmd
+             AND (coalesce(p.qual, '') || coalesce(p.with_check, '')) LIKE '%rye_role_may_write%'
+       ));
+  END IF;
+
+  -- The governance structure is admin-only, and the test is row-local.
+  IF EXISTS (
+      SELECT 1
+      FROM (VALUES ('INSERT'), ('UPDATE'), ('DELETE')) required(cmd)
+      WHERE NOT EXISTS (
+          SELECT 1
+          FROM pg_policies p
+          WHERE p.schemaname = v_schema
+            AND p.tablename = 'nodes'
+            AND p.cmd = required.cmd
+            AND (coalesce(p.qual, '') || coalesce(p.with_check, '')) LIKE '%onboarding_scope%'
+      )
+  ) THEN
+    RAISE EXCEPTION 'the nodes write policies do not gate onboarding_scope rows to an admin';
+  END IF;
+
+  IF EXISTS (
+      SELECT 1
+      FROM (VALUES ('INSERT'), ('UPDATE'), ('DELETE')) required(cmd)
+      WHERE NOT EXISTS (
+          SELECT 1
+          FROM pg_policies p
+          WHERE p.schemaname = v_schema
+            AND p.tablename = 'edges'
+            AND p.cmd = required.cmd
+            AND (coalesce(p.qual, '') || coalesce(p.with_check, '')) LIKE '%scope_governs_subject%'
+            AND (coalesce(p.qual, '') || coalesce(p.with_check, '')) LIKE '%scope_governs_source%'
+            AND (coalesce(p.qual, '') || coalesce(p.with_check, '')) LIKE '%scope_enables_plugin%'
+      )
+  ) THEN
+    RAISE EXCEPTION 'the edges write policies do not gate the three governance edge types to an admin';
+  END IF;
+
+  IF NOT EXISTS (
+      SELECT 1
+      FROM rye.assertion_type_access ata
+      WHERE ata.assertion_type = 'scope_status'
+        AND ata.operation = 'settle'
+        AND 'admin' = ANY(ata.allowed_roles)
+  ) THEN
+    RAISE EXCEPTION 'scope_status is not settle-gated to admin';
+  END IF;
+
   IF to_regprocedure('rye.rye_current_agent_key()') IS NULL THEN
     RAISE EXCEPTION 'rye_current_agent_key function missing';
   END IF;

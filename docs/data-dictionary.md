@@ -151,9 +151,113 @@ Maps roles to the classification levels they can access. Used by `redact_propert
 
 **Why it exists:** The original `redact_properties()` hardcoded a CASE statement mapping roles to classification arrays. Adding a new role or changing access levels required modifying the function. This table makes the role hierarchy data-driven.
 
-**Key columns:** `role_name` (PK), `classifications` (text array of accessible levels). Roles not in this table default to `['public']` only.
+**Key columns:** `role_name` (PK), `classifications` (text array of accessible levels), `may_write` (boolean, default true). Roles not in this table default to `['public']` only and may not write. One seeded row is reserved: `system:cdc`, described below.
 
 It is also the instance's list of role names. The governance policies below read it to decide whether a session is a named role, so adding a role stays an insert rather than a migration.
+
+#### Who may write — `may_write` and `rye_role_may_write()`
+
+`may_write` says whether a session holding that role may write the seven core
+tables. It is seeded `true` for every role except `viewer`. A new read-only role
+is an `INSERT`; widening a role later is an `UPDATE`. Neither is a migration.
+The table is readable by every session and writable only by an admin.
+
+```
+rye_role_may_write() → boolean
+```
+
+True when `app.current_role` is agent-shaped (`agent:<key>`), or names a
+`role_classification_access` row whose `may_write` is true. False for `viewer`,
+for an unknown role name, and for an unset role. `STABLE`, `SECURITY INVOKER`,
+reads only `app.current_role` and `role_classification_access`, so it is safe in
+a policy on any table.
+
+**The gate is a trigger; the policy conjunct is the second line.** A policy
+alone is not enough: a `SECURITY DEFINER` function owned by a superuser runs
+with RLS switched off for itself, and on the default Docker install a `viewer`
+still accepted a candidate through `accept_assertion()`, closed one through
+`reject_candidate()`, and rewrote `attrs` through `mark_assertion_outcome()`.
+So `rye_gate_may_write()` runs `BEFORE INSERT OR UPDATE OR DELETE ... FOR EACH
+ROW` on each of the seven core tables and raises `42501` when
+`rye_role_may_write()` is false. A trigger fires for a superuser, inside a
+definer function, and on a raw write alike, and it needs no list of helpers to
+keep current.
+
+| table | trigger |
+|---|---|
+| `nodes` | `trg_nodes_gate_may_write` |
+| `edges` | `trg_edges_gate_may_write` |
+| `events` | `trg_events_gate_may_write` |
+| `event_participants` | `trg_event_participants_gate_may_write` |
+| `assertions` | `trg_assertions_gate_may_write` |
+| `assertion_evidence` | `trg_assertion_evidence_gate_may_write` |
+| `artifacts` | `trg_artifacts_gate_may_write` |
+| `node_source_map` | `trg_node_source_map_gate_may_write` |
+
+On `assertions` the name is chosen so the triggers sort
+`trg_assertion_settle_gate`, `trg_assertions_gate_may_write`,
+`trg_assertions_immutable`, `trg_assertions_insert_review` — the settle gate's
+message still wins, and the shape guards still run after the role is settled.
+
+`node_source_map` is in the list because a mapping decides which node a tracked
+table's change events attach to. Before `0026` its insert policy was
+`WITH CHECK (true)` and its update policy asked only that the node be visible,
+so a `viewer` could map a source id onto a node of its choosing and have CDC
+record its own text there, or re-point an operator's mapping. Only a role that
+may write can now insert, update, or delete a mapping, by raw SQL or through
+`link_record()`. Its delete policy still narrows further to `admin` and
+`manager`, as it always did. `system:cdc` gets nothing here: it reads
+`node_source_map` and never writes it.
+
+Every `INSERT`, `UPDATE`, and `DELETE` policy on those eight tables
+carries the same conjunct as the cheaper refusal where the owner is bound by
+RLS. A `viewer` and a session with no role set may read everything they could
+read before and may write nothing, by raw SQL or through any helper, including
+a `SECURITY DEFINER` one. Nothing a `team_member` or an `agent:*` could write to
+an ordinary row is taken away.
+
+**A refusal has two shapes, by owner.** A `BEFORE ROW` trigger only sees rows
+RLS admitted. Where the table owner is bound by RLS a refused `UPDATE` or
+`DELETE` affects zero rows and raises nothing; where the owner is a superuser
+the rows are visited and the trigger raises `42501`. An `INSERT` raises on both.
+A client, and a test, asserts the row rather than one error text.
+
+**`system:cdc`.** `capture_domain_change()` runs inside the application's own
+transaction on a tracked domain table, and an application that does not know
+Rye exists sets no `app.current_role`. Refusing its `record_event()` would fail
+the application's own write; skipping the event would turn off the feature
+`track_table()` exists for. So the CDC trigger resolves the source node under
+the caller's own visibility, then sets `app.current_role` to `system:cdc`
+around its `record_event()` call only and restores the caller's value on every
+exit path, including the exception one. `rye_gate_may_write()` admits
+`system:cdc` for `INSERT` on `events` and `event_participants` and refuses it
+everywhere else, and `merge_nodes()` names it, so a caller who sets it by hand
+can do strictly less than one who sets `team_member`. The event's
+`actor_system` stays `system:cdc` and its `properties.session_role` carries the
+caller's role, or null when none was set.
+
+**The governance structure is admin-only.** A `nodes` row whose `node_type` is
+`onboarding_scope`, and an `edges` row whose `edge_type` is
+`scope_governs_subject`, `scope_governs_source`, or `scope_enables_plugin`, may
+be inserted, updated, or deleted only by a caller whose `app.current_role` is
+`admin`. The test is row-local, so it reads no table and cannot recurse, and
+because RLS applies `USING` to the old row and `WITH CHECK` to the new one, one
+rule covers archiving, ending, deleting, and re-pointing in both directions.
+`scope_status` joins `registry_entry` and `review_policy` on the settle gate, so
+activating a scope is an admin act too. `has_step` is deliberately not gated:
+archiving one still drops a step's *inherited* scope, and a subject that must
+stay governed gets its own `scope_governs_subject` edge.
+
+`create_onboarding_scope()`, `activate_onboarding_scope()`,
+`enable_plugin_for_scope()`, and `record_scope_policy()` keep their signatures
+and bodies and are admin-only because the rows they write are.
+
+**What this protects and what it does not.** Session variables are Rye's only
+authorization, and every rule here reads the role in order to permit. It
+protects deployments where a trusted backend sets the session variables and
+agents that state their role honestly. It is not a defence against a hostile
+caller with a raw connection. Recorded in
+`docs/decisions/0009-who-may-write.md`; migration `0026`.
 
 #### Governance tables — who reads, who writes
 
@@ -371,6 +475,8 @@ Attaches a CDC trigger (`capture_domain_change`) to a domain table. After this, 
 Trigger function called by `track_table()`. Not called directly. Fires on INSERT/UPDATE/DELETE, checks if the affected row has a linked node in `node_source_map`, and if so, calls `record_event()` with the full before/after diff. Unlinked rows are silently skipped.
 
 Supports tables with any primary key column — tries `id` first, then falls back to the table's actual PK column via `pg_index` catalog lookup.
+
+**It records under `system:cdc`.** The application's session may set no `app.current_role` at all, which is the normal overlay case, and since `0026` such a session may not write the graph. So the node lookup runs first, under the caller's own role and `app.current_teams` — node visibility is unchanged, and a mapped node the session cannot see still skips silently — and then `app.current_role` is set to `system:cdc` around the `record_event()` call only and restored on every exit path, including a re-raising exception block. A tracked table's writes never fail because of Rye's role rules, and a tracked table always produces its event. `actor_system` stays `system:cdc`; `properties.session_role` carries the caller's role before the swap, or null when none was set.
 
 **Why it exists:** The CDC trigger needs to be generic — it works on any table without knowing its schema. It also needs to be selective — only rows that have been explicitly linked to the graph should produce events.
 
@@ -879,6 +985,8 @@ Merges a duplicate node into a canonical node. Records a `node_merge` event (bef
 
 **Why it exists:** Cross-source deduplication is a common operational problem. When two nodes represent the same real-world entity, all their graph relationships need to follow the merge. This function handles the full redirect atomically.
 
+**Who may call it.** A merge is irreversible, it moves one subject's history onto another, and it crosses review policies, so it is for people. Four refusals, all `42501` and all raised **before the first `FOR UPDATE`**: a role `rye_role_may_write()` is false for (`merge_nodes requires a role that may write`), an agent-shaped role (`merge_nodes is not available to an agent`; record the duplicate and ask a person), `system:cdc` (`merge_nodes is not available to system:cdc, which only records domain changes`), and a non-admin merging a duplicate that is an `onboarding_scope` node or an endpoint of a live governance edge (`Merging a node a scope governs requires a Rye admin`). The ordering matters: `SELECT ... FOR UPDATE` applies the UPDATE policy as a silent filter, so a gate placed after the lock reported `Duplicate node % not found` about a node the caller could see. After `0026` that message means the node is absent or invisible and nothing else.
+
 #### `agent_node_summary()`
 
 ```
@@ -920,6 +1028,8 @@ update_node_properties(p_node_id, p_properties, p_label, p_summary) → uuid
 Merges new properties into an existing node, optionally updates the label, and records a `node_properties_updated` audit event with before/after diff. Returns the event UUID.
 
 Uses a write-path gate (`app.write_path = 'update_node_properties'`) to temporarily open the `node_update_policy` for agent roles. The gate is set before the `FOR UPDATE` lock (required because `SELECT ... FOR UPDATE` checks both SELECT and UPDATE policies) and cleared immediately after the update.
+
+Two refusals come before the gate and the lock, both `42501`, because RLS would otherwise report a visible node as missing: a role `rye_role_may_write()` is false for, and a non-admin editing an `onboarding_scope` node.
 
 **Why it exists:** Agents can INSERT nodes but the `node_update_policy` blocks direct UPDATE. When a node IS the system of record (no backing domain table), agents need a controlled, audited way to update properties — e.g., recording a new email discovered during conversation. This function provides that path while keeping direct `UPDATE nodes` blocked.
 

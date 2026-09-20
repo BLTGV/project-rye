@@ -86,6 +86,15 @@ DECLARE
     v_ask_roles    text[] := ARRAY[
         'admin', 'agent:config_gate_area', 'agent:t', 'viewer', 'team_member', ''
     ];
+    -- Who tries to settle configuration. Since migration 0026
+    -- (docs/decisions/0009-who-may-write.md) `viewer` and an unset role may not
+    -- write the core tables at all, so they never reach the settle gate: their
+    -- INSERTs raise 42501 and their UPDATEs affect zero rows silently. They
+    -- stay in v_ask_roles above, which only reads, and their refusals are
+    -- covered by tests/conformance/32_who_may_write.sql. What is left here is
+    -- the set of non-admin roles that still write, which is what this gate is
+    -- for.
+    v_gate_write_roles text[] := ARRAY['agent:t', 'team_member'];
     v_base_exp     jsonb := '{}'::jsonb;
     v_base_self    jsonb := '{}'::jsonb;
     v_baseline     jsonb;
@@ -318,7 +327,7 @@ BEGIN
             END IF;
         END IF;
 
-        FOREACH v_role IN ARRAY ARRAY['agent:t', 'viewer', 'team_member', ''] LOOP
+        FOREACH v_role IN ARRAY v_gate_write_roles LOOP
             PERFORM set_config('app.current_role', v_role, true);
 
             FOREACH v_key IN ARRAY ARRAY[
@@ -434,7 +443,7 @@ BEGIN
     -- Obligation 3. No lifecycle helper and no raw UPDATE promotes a
     -- registry candidate for a non-admin.
     -- ==================================================================
-    FOREACH v_role IN ARRAY ARRAY['agent:t', 'viewer', 'team_member', ''] LOOP
+    FOREACH v_role IN ARRAY v_gate_write_roles LOOP
         PERFORM set_config('app.current_role', 'admin', true);
         v_cand := record_assertion(
             'registry_entry', '{"value":"commitment"}', v_core,
@@ -547,7 +556,7 @@ BEGIN
         RAISE EXCEPTION 'An admin could not record an accepted registry entry';
     END IF;
 
-    FOREACH v_role IN ARRAY ARRAY['agent:t', 'viewer', 'team_member', ''] LOOP
+    FOREACH v_role IN ARRAY v_gate_write_roles LOOP
         PERFORM set_config('app.current_role', v_role, true);
         v_failed := false;
         BEGIN
@@ -591,7 +600,7 @@ BEGIN
     -- merely a loss: ending an accepted `strict` policy drops the scope back
     -- to `open`, and the next ordinary write lands accepted.
     -- ==================================================================
-    FOREACH v_role IN ARRAY ARRAY['agent:t', 'viewer', 'team_member', ''] LOOP
+    FOREACH v_role IN ARRAY v_gate_write_roles LOOP
         PERFORM set_config('app.current_role', v_role, true);
 
         -- End it, by spoofing the supersession write path.
@@ -725,7 +734,7 @@ BEGIN
         RAISE EXCEPTION 'Premise broken: the strict scope has no accepted review_policy to end';
     END IF;
 
-    FOREACH v_role IN ARRAY ARRAY['agent:t', 'viewer', 'team_member', ''] LOOP
+    FOREACH v_role IN ARRAY v_gate_write_roles LOOP
         PERFORM set_config('app.current_role', v_role, true);
         v_failed := false;
         BEGIN
@@ -823,7 +832,7 @@ BEGIN
     END LOOP;
     PERFORM set_config('app.current_role', 'admin', true);
 
-    FOREACH v_role IN ARRAY ARRAY['agent:t', 'viewer', 'team_member', ''] LOOP
+    FOREACH v_role IN ARRAY v_gate_write_roles LOOP
         PERFORM set_config('app.current_role', v_role, true);
         v_failed := false;
         BEGIN
@@ -917,7 +926,7 @@ BEGIN
     -- record_assertion(), so it demotes, and the scheduled row never
     -- becomes effective.
     -- ==================================================================
-    FOREACH v_role IN ARRAY ARRAY['agent:t', 'viewer', 'team_member', ''] LOOP
+    FOREACH v_role IN ARRAY v_gate_write_roles LOOP
         PERFORM set_config('app.current_role', v_role, true);
         v_id := schedule_assertion_change(
             p_subject_node_id := v_core,
@@ -951,7 +960,7 @@ BEGIN
     -- Obligation 7. record_scope_policy() routes through
     -- record_assertion() too, and a strict scope stays strict.
     -- ==================================================================
-    FOREACH v_role IN ARRAY ARRAY['agent:t', 'viewer', 'team_member', ''] LOOP
+    FOREACH v_role IN ARRAY v_gate_write_roles LOOP
         PERFORM set_config('app.current_role', v_role, true);
         v_id := record_scope_policy(
             p_scope_id     := v_scope_strict,
