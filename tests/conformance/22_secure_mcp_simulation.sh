@@ -21,6 +21,22 @@ pick_port() {
   node -e "const net = require('node:net'); const server = net.createServer(); server.listen(0, '127.0.0.1', () => { console.log(server.address().port); server.close(); });"
 }
 
+# grep with three outcomes, not two: found (0), not found (1), and broken.
+# grep exits 2 on an error and bash returns 127 when the command is missing,
+# and either of those must fail the test. The checks below used ripgrep, which
+# a GitHub runner does not have: `if rg ...; then fail` then read as "not
+# found" and passed vacuously. POSIX ERE only, no \( or \. — literal
+# parentheses and dots are bracketed, which every grep reads the same way.
+grep_text() {
+  local pattern="$1" file="$2" status=0
+  grep -nE -- "$pattern" "$file" >/dev/null || status=$?
+  if (( status > 1 )); then
+    echo "grep exited ${status} while checking ${file} for /${pattern}/" >&2
+    exit 1
+  fi
+  return "$status"
+}
+
 PORT="${RYE_MCP_SECURITY_TEST_PORT:-$(pick_port)}"
 BASE_URL="http://127.0.0.1:${PORT}"
 LOG_FILE="${TMPDIR:-/tmp}/rye-mcp-security-${PORT}.log"
@@ -85,7 +101,7 @@ fi
 
 node --check "$MCP_SCRIPT"
 
-if rg -n "db_url|docker_container|docker_user|docker_db" "$MCP_SCRIPT" >/dev/null; then
+if grep_text 'db_url|docker_container|docker_user|docker_db' "$MCP_SCRIPT"; then
   echo "Secure MCP server must not accept DB or Docker target override fields" >&2
   exit 1
 fi
@@ -117,7 +133,7 @@ if [[ "$candidate_tools" == *"promote"* || "$read_tools" == *"promote"* ]]; then
   exit 1
 fi
 
-if ! rg -n "maxPayloadBytes|ensurePayloadSize|statement: z\\.string\\(\\)\\.min\\(1\\)\\.max\\(4000\\)" "$MCP_SCRIPT" >/dev/null; then
+if ! grep_text 'maxPayloadBytes|ensurePayloadSize|statement: z[.]string[(][)][.]min[(]1[)][.]max[(]4000[)]' "$MCP_SCRIPT"; then
   echo "Secure MCP server is missing oversized or invalid payload guards" >&2
   exit 1
 fi
