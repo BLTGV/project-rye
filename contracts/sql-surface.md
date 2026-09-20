@@ -866,7 +866,9 @@ shape-constrained, not role-constrained, so a caller may still label an outcome
 by hand. The insert
 check resolves the governing scope without a witness, because evidence is
 written after the assertion, so a scope reached only through
-`scope_governs_source` does not demote a raw insert. And a caller who may
+`scope_governs_source` does not demote a raw insert; a helper covers the gap
+from its own side by taking the stricter of the two resolutions, but a raw
+insert is judged by the witness-free one alone. And a caller who may
 accept through `accept_assertion()` under an `open` policy is a caller whose
 raw promotion is refused only by the missing acceptance event, which is a
 record, not a lock. The rival test for a promotion is taken at one instant,
@@ -915,10 +917,47 @@ candidate, the candidate is in `review_queue` and `competing_candidates`, and a
 settler accepting it through `accept_assertion()` supersedes the incumbent then,
 which is the ordinary acceptance path.
 
-The predicate is the same one `record_assertion()` applies, resolved from the
-incumbent's own subject, type, and primary witness, so for the same caller and
-the same claim the two helpers agree. Where `record_assertion()` would land
-accepted, `supersede_assertion()` behaves exactly as before.
+The predicate is the same one `record_assertion()` applies, so for the same
+caller and the same claim the two helpers agree. Where `record_assertion()`
+would land accepted, `supersede_assertion()` behaves exactly as before.
+
+### A helper's policy is the stricter of the two resolutions
+
+Every helper that inserts an assertion resolves the governing scope **twice**
+and takes the **stricter** of the two review policies: once with the primary
+witness, as it always did, and once with no witness, which is what the insert
+guard can see. The scope *id* a helper reports and passes on is unchanged — it
+is still the witness-resolved one, because that is what a capability check, a
+scoped type resolution, and a scoped registry read are about. Only the policy is
+the maximum of the two, compared with `scope_review_policy_rank()`.
+
+This is not symmetry for its own sake. The witness branch of `governing_scope()`
+runs *before* `DEFAULT_SCOPE`, so a witness-free resolution does not merely lose
+the witness scope — it **falls through to `DEFAULT_SCOPE`**, which may be
+stricter. A subject with no direct, inherited, or type coverage, whose witness is
+reached by a `scope_governs_source` edge from an `open` scope, on an instance
+whose `DEFAULT_SCOPE` is `strict`, resolved `open` in the helper and `strict` in
+the guard. The helper ended the incumbent and inserted the replacement accepted,
+the guard demoted it to candidate, and the transaction was refused at commit
+with the key left holding nothing. Taking the stricter of the two makes the
+helper's policy always at least as demoting as the guard's, so the guard can
+never demote a row a helper meant to keep accepted, and the two can never
+disagree in the accepting direction.
+
+**A behaviour change worth naming.** A `scope_governs_source` edge from an
+`open` scope no longer opens a source on an instance whose witness-free
+resolution is stricter — in practice, one with a `strict` or `candidates_only`
+`DEFAULT_SCOPE`. Writes witnessed through that source now land as candidates
+where they used to land accepted. A deployment that used an open source scope as
+an exception to a strict default keeps it by giving those subjects their own
+`scope_governs_subject` edge to the open scope: direct subject coverage is
+resolved identically with and without a witness, so both resolutions agree and
+the exception holds.
+
+The same rule removes a silent divergence that pre-dates this migration. In that
+fixture with no incumbent, `record_assertion()` already said `accepted` and the
+guard already wrote `candidate`; now the helper demotes deliberately and the
+caller sees one answer from one place.
 
 **How the caller is told.** The signature does not change and neither does the
 return type: `supersede_assertion()` returns the new row's id, whether that row
@@ -1007,7 +1046,7 @@ What each caller of `governing_scope()` sees:
 | `record_assertion()` | resolves the strictest governing scope. A caller passing `p_scope_node_id` for a looser scope on a subject two scopes govern now gets `Explicit scope % does not match governing scope %` where it did not before. The type is canonicalized in the strictest scope. |
 | `accept_assertion()` | an `agent:*` caller now needs `rye.authoritative.promote` for the strictest governing scope, not for whichever sorted first. A narrowing, and the intended one. |
 | `record_distillation()` | reads `digest_facets:<node_type>` from the strictest scope. |
-| the insert guard in "The row is the gate, not the route" | resolves with no witness, as before, and takes the strictest of whatever the witness-free branches produce. The witness asymmetry between the guard and `accept_assertion()` is unchanged and is still a stated limit. |
+| the insert guard in "The row is the gate, not the route" | resolves with no witness, as before, and takes the strictest of whatever the witness-free branches produce, which includes falling through to `DEFAULT_SCOPE`. The helpers meet it there by taking the stricter of both resolutions, so the two never disagree in the accepting direction. |
 | `agent_can_promote_in_scope()` | unchanged. It answers about the scope it is handed. |
 | `compile_scope_policy()`, `rye_agent_context()`, the CLI `--scope` option | unchanged. They take an explicit scope and never call `governing_scope()`. |
 

@@ -123,11 +123,88 @@ it existed:
 - `accept_assertion()` does not insert.
 
 The one direction that could strand a key is the guard being *stricter* than the
-helper, and it cannot be: the guard resolves the scope with a null witness while
-the helpers pass one, and the witness branch in `governing_scope()` runs only
-after the subject, inheritance, and type branches have all produced nothing. So
-the guard's scope is the helper's scope or none at all, and its policy is the
-helper's policy or `open`. That asymmetry stays and is still a stated limit.
+helper. The next section is how that is prevented; the paragraph that used to
+stand here claimed it could not happen and was wrong.
+
+### Corrected 2026-09-20, after verification: the helper takes the stricter of two resolutions
+
+The first draft of this record argued that the guard's scope is "the helper's
+scope or none at all, and its policy is the helper's policy or `open`", because
+the witness branch of `governing_scope()` runs only after the subject,
+inheritance, and type branches produce nothing. That is false, and the Verifier
+reproduced it on both owner types as `team_member`. The witness branch runs
+before `DEFAULT_SCOPE`, so a witness-free resolution does not stop at nothing —
+it **falls through to `DEFAULT_SCOPE`**, which can be stricter than the witness
+scope.
+
+The fixture: a subject with no direct, `has_step`, or type coverage; an accepted
+incumbent whose `assertion_evidence` carries `witness_node_id = W`; a
+`scope_governs_source` edge from an **open** scope to `W`; and a **strict**
+`DEFAULT_SCOPE`. `supersede_assertion()` resolved `open`, took the accepting
+branch, ended the incumbent and inserted the replacement accepted;
+`assertions_insert_review_guard()` resolved `strict` and demoted it;
+`trg_assertions_transition_complete` refused the commit with the key holding
+nothing. On a tree without `0027` the same call commits, because `0025`'s
+exemption kept the replacement accepted — so removing the exemption without this
+correction is a regression.
+
+**The rule: every helper that inserts an assertion resolves the governing scope
+twice and takes the stricter of the two review policies** — once with its
+primary witness, once with none — compared with `scope_review_policy_rank()`.
+The scope *id* the helper reports and passes on is unchanged and is still the
+witness-resolved one, because that is what the capability check, the scoped type
+resolution, the scoped registry read, and the `p_scope_node_id` mismatch test
+are about. Only the policy is the maximum. Helper policy is then always at least
+as demoting as the guard's, so the guard can never demote a row a helper meant
+to keep accepted, in any fixture, without the guard reading evidence that does
+not exist yet and without anything reading past RLS.
+
+Rejected: restoring a narrow exemption in the guard. It would have to be
+narrowed to exactly the disagreement this rule removes, which means expressing
+the helper's witness resolution inside a trigger that has no evidence to read;
+and any exemption at all reopens the raw supersede-and-replace route under
+`strict`, which is the thing this record closes. With the stricter-of-two rule
+the exemption has nothing left to do.
+
+Rejected: giving the guard the witness. Evidence is written after the assertion,
+so at `BEFORE INSERT` there is nothing to read. That asymmetry is why the fix
+belongs on the helper's side.
+
+**What this changes for a deployment, plainly.** A `scope_governs_source` edge
+from an `open` scope no longer opens a source on an instance whose witness-free
+resolution is stricter — in practice, one with a `strict` or `candidates_only`
+`DEFAULT_SCOPE`. Writes witnessed through that source land as candidates where
+they used to land accepted. Anyone using an open source scope as an exception to
+a strict default keeps it by giving those subjects their own
+`scope_governs_subject` edge to the open scope, because direct subject coverage
+resolves identically with and without a witness. This is a visible behaviour
+change and belongs in the work item's "Assumed by default" list for Casey to
+overturn.
+
+**It also removes a divergence that pre-dates `0027`.** In the same fixture with
+no incumbent, `record_assertion()` under `0025` already returned a row it called
+accepted while the guard wrote `candidate`. That silent disagreement is closed
+by the same rule: the helper now demotes deliberately and says so.
+
+**Per helper.**
+
+- `supersede_assertion()` — takes the stricter of the two. This is the reported
+  regression.
+- `record_assertion()` — takes the stricter of the two, for both the incumbent
+  case, where the commit check would otherwise refuse, and the no-incumbent
+  case, where the guard would otherwise demote behind the helper's back.
+- `record_distillation()` — takes the stricter of the two. It supersedes the
+  digest incumbent only when its own write is accepted, so it reaches the same
+  refusal in the same fixture.
+- `resolve_knowledge_gap()` — inherits the fix through
+  `supersede_assertion()`; no change beyond the one this record already makes.
+- `accept_assertion()` — **unchanged**, and deliberately. It performs no
+  `INSERT`, so it cannot produce a helper-versus-guard disagreement; its only
+  use of the policy is the `agent:*` promotion gate, and the witness asymmetry
+  there is the pre-existing stated limit, neither closed nor widened here.
+- `merge_nodes()` — unchanged, and owned by `0026`. It inserts the copy before
+  marking the duplicate's row, so it has always been judged by the canonical
+  node's witness-free policy on both sides.
 
 The consequence for the raw supersede-and-replace shape is a refusal rather than
 a demotion: the incumbent was ended, the replacement is demoted to candidate,
@@ -259,16 +336,61 @@ rest. Every case runs under a non-superuser role and is repeated under
     `rye.authoritative.promote` for the open scope only cannot accept on a
     subject the strict scope also governs, and one holding it for the strict
     scope can.
-15. The suite fails on a tree without `0027`, under both owner types. Run it
-    once against the previous migration set and record that it fails.
-16. `./scripts/test-all.sh` passes, on the builder's own
+15. **The witness-versus-`DEFAULT_SCOPE` fixture, built exactly as the Verifier
+    built it**, as `team_member` under both owner types: a subject with no
+    direct, `has_step`, or type coverage; a `scope_governs_source` edge from an
+    **open** scope to a witness node `W`; a **strict** `DEFAULT_SCOPE`; and an
+    accepted incumbent whose `assertion_evidence` carries
+    `witness_node_id = W`. Anti-vacuity first: assert
+    `governing_scope(subject, NULL, type, W)` and
+    `governing_scope(subject, NULL, type, NULL)` resolve to *different* scopes
+    with *different* policies, or the case proves nothing. Then:
+    - `supersede_assertion()` commits. The replacement is a `candidate`, the
+      incumbent is still accepted and unsuperseded, and `attrs.review_gate`
+      names `strict`. It must not raise, and it must not leave the key empty.
+    - `record_assertion()` **with** an incumbent on the tuple commits and lands
+      a candidate, leaving the incumbent standing.
+    - `record_assertion()` **without** an incumbent commits and lands a
+      candidate, and the status the helper returns matches the status in the
+      table. Run this one against a tree without `0027` too and record that the
+      helper and the row already disagreed there.
+    - `resolve_knowledge_gap()` commits, the resolution is a candidate, and the
+      gap is still open.
+    - `record_distillation()` commits, the digest is a candidate, and the digest
+      incumbent is still accepted.
+16. The same fixture with the `scope_governs_source` scope `strict` and
+    `DEFAULT_SCOPE` `open` — the stricter one on the other side — gives the same
+    answers, proving the rule is a maximum and not a preference for one
+    resolution.
+17. The remedy works: add a `scope_governs_subject` edge from the open scope to
+    the subject in the fixture, and the same calls land accepted again, because
+    direct coverage resolves identically with and without a witness.
+18. The suite fails on a tree without `0027`, under both owner types. Run it
+    once against the previous migration set and record that it fails. For
+    obligation 15 in particular, record that the tree without `0027` commits
+    the `supersede_assertion()` call, so the regression is visible as a
+    difference and not only as a pass.
+19. `./scripts/test-all.sh` passes, on the builder's own
     `COMPOSE_PROJECT_NAME` and an unused `RYE_POSTGRES_PORT`.
 
 ## What `0027` replaces, and what it must not touch
 
 Replaces: `supersede_assertion()` (live in 0017), `governing_scope()` (0018),
-`assertions_insert_review_guard()` (0025), and `resolve_knowledge_gap()` (0017).
-Adds `scope_review_policy_rank()`.
+`assertions_insert_review_guard()` (0025), `resolve_knowledge_gap()` (0017),
+`record_assertion()` (live in 0023), and `record_distillation()` (0018). Adds
+`scope_review_policy_rank()` and `effective_review_policy(p_subject_node_id,
+p_subject_edge_id, p_assertion_type, p_witness_node_id)`, which is the one place
+the stricter-of-two comparison lives so no helper writes it twice; when the
+witness is null it resolves once.
+
+`record_assertion()` is added to that list by the correction above and is
+confirmed free: `0026` replaces the seven tables' policies, `merge_nodes()`,
+`update_node_properties()`, and `capture_domain_change()`, and none of the six
+functions here. `record_distillation()` likewise.
+
+The migration comment that repeats the false claim, and the sentence in
+`docs/data-dictionary.md` that repeats it, are corrected with the same words as
+the section above.
 
 Must not touch, because `0026` replaces them for work/009: every `INSERT`,
 `UPDATE`, and `DELETE` policy on the seven core tables, `merge_nodes()` (0005),
