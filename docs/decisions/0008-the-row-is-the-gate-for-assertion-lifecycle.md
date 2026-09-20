@@ -1,6 +1,6 @@
 # 0008 The row is the gate for the assertion lifecycle
 
-Date: 2026-09-19. Work item: `work/007-assertion-lifecycle-gate.md`.
+Date: 2026-09-19. Work item: `work/008-assertion-lifecycle-gate.md`.
 Contract: `contracts/sql-surface.md`, section "The row is the gate, not the
 route". Areas: schema. Migration: `0025`.
 

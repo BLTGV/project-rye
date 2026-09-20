@@ -1,6 +1,6 @@
-# 007 assertion-lifecycle-gate
+# 008 assertion-lifecycle-gate
 
-- status: blocked on one ruling from Casey (see "Open ruling"). Four verifier passes; every HIGH is closed; one MEDIUM and one LOW remain, both rulings. Not merged.
+- status: open, integrating. Ruling received (see "Ruled by Casey"). Four verifier passes; every HIGH is closed; one MEDIUM and one LOW remain, both rulings. Not merged.
 - opened: 2026-09-19
 - areas: schema
 - contracts: contracts/sql-surface.md
@@ -86,7 +86,7 @@ strict to open, and that 0023 now refuses it. This item must not reopen it.
 - 2026-09-19, Casey: do not push.
 
 ## Assumed by default
-- Item number 007 and migration 0025, because another session holds work/004 with 0022 and work/006 with 0024. Overturn: Lead.
+- Item number 008 and migration 0025. Opened as 007; renumbered 2026-09-20 at integration because the other session had closed work/007-ci-nonsuperuser-owner by then. Reports below that say work/007 mean this item. Overturn: Lead.
 - The four other forged paths found during reproduction (window, outcome attrs, classification, and the supersede id) are in scope, since they are the same defect. Overturn: Casey.
 - Admin keeps the ability it has today. Whether an admin may do by raw UPDATE what a helper does is the Architect's call. Overturn: Architect.
 - Viewer and no-role callers being able to insert assertions at all is reported, and fixed here only if the Architect finds it is the same mechanism. Overturn: Architect.
@@ -106,6 +106,9 @@ ROLE to a non-superuser role, with writes committed and rows re-read:
 - Every helper in decision 0008 obligation 8 still commits, asserted by effect. accept_assertion() still refuses agent:t under strict. Test 30 is byte-identical to agent-roles and passes. Test 31 fails without 0025 and refuses a superuser. `./scripts/docker-test.sh test --reset --profiles crm,pm` passes from an empty volume. Constraint audit passes: no current_user, session_user, pg_has_role, SECURITY DEFINER, or new table; all seven functions declare search_path.
 - DOES NOT HOLD (open HIGH): a caller can end an accepted assertion by naming a replacement it cannot read back. Both replacement checks (0025 lines 426 and 558, `IF FOUND`) run under the caller's RLS, so a row the caller classifies above its own read level passes both. Reproduced as viewer, committed: forge the supersede settings, UPDATE the accepted row setting superseded_at and superseded_by to a new id, INSERT that id as a candidate of another type and key with classification 'restricted', COMMIT. The incumbent is ended and current_valid_assertions has 0 rows for the tuple. This is erasure, the thing this item exists to stop. It is the one fail-open decision 0008 section A chose on purpose.
 - DOES NOT HOLD (LOW): 0025 line 534 says the contract discloses that fail-open; the contract's list of limits does not.
+
+## Ruled by Casey, 2026-09-20
+Take the Lead's recommendation on both remaining findings: change no code, disclose the hidden-rival overlap as a stated limit and correct the false sentence, reword the erasure claim to "replaced, or moved into review". Also: integrate the other session's verified items (work/004 with 0022, work/006 with 0024, work/007-ci) so everything merges together. Architect wording: da2f316. Their branch merged into agent-roles at 285d694.
 
 ## Open ruling, 2026-09-20 (fourth pass, builder df43fa1, Architect 002044a)
 Closed and re-verified on df43fa1: the invisible-replacement erasure, in
