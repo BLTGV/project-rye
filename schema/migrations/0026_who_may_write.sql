@@ -8,17 +8,30 @@
 -- role set at all, could insert assertions, archive an onboarding_scope node,
 -- archive or delete the edge that says which scope governs a subject, and merge
 -- nodes. Any of those turns a strict area into an open one for helpers and raw
--- writes alike. This migration says who may write, in three parts:
+-- writes alike. This migration says who may write, in four parts:
 --
 --   A. the role list is the write list (`may_write` + `rye_role_may_write()`),
---      one conjunct on every INSERT/UPDATE/DELETE policy of the seven core
---      tables;
+--      enforced by `rye_gate_may_write()` -- one BEFORE ROW trigger on each of
+--      the seven core tables -- with the same test as a conjunct on every
+--      INSERT/UPDATE/DELETE policy as the second line;
 --   B. the governance structure is configuration, so it is admin-only — the
 --      test is row-local, on the row's own `node_type` or `edge_type`, so it
 --      reads no table and cannot recurse;
 --   C. `merge_nodes()` and `update_node_properties()` refuse before they lock,
 --      because SELECT ... FOR UPDATE applies the UPDATE policy as a silent
---      filter and would otherwise report a visible row as missing.
+--      filter and would otherwise report a visible row as missing;
+--   D. `capture_domain_change()` records under the reserved `system:cdc` role,
+--      so a tracked domain table still produces its CDC event when the
+--      application's session sets no Rye role -- the normal overlay case.
+--
+-- Why a trigger and not a policy alone: the first cut of this migration was a
+-- policy conjunct only, and on the Docker install, whose table owner is a
+-- superuser, a `viewer` still accepted a candidate through accept_assertion(),
+-- closed one through reject_candidate(), and rewrote attrs through
+-- mark_assertion_outcome(). All three are SECURITY DEFINER owned by that
+-- superuser, so RLS never ran and the conjunct never ran with it. A trigger
+-- fires for a superuser, inside a SECURITY DEFINER function, and on a raw write
+-- alike, and it needs no list of helpers to keep up to date.
 --
 -- What this protects and what it does not: session variables are Rye's only
 -- authorization. Every rule here reads the role in order to permit, because a
@@ -85,6 +98,101 @@ $$ LANGUAGE sql STABLE;
 
 COMMENT ON FUNCTION rye_role_may_write() IS
     'True when app.current_role is agent-shaped, or names a role_classification_access row whose may_write is true. False for viewer, for an unknown role name, and for an unset role. STABLE, SECURITY INVOKER, reads only app.current_role and role_classification_access (level 0), so it is safe in a policy on any table.';
+
+-- The reserved role capture_domain_change() swaps in around its record_event()
+-- call, and nothing else uses. It is an ordinary row in the role list rather
+-- than a forgeable named gate, which is why it is acceptable here and why
+-- app.write_path was not: the most a caller who sets it by hand can do is
+-- insert an event and a participant, which is strictly less than they could do
+-- by setting team_member. `public` is the narrowest classification set there
+-- is, and all it needs -- record_event() generates the event id before
+-- inserting, so it never reads events back, ep_insert_policy admits a
+-- participant without reading the node, and nothing on the path redacts.
+INSERT INTO role_classification_access (role_name, classifications, may_write)
+VALUES ('system:cdc', ARRAY['public'], true)
+ON CONFLICT (role_name) DO NOTHING;
+
+-- ---------------------------------------------------------------------------
+-- The gate itself. BEFORE ROW on each of the seven core tables, so it runs
+-- where RLS does not: for a superuser, and inside a SECURITY DEFINER function
+-- owned by one.
+--
+-- Row-level and not statement-level: a BEFORE STATEMENT trigger fires before
+-- every BEFORE ROW trigger whatever it is named, which would take
+-- trg_assertion_settle_gate's message away from
+-- tests/conformance/30_configuration_gate.sql, where it is load-bearing.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION rye_gate_may_write() RETURNS trigger
+SET search_path = rye, pg_catalog
+AS $$
+BEGIN
+    IF NOT rye_role_may_write() THEN
+        RAISE EXCEPTION
+            'A session that may not write attempted to % %. Set app.current_role to a role the instance allows to write.',
+            lower(TG_OP), TG_TABLE_NAME
+            USING ERRCODE = '42501';
+    END IF;
+
+    -- system:cdc is Rye recording a domain change, not a writing role.
+    IF current_setting('app.current_role', true) = 'system:cdc'
+       AND NOT (TG_OP = 'INSERT'
+                AND TG_TABLE_NAME IN ('events', 'event_participants'))
+    THEN
+        RAISE EXCEPTION
+            'system:cdc may only insert events and event participants; it attempted to % %.',
+            lower(TG_OP), TG_TABLE_NAME
+            USING ERRCODE = '42501';
+    END IF;
+
+    IF TG_OP = 'DELETE' THEN
+        RETURN OLD;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION rye_gate_may_write() IS
+    'BEFORE ROW trigger on the seven core tables. Raises 42501 when rye_role_may_write() is false, and when app.current_role is system:cdc and the write is not an INSERT into events or event_participants. Fires for a superuser and inside a SECURITY DEFINER function, which is where the RLS conjunct does not.';
+
+DROP TRIGGER IF EXISTS trg_nodes_gate_may_write ON nodes;
+CREATE TRIGGER trg_nodes_gate_may_write
+    BEFORE INSERT OR UPDATE OR DELETE ON nodes
+    FOR EACH ROW EXECUTE FUNCTION rye_gate_may_write();
+
+DROP TRIGGER IF EXISTS trg_edges_gate_may_write ON edges;
+CREATE TRIGGER trg_edges_gate_may_write
+    BEFORE INSERT OR UPDATE OR DELETE ON edges
+    FOR EACH ROW EXECUTE FUNCTION rye_gate_may_write();
+
+DROP TRIGGER IF EXISTS trg_events_gate_may_write ON events;
+CREATE TRIGGER trg_events_gate_may_write
+    BEFORE INSERT OR UPDATE OR DELETE ON events
+    FOR EACH ROW EXECUTE FUNCTION rye_gate_may_write();
+
+DROP TRIGGER IF EXISTS trg_event_participants_gate_may_write ON event_participants;
+CREATE TRIGGER trg_event_participants_gate_may_write
+    BEFORE INSERT OR UPDATE OR DELETE ON event_participants
+    FOR EACH ROW EXECUTE FUNCTION rye_gate_may_write();
+
+-- The name on assertions is a decision, not a convention: triggers fire in
+-- name order, and this one must fall after trg_assertion_settle_gate -- whose
+-- '%is Rye configuration%' message test 30 asserts -- and before
+-- trg_assertions_immutable and trg_assertions_insert_review, so the shape
+-- guards still run after the role is settled. Verified under C and en_US.UTF-8.
+DROP TRIGGER IF EXISTS trg_assertions_gate_may_write ON assertions;
+CREATE TRIGGER trg_assertions_gate_may_write
+    BEFORE INSERT OR UPDATE OR DELETE ON assertions
+    FOR EACH ROW EXECUTE FUNCTION rye_gate_may_write();
+
+DROP TRIGGER IF EXISTS trg_assertion_evidence_gate_may_write ON assertion_evidence;
+CREATE TRIGGER trg_assertion_evidence_gate_may_write
+    BEFORE INSERT OR UPDATE OR DELETE ON assertion_evidence
+    FOR EACH ROW EXECUTE FUNCTION rye_gate_may_write();
+
+DROP TRIGGER IF EXISTS trg_artifacts_gate_may_write ON artifacts;
+CREATE TRIGGER trg_artifacts_gate_may_write
+    BEFORE INSERT OR UPDATE OR DELETE ON artifacts
+    FOR EACH ROW EXECUTE FUNCTION rye_gate_may_write();
 
 -- ============================================================================
 -- B. THE GOVERNANCE STRUCTURE IS ADMIN-ONLY
@@ -556,6 +664,12 @@ BEGIN
             USING ERRCODE = '42501';
     END IF;
 
+    IF v_role = 'system:cdc' THEN
+        RAISE EXCEPTION
+            'merge_nodes is not available to system:cdc, which only records domain changes. A Rye admin or a team member merges.'
+            USING ERRCODE = '42501';
+    END IF;
+
     IF p_duplicate_id = p_canonical_id THEN
         RAISE EXCEPTION 'duplicate_id and canonical_id must be different';
     END IF;
@@ -739,4 +853,139 @@ END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION merge_nodes(uuid, uuid, text) IS
-    'Merge a duplicate node into a canonical one. Refuses, before it takes any lock and with SQLSTATE 42501: a role that may not write, an agent-shaped role, and a non-admin merging a node the governance structure touches. After those gates, "Duplicate node % not found" means absent or invisible and nothing else.';
+    'Merge a duplicate node into a canonical one. Refuses, before it takes any lock and with SQLSTATE 42501: a role that may not write, an agent-shaped role, system:cdc, and a non-admin merging a node the governance structure touches. After those gates, "Duplicate node % not found" means absent or invisible and nothing else.';
+
+-- ============================================================================
+-- D. CDC RECORDS UNDER A SYSTEM ROLE
+-- ============================================================================
+-- capture_domain_change() runs inside the application's own transaction on its
+-- own domain table, in a session that may set no Rye role at all -- which is
+-- the normal overlay deployment, not an edge case. Refusing its record_event()
+-- would fail the application's INSERT and put Rye in the way of the system of
+-- record; skipping the event would turn off the feature track_table() exists
+-- for. So it does neither.
+--
+-- The node lookup stays where it was, before the swap, under the calling
+-- session's own role and app.current_teams: node visibility is exactly what it
+-- was, and a mapped node the session cannot see still skips silently. Only the
+-- record_event() call runs as system:cdc, and the caller's value is restored on
+-- the normal path and in a re-raising EXCEPTION block. Rolling the
+-- subtransaction back would restore it anyway; the block is belt and braces.
+--
+-- An unset variable restores as the empty string, which matches no role row and
+-- is therefore the same "unknown" shape it was. `PERFORM set_config` resets
+-- FOUND, so nothing after the swap tests FOUND from before it -- the node
+-- lookup is already tested by its own variable.
+--
+-- The audit trail keeps the real caller: actor_system stays system:cdc, as it
+-- already was, and properties gain one additive key, session_role, carrying the
+-- caller's app.current_role before the swap, or null when none was set.
+
+CREATE OR REPLACE FUNCTION capture_domain_change() RETURNS trigger
+SET search_path = rye, pg_catalog, public
+AS $$
+DECLARE
+    v_node_id uuid;
+    v_change_type text;
+    v_old_data jsonb;
+    v_new_data jsonb;
+    v_record_id text;
+    v_pk_col text;
+    v_prev_role text;
+BEGIN
+    -- Determine the record identifier:
+    -- 1. Try the 'id' column (most common)
+    -- 2. Fall back to looking up from node_source_map via primary key
+    v_old_data := CASE WHEN TG_OP IN ('UPDATE', 'DELETE') THEN to_jsonb(OLD) ELSE NULL END;
+    v_new_data := CASE WHEN TG_OP IN ('INSERT', 'UPDATE') THEN to_jsonb(NEW) ELSE NULL END;
+
+    -- Use the row data to find the record_id from the appropriate column
+    IF TG_OP = 'DELETE' THEN
+        -- For DELETE, try 'id' field from OLD row
+        v_record_id := v_old_data->>'id';
+        IF v_record_id IS NULL THEN
+            -- Look up the PK column from pg_index
+            SELECT a.attname INTO v_pk_col
+            FROM pg_index i
+            JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
+            WHERE i.indrelid = (TG_TABLE_SCHEMA || '.' || TG_TABLE_NAME)::regclass
+              AND i.indisprimary
+            LIMIT 1;
+
+            IF v_pk_col IS NOT NULL THEN
+                v_record_id := v_old_data->>v_pk_col;
+            END IF;
+        END IF;
+    ELSE
+        v_record_id := v_new_data->>'id';
+        IF v_record_id IS NULL THEN
+            SELECT a.attname INTO v_pk_col
+            FROM pg_index i
+            JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
+            WHERE i.indrelid = (TG_TABLE_SCHEMA || '.' || TG_TABLE_NAME)::regclass
+              AND i.indisprimary
+            LIMIT 1;
+
+            IF v_pk_col IS NOT NULL THEN
+                v_record_id := v_new_data->>v_pk_col;
+            END IF;
+        END IF;
+    END IF;
+
+    IF v_record_id IS NULL THEN
+        RETURN COALESCE(NEW, OLD);
+    END IF;
+
+    -- Under the caller's own role, before any swap.
+    SELECT node_id INTO v_node_id
+    FROM node_source_map
+    WHERE source_schema = TG_TABLE_SCHEMA
+      AND source_table = TG_TABLE_NAME
+      AND source_id = v_record_id;
+
+    -- No graph node mapped, or the caller cannot see the mapping; skip silently
+    IF v_node_id IS NULL THEN RETURN COALESCE(NEW, OLD); END IF;
+
+    v_change_type := lower(TG_OP);
+    v_prev_role := current_setting('app.current_role', true);
+
+    BEGIN
+        PERFORM set_config('app.current_role', 'system:cdc', true);
+
+        PERFORM record_event(
+            p_event_type        := 'domain_change',
+            p_summary           := format('%s.%s %s (record %s)', TG_TABLE_SCHEMA, TG_TABLE_NAME, v_change_type, v_record_id),
+            p_properties        := jsonb_build_object(
+                'schema', TG_TABLE_SCHEMA,
+                'table', TG_TABLE_NAME,
+                'operation', v_change_type,
+                'record_id', v_record_id,
+                'session_role', nullif(v_prev_role, ''),
+                'old', v_old_data,
+                'new', v_new_data,
+                'changed_fields', CASE
+                    WHEN TG_OP = 'UPDATE' THEN (
+                        SELECT jsonb_object_agg(key, jsonb_build_object('old', v_old_data->key, 'new', value))
+                        FROM jsonb_each(v_new_data)
+                        WHERE v_old_data->key IS DISTINCT FROM v_new_data->key
+                    )
+                    ELSE NULL
+                END
+            ),
+            p_participant_ids   := ARRAY[v_node_id],
+            p_participant_roles := ARRAY['subject'],
+            p_actor             := 'system:cdc'
+        );
+
+        PERFORM set_config('app.current_role', coalesce(v_prev_role, ''), true);
+    EXCEPTION WHEN OTHERS THEN
+        PERFORM set_config('app.current_role', coalesce(v_prev_role, ''), true);
+        RAISE;
+    END;
+
+    RETURN COALESCE(NEW, OLD);
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION capture_domain_change() IS
+    'CDC trigger for tracked domain tables. Resolves the source node under the calling session''s own role, then records the domain_change event as the reserved system:cdc role and restores the caller''s role on every exit path. A tracked table''s writes never fail because of Rye''s role rules, and a tracked table always produces its event. properties.session_role carries the caller''s role, or null when none was set; actor_system stays system:cdc.';

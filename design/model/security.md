@@ -187,15 +187,55 @@ Default seed data:
 
 Agent roles (`agent:*`) can INSERT nodes, edges, events, event participants, assertions, and artifacts. They cannot DELETE any of these. Direct UPDATE is blocked — agents modify data only through approved function paths that set session flags.
 
-**Who may write at all.** Migration `0026` adds one conjunct,
-`rye_role_may_write()`, to every `INSERT`, `UPDATE`, and `DELETE` policy on the
-seven core tables. It is true when `app.current_role` is agent-shaped or names a
-`role_classification_access` row whose `may_write` column is true, and false for
-`viewer`, for an unknown role name, and for an unset role. The rule is a row in
-a table that is already the instance's role list, so a new read-only role is an
-`INSERT` and widening a role later is an `UPDATE`. The snippets below predate
-`0026` and omit that conjunct; the installed policies carry it, and
-`scripts/verify.sh` fails if any of the twenty-one does not.
+**Who may write at all.** Migration `0026` adds `rye_role_may_write()`: true
+when `app.current_role` is agent-shaped or names a `role_classification_access`
+row whose `may_write` column is true, false for `viewer`, for an unknown role
+name, and for an unset role. The rule is a row in a table that is already the
+instance's role list, so a new read-only role is an `INSERT` and widening a
+role later is an `UPDATE`.
+
+**It is enforced by a trigger, with the policy conjunct as the second line.** A
+policy alone holds on only one of Rye's two supported deployments. A
+`SECURITY DEFINER` function owned by a superuser runs with RLS switched off for
+itself, and on the superuser-owned Docker install a `viewer` still accepted a
+candidate through `accept_assertion()`, closed one through `reject_candidate()`,
+and rewrote `attrs` through `mark_assertion_outcome()`. So `rye_gate_may_write()`
+runs `BEFORE INSERT OR UPDATE OR DELETE ... FOR EACH ROW` on each of the seven
+core tables and raises `42501` when `rye_role_may_write()` is false — triggers
+fire for a superuser, inside a definer function, and on a raw write alike. The
+triggers are `trg_nodes_gate_may_write`, `trg_edges_gate_may_write`,
+`trg_events_gate_may_write`, `trg_event_participants_gate_may_write`,
+`trg_assertions_gate_may_write`, `trg_assertion_evidence_gate_may_write`, and
+`trg_artifacts_gate_may_write`. On `assertions` the name is chosen so the
+settle gate still sorts first and the shape guards still sort after.
+
+The same test stays as a conjunct on all twenty-one write policies: it is the
+cheaper refusal where the owner is bound by RLS, and it keeps `USING` and
+`WITH CHECK` doing the governance row test below. The snippets in this section
+predate `0026` and omit it; the installed policies carry it, and
+`scripts/verify.sh` fails if any of the twenty-one does not, or if any of the
+seven triggers is missing.
+
+**A refusal has two shapes, by owner.** A `BEFORE ROW` trigger only sees rows
+RLS admitted. Where the owner is bound by RLS a refused `UPDATE` or `DELETE`
+affects zero rows and raises nothing; where the owner is a superuser the rows
+are visited and the trigger raises `42501`. An `INSERT` raises on both. Assert
+the row, not one error text.
+
+**The CDC path records under `system:cdc`.** `capture_domain_change()` runs in
+the application's own transaction, and an application that does not know Rye
+exists sets no role. It resolves the source node under the caller's own
+visibility, then sets `app.current_role` to `system:cdc` around its
+`record_event()` call only and restores the caller's value on every exit path.
+`system:cdc` is an ordinary `role_classification_access` row with `may_write`
+true and `classifications` `ARRAY['public']`;  `rye_gate_may_write()` admits it
+for `INSERT` on `events` and `event_participants` and refuses it everywhere
+else, and `merge_nodes()` names it. A caller who sets it by hand can therefore
+do strictly less than one who sets `team_member`, which any caller with a raw
+connection can already do — the stated session-variable boundary, not a new
+hole, and the reason this is a role in the role list rather than a forgeable
+`app.write_path` gate. The event keeps `actor_system = 'system:cdc'` and gains
+`properties.session_role`, the caller's role before the swap or null.
 
 **The governance structure is admin-only.** The same policies carry a row-local
 test on the row's own type column: a `nodes` row whose `node_type` is
@@ -531,7 +571,7 @@ RLS is enabled and forced on all supporting and configuration tables.
 | SELECT | All roles (needed by `redact_properties()`) |
 | INSERT/UPDATE/DELETE | `admin` only |
 
-It is also the instance's list of role names. The governance policies in section 7 read it to decide whether a session is a named role, and the core write policies in section 2.5 read its `may_write` column to decide whether a session may write at all. Only `INSERT` was policed before `0026`; that migration adds the admin-only `UPDATE` policy the "widening a role is an UPDATE" rule needs.
+It is also the instance's list of role names. The governance policies in section 7 read it to decide whether a session is a named role, and the write gate and write policies in section 2.5 read its `may_write` column to decide whether a session may write at all. Only `INSERT` was policed before `0026`; that migration adds the admin-only `UPDATE` policy the "widening a role is an UPDATE" rule needs, and seeds the reserved `system:cdc` row.
 
 ---
 

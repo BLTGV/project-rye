@@ -1017,6 +1017,581 @@ BEGIN
 END
 $$;
 
+-- --------------------------------------------------------------------------
+-- Fixtures for obligations 11 and 12, as admin. Everything here hangs off one
+-- ungoverned subject, so the review policy is `open` and the admin half of
+-- each pair is expected to succeed outright. That premise is asserted, not
+-- assumed.
+-- --------------------------------------------------------------------------
+DO $$
+DECLARE
+    v_sub    uuid;
+    v_cand_a uuid;
+    v_cand_r uuid;
+    v_acc_o  uuid;
+    v_gap    uuid;
+    v_answer uuid;
+    v_kcand  uuid;
+    v_agent  uuid;
+    v_pred   uuid;
+    v_acc_s  uuid;
+    v_acc_f  uuid;
+BEGIN
+    PERFORM set_config('app.current_role', 'admin', true);
+    PERFORM set_config('app.current_user_id', 'test:who-may-write', true);
+    PERFORM set_config('app.current_teams', '', true);
+
+    INSERT INTO nodes (node_type, label, properties)
+    VALUES ('person', 'Definer probe subject', '{"suite":"who_may_write"}')
+    RETURNING id INTO v_sub;
+
+    IF scope_review_policy(governing_scope(v_sub, NULL, 'wmw_probe', NULL)) <> 'open' THEN
+        RAISE EXCEPTION
+            'Premise broken: the definer-probe subject is governed by %, so the admin half of each pair below would not be a clean success',
+            scope_review_policy(governing_scope(v_sub, NULL, 'wmw_probe', NULL));
+    END IF;
+
+    v_cand_a := record_assertion('wmw_probe', '{"value":"accept me"}', v_sub,
+        p_assertion_key := 'def:accept', p_status := 'candidate', p_basis := 'assumed');
+    v_cand_r := record_assertion('wmw_probe', '{"value":"reject me"}', v_sub,
+        p_assertion_key := 'def:reject', p_status := 'candidate', p_basis := 'assumed');
+    v_acc_o := record_assertion('wmw_probe', '{"value":"label me"}', v_sub,
+        p_assertion_key := 'def:outcome', p_status := 'accepted', p_basis := 'assumed');
+    v_acc_s := record_assertion('wmw_probe', '{"value":"supersede me"}', v_sub,
+        p_assertion_key := 'def:supersede', p_status := 'accepted', p_basis := 'assumed');
+    v_acc_f := record_assertion('wmw_probe', '{"value":"forge against me"}', v_sub,
+        p_assertion_key := 'def:forge', p_status := 'accepted', p_basis := 'assumed');
+
+    v_answer := record_assertion('wmw_probe', '{"value":"the answer"}', v_sub,
+        p_assertion_key := 'def:answer', p_status := 'accepted', p_basis := 'assumed');
+    v_gap := record_assertion('knowledge_gap', '{"question":"what?","status":"open"}', v_sub,
+        p_assertion_key := 'def:gap', p_status := 'accepted', p_basis := 'assumed');
+
+    v_kcand := create_knowledge_candidate(
+        p_candidate_kind := 'decision',
+        p_statement      := 'Who may write knowledge candidate',
+        p_created_by     := 'test:who-may-write');
+
+    v_agent := create_agent_identity('wmw_definer_agent', 'Who May Write Definer Agent', 'conformance');
+    PERFORM grant_agent_capability('wmw_definer_agent', 'rye.observation.create');
+    PERFORM grant_agent_capability('wmw_definer_agent', 'rye.candidate.create');
+
+    v_pred := record_prediction(
+        p_subject_node_id := v_sub,
+        p_subject_edge_id := NULL,
+        p_assertion_key   := 'def:prediction',
+        p_question        := 'Will the gate hold?',
+        p_outcome_key     := 'wmw_probe:def:outcome',
+        p_predicted_value := '{"value":"label me"}',
+        p_probability     := 0.8,
+        p_horizon         := now() - interval '1 day',
+        p_witness_node_id := v_sub,
+        p_actor           := 'test:who-may-write');
+
+    INSERT INTO wmw_fixture (k, v) VALUES
+        ('def_sub', v_sub::text),
+        ('def_cand_accept', v_cand_a::text),
+        ('def_cand_reject', v_cand_r::text),
+        ('def_acc_outcome', v_acc_o::text),
+        ('def_acc_supersede', v_acc_s::text),
+        ('def_acc_forge', v_acc_f::text),
+        ('def_gap', v_gap::text),
+        ('def_answer', v_answer::text),
+        ('def_kcand', v_kcand::text),
+        ('def_agent', v_agent::text),
+        ('def_prediction', v_pred::text);
+END
+$$;
+
+-- --------------------------------------------------------------------------
+-- Obligation 11. Every SECURITY DEFINER writer is refused for `viewer` and for
+-- an unset role, under both owner types.
+--
+-- This is the case the first verification missed. A `SECURITY DEFINER` helper
+-- owned by a superuser runs with RLS switched off for itself, so the policy
+-- conjunct never fires and a `viewer` accepted a candidate, closed one, and
+-- rewrote `attrs`. The gate is therefore a trigger, and the assertion here is
+-- the effect on the row rather than any error text: on an owner RLS binds the
+-- write is filtered away silently, and on a superuser owner the trigger raises.
+--
+-- The covered list is checked against `pg_proc` below rather than trusted, so
+-- a definer writer added later fails this suite instead of slipping through.
+-- --------------------------------------------------------------------------
+DO $$
+DECLARE
+    v_covered text[] := ARRAY[
+        'accept_assertion',
+        'agent_create_candidate',
+        'agent_submit_observation',
+        'mark_assertion_outcome',
+        'promote_candidate_node_to_assertion',
+        'reject_candidate',
+        'resolve_knowledge_gap',
+        'score_due_predictions'
+    ];
+    v_derived text[];
+    v_missing text[];
+BEGIN
+    SELECT array_agg(DISTINCT p.proname ORDER BY p.proname)
+    INTO v_derived
+    FROM pg_proc p
+    JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname = 'rye'
+      AND p.prosecdef
+      AND (
+          -- writes a core table itself
+          p.prosrc ~* '(insert\s+into|update\s+|delete\s+from)\s*(rye\.)?(nodes|edges|events|event_participants|assertions|assertion_evidence|artifacts)\M'
+          -- or reaches one through a helper that does
+          OR p.prosrc ~* '(record_event|record_assertion|record_artifact|mark_assertion_superseded|mark_assertion_outcome|accept_assertion|reject_candidate|append_assertion_evidence|create_knowledge_candidate|link_record|record_distillation)\s*\('
+      );
+
+    SELECT array_agg(d) INTO v_missing
+    FROM unnest(v_derived) d
+    WHERE NOT (d = ANY(v_covered));
+
+    IF v_missing IS NOT NULL THEN
+        RAISE EXCEPTION
+            'SECURITY DEFINER writers this suite does not cover: %. Add a case for each.',
+            array_to_string(v_missing, ', ');
+    END IF;
+    IF coalesce(array_length(v_derived, 1), 0) = 0 THEN
+        RAISE EXCEPTION
+            'Refusing to pass vacuously: the pg_proc derivation found no SECURITY DEFINER writers at all';
+    END IF;
+END
+$$;
+
+DO $$
+DECLARE
+    v_role     text;
+    v_sub      uuid := (SELECT v FROM wmw_fixture WHERE k = 'def_sub')::uuid;
+    v_cand_a   uuid := (SELECT v FROM wmw_fixture WHERE k = 'def_cand_accept')::uuid;
+    v_cand_r   uuid := (SELECT v FROM wmw_fixture WHERE k = 'def_cand_reject')::uuid;
+    v_acc_o    uuid := (SELECT v FROM wmw_fixture WHERE k = 'def_acc_outcome')::uuid;
+    v_gap      uuid := (SELECT v FROM wmw_fixture WHERE k = 'def_gap')::uuid;
+    v_answer   uuid := (SELECT v FROM wmw_fixture WHERE k = 'def_answer')::uuid;
+    v_kcand    uuid := (SELECT v FROM wmw_fixture WHERE k = 'def_kcand')::uuid;
+    v_agent    uuid := (SELECT v FROM wmw_fixture WHERE k = 'def_agent')::uuid;
+    v_pred     uuid := (SELECT v FROM wmw_fixture WHERE k = 'def_prediction')::uuid;
+    v_n        integer;
+BEGIN
+    FOREACH v_role IN ARRAY ARRAY['viewer', ''] LOOP
+        PERFORM set_config('app.current_role', v_role, true);
+        IF current_setting('app.current_role', true) IS DISTINCT FROM v_role THEN
+            RAISE EXCEPTION 'Role did not read back as "%"', v_role;
+        END IF;
+
+        BEGIN PERFORM accept_assertion(v_cand_a); EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN PERFORM reject_candidate(v_cand_r, 'who may write probe'); EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN PERFORM mark_assertion_outcome(v_acc_o, 'correct', '{}'::jsonb); EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN PERFORM resolve_knowledge_gap(v_gap, v_answer, 'test:who-may-write'); EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN
+            PERFORM promote_candidate_node_to_assertion(
+                p_candidate_id    := v_kcand,
+                p_subject_node_id := v_sub,
+                p_assertion_type  := 'wmw_probe',
+                p_assertion_key   := 'def:promoted',
+                p_claim           := '{"value":"promoted"}');
+        EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN
+            PERFORM agent_submit_observation(
+                p_agent_id  := v_agent,
+                p_statement := 'who may write observation');
+        EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN
+            PERFORM agent_create_candidate(
+                p_agent_id       := v_agent,
+                p_candidate_kind := 'decision',
+                p_statement      := 'who may write candidate');
+        EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN PERFORM score_due_predictions(); EXCEPTION WHEN OTHERS THEN NULL; END;
+
+        -- Nothing moved. Checked as admin, so an invisible row cannot look
+        -- like an unchanged one.
+        PERFORM set_config('app.current_role', 'admin', true);
+
+        IF (SELECT status FROM assertions WHERE id = v_cand_a) <> 'candidate' THEN
+            RAISE EXCEPTION 'Role "%" accepted a candidate through accept_assertion()', v_role;
+        END IF;
+        IF (SELECT status FROM assertions WHERE id = v_cand_r) <> 'candidate'
+           OR (SELECT superseded_at FROM assertions WHERE id = v_cand_r) IS NOT NULL THEN
+            RAISE EXCEPTION 'Role "%" closed a candidate through reject_candidate()', v_role;
+        END IF;
+        IF (SELECT attrs ? 'outcome' FROM assertions WHERE id = v_acc_o) THEN
+            RAISE EXCEPTION 'Role "%" labelled an outcome through mark_assertion_outcome()', v_role;
+        END IF;
+        IF (SELECT superseded_at FROM assertions WHERE id = v_gap) IS NOT NULL THEN
+            RAISE EXCEPTION 'Role "%" closed a gap through resolve_knowledge_gap()', v_role;
+        END IF;
+        IF (SELECT archived_at FROM nodes WHERE id = v_kcand) IS NOT NULL THEN
+            RAISE EXCEPTION 'Role "%" promoted a candidate node', v_role;
+        END IF;
+        SELECT count(*) INTO v_n FROM nodes
+        WHERE properties->>'statement' = 'who may write observation';
+        IF v_n <> 0 THEN
+            RAISE EXCEPTION 'Role "%" left % observation nodes behind', v_role, v_n;
+        END IF;
+        SELECT count(*) INTO v_n FROM nodes
+        WHERE node_type = 'knowledge_candidate'
+          AND properties->>'statement' = 'who may write candidate';
+        IF v_n <> 0 THEN
+            RAISE EXCEPTION 'Role "%" left % agent candidate nodes behind', v_role, v_n;
+        END IF;
+        IF (SELECT attrs ? 'outcome' FROM assertions WHERE id = v_pred) THEN
+            RAISE EXCEPTION 'Role "%" scored a prediction through score_due_predictions()', v_role;
+        END IF;
+    END LOOP;
+
+    -- Anti-vacuity: the same calls, the same fixture, the same run, as admin.
+    -- If any of these fails, the refusals above proved nothing.
+    PERFORM set_config('app.current_role', 'admin', true);
+
+    PERFORM accept_assertion(v_cand_a);
+    IF (SELECT status FROM assertions WHERE id = v_cand_a) <> 'accepted' THEN
+        RAISE EXCEPTION 'An admin could not accept the candidate';
+    END IF;
+
+    PERFORM reject_candidate(v_cand_r, 'who may write probe');
+    IF (SELECT superseded_at FROM assertions WHERE id = v_cand_r) IS NULL THEN
+        RAISE EXCEPTION 'An admin could not reject the candidate';
+    END IF;
+
+    PERFORM mark_assertion_outcome(v_acc_o, 'correct', '{}'::jsonb);
+    IF NOT (SELECT attrs ? 'outcome' FROM assertions WHERE id = v_acc_o) THEN
+        RAISE EXCEPTION 'An admin could not label an outcome';
+    END IF;
+
+    PERFORM resolve_knowledge_gap(v_gap, v_answer, 'test:who-may-write');
+    IF (SELECT superseded_at FROM assertions WHERE id = v_gap) IS NULL THEN
+        RAISE EXCEPTION 'An admin could not resolve the knowledge gap';
+    END IF;
+
+    PERFORM promote_candidate_node_to_assertion(
+        p_candidate_id    := v_kcand,
+        p_subject_node_id := v_sub,
+        p_assertion_type  := 'wmw_probe',
+        p_assertion_key   := 'def:promoted',
+        p_claim           := '{"value":"promoted"}');
+    IF (SELECT archived_at FROM nodes WHERE id = v_kcand) IS NULL THEN
+        RAISE EXCEPTION 'An admin could not promote the candidate node';
+    END IF;
+
+    PERFORM agent_submit_observation(
+        p_agent_id  := v_agent,
+        p_statement := 'who may write observation');
+    SELECT count(*) INTO v_n FROM nodes
+    WHERE properties->>'statement' = 'who may write observation';
+    IF v_n <> 1 THEN
+        RAISE EXCEPTION 'An admin''s agent_submit_observation left % nodes, expected 1', v_n;
+    END IF;
+
+    PERFORM agent_create_candidate(
+        p_agent_id       := v_agent,
+        p_candidate_kind := 'decision',
+        p_statement      := 'who may write candidate');
+    SELECT count(*) INTO v_n FROM nodes
+    WHERE node_type = 'knowledge_candidate'
+      AND properties->>'statement' = 'who may write candidate';
+    IF v_n <> 1 THEN
+        RAISE EXCEPTION 'An admin''s agent_create_candidate left % nodes, expected 1', v_n;
+    END IF;
+
+    PERFORM score_due_predictions();
+    IF NOT (SELECT attrs ? 'outcome' FROM assertions WHERE id = v_pred) THEN
+        RAISE EXCEPTION 'An admin could not score the due prediction';
+    END IF;
+END
+$$;
+
+-- --------------------------------------------------------------------------
+-- Obligation 12. The coverage tests 30 and 31 used to get from `viewer` and an
+-- unset role, which can no longer write at all, as refusals asserted by effect.
+-- --------------------------------------------------------------------------
+DO $$
+DECLARE
+    v_role    text;
+    v_path    text;
+    v_sub     uuid := (SELECT v FROM wmw_fixture WHERE k = 'def_sub')::uuid;
+    v_acc_s   uuid := (SELECT v FROM wmw_fixture WHERE k = 'def_acc_supersede')::uuid;
+    v_acc_f   uuid := (SELECT v FROM wmw_fixture WHERE k = 'def_acc_forge')::uuid;
+    v_scope   uuid := (SELECT v FROM wmw_fixture WHERE k = 'scope')::uuid;
+    v_before  assertions;
+    v_after   assertions;
+    v_n       integer;
+    v_new     uuid;
+BEGIN
+    PERFORM set_config('app.current_role', 'admin', true);
+    SELECT * INTO v_before FROM assertions WHERE id = v_acc_f;
+
+    FOREACH v_role IN ARRAY ARRAY['viewer', ''] LOOP
+        PERFORM set_config('app.current_role', v_role, true);
+        IF current_setting('app.current_role', true) IS DISTINCT FROM v_role THEN
+            RAISE EXCEPTION 'Role did not read back as "%"', v_role;
+        END IF;
+
+        BEGIN
+            PERFORM supersede_assertion(
+                v_acc_s, 'wmw_probe', v_sub, NULL, '{"value":"hijacked"}',
+                p_new_assertion_key := 'def:supersede', p_new_basis := 'assumed');
+        EXCEPTION WHEN OTHERS THEN NULL; END;
+
+        BEGIN
+            PERFORM schedule_assertion_change(
+                p_subject_node_id := v_sub,
+                p_subject_edge_id := NULL,
+                p_assertion_type  := 'wmw_probe',
+                p_assertion_key   := 'def:scheduled',
+                p_claim           := '{"value":"later"}',
+                p_effective_at    := now() + interval '1 day',
+                p_basis           := 'assumed');
+        EXCEPTION WHEN OTHERS THEN NULL; END;
+
+        BEGIN
+            PERFORM record_scope_policy(
+                p_scope_id    := v_scope,
+                p_policy_type := 'review_policy',
+                p_claim       := '{"review_policy":"open"}');
+        EXCEPTION WHEN OTHERS THEN NULL; END;
+
+        -- The five forged write paths, each with its matching id setting. The
+        -- update policy trusts them because any caller can set them; the role
+        -- rule does not.
+        FOREACH v_path IN ARRAY ARRAY[
+            'accept_assertion', 'supersede_assertion', 'assertion_effective_window',
+            'assertion_classification', 'assertion_outcome'
+        ] LOOP
+            BEGIN
+                PERFORM set_config('app.write_path', v_path, true);
+                PERFORM set_config('app.accept_assertion_id', v_acc_f::text, true);
+                PERFORM set_config('app.supersede_assertion_id', v_acc_f::text, true);
+                PERFORM set_config('app.effective_window_assertion_id', v_acc_f::text, true);
+                PERFORM set_config('app.classification_assertion_id', v_acc_f::text, true);
+                PERFORM set_config('app.outcome_assertion_id', v_acc_f::text, true);
+                UPDATE assertions
+                   SET status = 'candidate',
+                       effective_to = now() + interval '1 day',
+                       attrs = attrs || '{"forged":true}'::jsonb
+                 WHERE id = v_acc_f;
+            EXCEPTION WHEN OTHERS THEN NULL; END;
+            PERFORM set_config('app.write_path', '', true);
+        END LOOP;
+
+        PERFORM set_config('app.current_role', 'admin', true);
+
+        SELECT * INTO v_after FROM assertions WHERE id = v_acc_s;
+        IF v_after.status <> 'accepted' OR v_after.superseded_at IS NOT NULL THEN
+            RAISE EXCEPTION
+                'Role "%" superseded the incumbent: status %, superseded_at %',
+                v_role, v_after.status, v_after.superseded_at;
+        END IF;
+
+        SELECT count(*) INTO v_n FROM assertions WHERE assertion_key = 'def:scheduled';
+        IF v_n <> 0 THEN
+            RAISE EXCEPTION 'Role "%" left % scheduled assertions behind', v_role, v_n;
+        END IF;
+
+        IF scope_review_policy(v_scope) <> 'strict' THEN
+            RAISE EXCEPTION
+                'Role "%" relaxed the strict scope to % through record_scope_policy()',
+                v_role, scope_review_policy(v_scope);
+        END IF;
+
+        SELECT * INTO v_after FROM assertions WHERE id = v_acc_f;
+        IF v_after.status IS DISTINCT FROM v_before.status
+           OR v_after.effective_to IS DISTINCT FROM v_before.effective_to
+           OR v_after.attrs IS DISTINCT FROM v_before.attrs
+           OR v_after.superseded_at IS DISTINCT FROM v_before.superseded_at
+        THEN
+            RAISE EXCEPTION
+                'Role "%" changed the forge target: status % attrs %',
+                v_role, v_after.status, v_after.attrs;
+        END IF;
+    END LOOP;
+
+    -- Anti-vacuity: an admin still supersedes the same incumbent.
+    PERFORM set_config('app.current_role', 'admin', true);
+    v_new := supersede_assertion(
+        v_acc_s, 'wmw_probe', v_sub, NULL, '{"value":"replaced by an admin"}',
+        p_new_assertion_key := 'def:supersede', p_new_basis := 'assumed');
+    IF v_new IS NULL THEN
+        RAISE EXCEPTION 'An admin could not supersede the incumbent';
+    END IF;
+    IF (SELECT superseded_at FROM assertions WHERE id = v_acc_s) IS NULL THEN
+        RAISE EXCEPTION 'An admin''s supersession left the incumbent standing';
+    END IF;
+END
+$$;
+
+-- --------------------------------------------------------------------------
+-- Obligation 15. `system:cdc` can do strictly less than any other writing role.
+-- It is the role capture_domain_change() swaps in around its record_event()
+-- call, so it may insert an event and a participant, and nothing else anywhere.
+-- A caller who sets it by hand therefore gains less than by setting
+-- team_member, which any caller with a raw connection can already do.
+-- --------------------------------------------------------------------------
+DO $$
+DECLARE
+    v_marsh    uuid := (SELECT v FROM wmw_fixture WHERE k = 'marsh')::uuid;
+    v_scope    uuid := (SELECT v FROM wmw_fixture WHERE k = 'scope')::uuid;
+    v_gov_edge uuid := (SELECT v FROM wmw_fixture WHERE k = 'gov_edge')::uuid;
+    v_subject  uuid := (SELECT v FROM wmw_fixture WHERE k = 'subject')::uuid;
+    v_assert   uuid := (SELECT v FROM wmw_fixture WHERE k = 'assertion')::uuid;
+    v_artifact uuid := (SELECT v FROM wmw_fixture WHERE k = 'artifact')::uuid;
+    v_event    uuid;
+    v_ep       uuid;
+    v_failed   boolean;
+    v_state    text;
+    v_msg      text;
+    v_rows     integer;
+BEGIN
+    PERFORM set_config('app.current_role', 'system:cdc', true);
+    IF current_setting('app.current_role', true) IS DISTINCT FROM 'system:cdc' THEN
+        RAISE EXCEPTION 'Role did not read back as system:cdc';
+    END IF;
+    IF NOT rye_role_may_write() THEN
+        RAISE EXCEPTION 'Refusing to pass vacuously: system:cdc is not in the role list as a writer';
+    END IF;
+
+    -- What it may do: one event and one participant.
+    v_event := gen_random_uuid();
+    INSERT INTO events (id, event_type, occurred_at, summary, properties, actor_system)
+    VALUES (v_event, 'domain_change', now(), 'system:cdc probe',
+            '{"suite":"who_may_write"}', 'system:cdc');
+    INSERT INTO event_participants (event_id, node_id, role)
+    VALUES (v_event, v_marsh, 'subject')
+    RETURNING id INTO v_ep;
+
+    -- And nothing else, anywhere.
+    v_failed := false;
+    BEGIN
+        INSERT INTO nodes (node_type, label) VALUES ('person', 'cdc node');
+    EXCEPTION WHEN OTHERS THEN v_failed := true; v_state := SQLSTATE; END;
+    IF NOT v_failed OR v_state <> '42501' THEN
+        RAISE EXCEPTION 'system:cdc inserted a node (failed=%, sqlstate=%)', v_failed, v_state;
+    END IF;
+
+    v_failed := false;
+    BEGIN
+        INSERT INTO edges (edge_type, source_id, target_id)
+        VALUES ('knows', v_marsh, v_subject);
+    EXCEPTION WHEN OTHERS THEN v_failed := true; v_state := SQLSTATE; END;
+    IF NOT v_failed OR v_state <> '42501' THEN
+        RAISE EXCEPTION 'system:cdc inserted an edge (failed=%, sqlstate=%)', v_failed, v_state;
+    END IF;
+
+    v_failed := false;
+    BEGIN
+        INSERT INTO assertions (assertion_type, assertion_key, subject_node_id, claim, status, basis)
+        VALUES ('wmw_probe', 'cdc:refused', v_marsh, '{"value":"no"}', 'accepted', 'assumed');
+    EXCEPTION WHEN OTHERS THEN v_failed := true; v_state := SQLSTATE; END;
+    IF NOT v_failed OR v_state <> '42501' THEN
+        RAISE EXCEPTION 'system:cdc inserted an assertion (failed=%, sqlstate=%)', v_failed, v_state;
+    END IF;
+
+    v_failed := false;
+    BEGIN
+        INSERT INTO assertion_evidence (assertion_id, kind, event_id)
+        VALUES (v_assert, 'source', v_event);
+    EXCEPTION WHEN OTHERS THEN v_failed := true; v_state := SQLSTATE; END;
+    IF NOT v_failed OR v_state <> '42501' THEN
+        RAISE EXCEPTION 'system:cdc inserted assertion evidence (failed=%, sqlstate=%)', v_failed, v_state;
+    END IF;
+
+    v_failed := false;
+    BEGIN
+        INSERT INTO artifacts (artifact_type, content) VALUES ('cdc', '{}'::jsonb);
+    EXCEPTION WHEN OTHERS THEN v_failed := true; v_state := SQLSTATE; END;
+    IF NOT v_failed OR v_state <> '42501' THEN
+        RAISE EXCEPTION 'system:cdc inserted an artifact (failed=%, sqlstate=%)', v_failed, v_state;
+    END IF;
+
+    -- Update and delete on the two tables it may insert into. On an owner RLS
+    -- binds these are filtered to zero rows; on a superuser owner the trigger
+    -- raises. Both are refusals, so the row is what is asserted.
+    v_rows := 0;
+    BEGIN
+        UPDATE event_participants SET role = 'hijacked' WHERE id = v_ep;
+        GET DIAGNOSTICS v_rows = ROW_COUNT;
+    EXCEPTION WHEN OTHERS THEN v_rows := 0; END;
+    IF v_rows <> 0 OR (SELECT role FROM event_participants WHERE id = v_ep) = 'hijacked' THEN
+        RAISE EXCEPTION 'system:cdc updated an event participant';
+    END IF;
+
+    v_rows := 0;
+    BEGIN
+        DELETE FROM event_participants WHERE id = v_ep;
+        GET DIAGNOSTICS v_rows = ROW_COUNT;
+    EXCEPTION WHEN OTHERS THEN v_rows := 0; END;
+    IF v_rows <> 0 OR NOT EXISTS (SELECT 1 FROM event_participants WHERE id = v_ep) THEN
+        RAISE EXCEPTION 'system:cdc deleted an event participant';
+    END IF;
+
+    v_rows := 0;
+    BEGIN
+        UPDATE events SET summary = 'hijacked' WHERE id = v_event;
+        GET DIAGNOSTICS v_rows = ROW_COUNT;
+    EXCEPTION WHEN OTHERS THEN v_rows := 0; END;
+    IF v_rows <> 0 OR (SELECT summary FROM events WHERE id = v_event) = 'hijacked' THEN
+        RAISE EXCEPTION 'system:cdc updated an event';
+    END IF;
+
+    v_rows := 0;
+    BEGIN
+        DELETE FROM events WHERE id = v_event;
+        GET DIAGNOSTICS v_rows = ROW_COUNT;
+    EXCEPTION WHEN OTHERS THEN v_rows := 0; END;
+    IF v_rows <> 0 OR NOT EXISTS (SELECT 1 FROM events WHERE id = v_event) THEN
+        RAISE EXCEPTION 'system:cdc deleted an event';
+    END IF;
+
+    -- The governance structure, which is admin-only and therefore excludes it.
+    v_rows := 0;
+    BEGIN
+        UPDATE nodes SET archived_at = now() WHERE id = v_scope;
+        GET DIAGNOSTICS v_rows = ROW_COUNT;
+    EXCEPTION WHEN OTHERS THEN v_rows := 0; END;
+    IF v_rows <> 0 OR (SELECT archived_at FROM nodes WHERE id = v_scope) IS NOT NULL THEN
+        RAISE EXCEPTION 'system:cdc archived the scope node';
+    END IF;
+
+    v_rows := 0;
+    BEGIN
+        DELETE FROM edges WHERE id = v_gov_edge;
+        GET DIAGNOSTICS v_rows = ROW_COUNT;
+    EXCEPTION WHEN OTHERS THEN v_rows := 0; END;
+    IF v_rows <> 0 OR NOT EXISTS (SELECT 1 FROM edges WHERE id = v_gov_edge) THEN
+        RAISE EXCEPTION 'system:cdc deleted the governance edge';
+    END IF;
+
+    -- Artifacts it did not write, for completeness of "every operation".
+    v_rows := 0;
+    BEGIN
+        UPDATE artifacts SET content = '{"hijacked":true}' WHERE id = v_artifact;
+        GET DIAGNOSTICS v_rows = ROW_COUNT;
+    EXCEPTION WHEN OTHERS THEN v_rows := 0; END;
+    IF v_rows <> 0 OR (SELECT content->>'hijacked' FROM artifacts WHERE id = v_artifact) IS NOT NULL THEN
+        RAISE EXCEPTION 'system:cdc rewrote an artifact';
+    END IF;
+
+    -- And merge_nodes() names it.
+    v_failed := false;
+    BEGIN
+        PERFORM merge_nodes(v_marsh, v_subject);
+    EXCEPTION WHEN OTHERS THEN
+        v_failed := true; v_state := SQLSTATE; v_msg := SQLERRM;
+    END;
+    IF NOT v_failed
+       OR v_state <> '42501'
+       OR v_msg NOT LIKE '%merge_nodes is not available to system:cdc%'
+       OR v_msg LIKE '%not found%'
+    THEN
+        RAISE EXCEPTION 'system:cdc merge refusal was sqlstate % message "%"', v_state, v_msg;
+    END IF;
+
+    PERFORM set_config('app.current_role', 'admin', true);
+END
+$$;
+
 DO $$
 BEGIN
     RAISE NOTICE 'Who may write: all obligations passed';
