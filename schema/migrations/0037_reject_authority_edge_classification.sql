@@ -174,6 +174,8 @@ AS $$
 DECLARE
     v_author text := OLD.attrs->>'recorded_by';
     v_canon  text;
+    v_gated_as text;
+    v_marked boolean := false;
     v_roles  text[];
     v_role   text := coalesce(nullif(current_setting('app.current_role', true), ''), '');
 BEGIN
@@ -196,10 +198,54 @@ BEGIN
         END IF;
     END IF;
 
+    -- 0036 demotes a write whose WRITTEN name is gated even where the stored
+    -- canonical type is not -- the pre-gate alias case -- and marks the row
+    -- attrs.settle_gate with the allowed roles and the spelling that gated it.
+    -- That marker is this row's gate, exactly as it is for
+    -- assertion_settle_gate_guard(): a suggestion waiting for an admin must
+    -- not be closable by the role the demotion excluded, or the demotion
+    -- promises nothing. Read only when neither type lookup answered, so a
+    -- forged marker can add refusals and never remove one, and 0025 makes it
+    -- unstrippable.
+    IF v_roles IS NULL
+       AND jsonb_typeof(OLD.attrs->'settle_gate'->'allowed_roles') = 'array'
+    THEN
+        SELECT coalesce(array_agg(role.value #>> '{}'), '{}'::text[])
+        INTO v_roles
+        FROM jsonb_array_elements(OLD.attrs->'settle_gate'->'allowed_roles') AS role(value);
+        v_marked := true;
+        v_gated_as := coalesce(
+            nullif(OLD.attrs->'settle_gate'->>'gated_as', ''), OLD.assertion_type
+        );
+    END IF;
+
     IF v_roles IS NOT NULL THEN
         IF v_role = ANY(v_roles) THEN
             RETURN NEW;
         END IF;
+
+        -- One exception, and only on the marker: an agent may withdraw its
+        -- own. The stored type is ungated, so the row is an ordinary
+        -- suggestion that happened to be written under a gated spelling, and
+        -- withdrawing your own words decides nothing -- the configuration is
+        -- unchanged either way. The correction route the agent-ops guide and
+        -- three skills document (close your own pending suggestion, file a
+        -- corrected one) has to keep working. Closing SOMEBODY ELSE'S is the
+        -- harm, and it is still refused. A row whose stored type is gated has
+        -- no such exception: there, closing is deciding, whoever wrote it.
+        IF v_marked AND v_role LIKE 'agent:%' AND v_author = v_role THEN
+            RETURN NEW;
+        END IF;
+
+        IF v_marked THEN
+            RAISE EXCEPTION
+                'Assertion % is waiting on the settle gate for Rye configuration type %: only % may close a suggestion of that type, because closing it is deciding it. Its author may still withdraw it.',
+                OLD.id,
+                v_gated_as,
+                array_to_string(v_roles, ', ')
+                USING ERRCODE = 'insufficient_privilege';
+        END IF;
+
         RAISE EXCEPTION
             'Assertion type % is Rye configuration: only % may close a suggestion of that type, because closing it is deciding it.',
             OLD.assertion_type,
@@ -232,7 +278,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION assertion_rejection_authority_guard() IS
-    'BEFORE UPDATE on assertions, firing only on the rejection shape (a live candidate ending with no replacement). An admin closes any; a named writing role closes any except a settle-gated configuration type, tested on the stored and the canonical spelling; an agent-shaped session closes only a candidate whose attrs.recorded_by is its own role. Unknown authorship is not own authorship.';
+    'BEFORE UPDATE on assertions, firing only on the rejection shape (a live candidate ending with no replacement). An admin closes any; a named writing role closes any except a settle-gated configuration type, tested on the stored spelling, on the canonical one, and -- where both are ungated -- on attrs.settle_gate.allowed_roles, the marker 0036 writes when the written name was gated; an agent-shaped session closes only a candidate whose attrs.recorded_by is its own role, and may withdraw its own marked suggestion. Unknown authorship is not own authorship.';
 
 DROP TRIGGER IF EXISTS trg_assertions_reject_authority ON assertions;
 CREATE TRIGGER trg_assertions_reject_authority
@@ -270,6 +316,8 @@ DECLARE
     v_author text;
     v_canon text;
     v_candidate assertions;
+    v_gated_as text;
+    v_marked boolean := false;
     v_outcome text := lower(nullif(trim(coalesce(p_outcome, '')), ''));
     v_participant_ids uuid[];
     v_participant_roles text[];
@@ -297,8 +345,34 @@ BEGIN
         END IF;
     END IF;
 
+    -- 0036's marker is this row's gate where neither type lookup answered.
+    -- Same rule and same exception as the trigger; see its comment.
+    IF v_settle_roles IS NULL
+       AND jsonb_typeof(v_candidate.attrs->'settle_gate'->'allowed_roles') = 'array'
+    THEN
+        SELECT coalesce(array_agg(role.value #>> '{}'), '{}'::text[])
+        INTO v_settle_roles
+        FROM jsonb_array_elements(v_candidate.attrs->'settle_gate'->'allowed_roles') AS role(value);
+        v_marked := true;
+        v_gated_as := coalesce(
+            nullif(v_candidate.attrs->'settle_gate'->>'gated_as', ''),
+            v_candidate.assertion_type
+        );
+    END IF;
+
     IF v_settle_roles IS NOT NULL THEN
-        IF NOT (v_role = ANY(v_settle_roles)) THEN
+        v_author := v_candidate.attrs->>'recorded_by';
+        IF NOT (v_role = ANY(v_settle_roles))
+           AND NOT (v_marked AND v_role LIKE 'agent:%' AND v_author = v_role)
+        THEN
+            IF v_marked THEN
+                RAISE EXCEPTION
+                    'Assertion % is waiting on the settle gate for Rye configuration type %: only % may close a suggestion of that type, because closing it is deciding it. Its author may still withdraw it.',
+                    p_assertion_id,
+                    v_gated_as,
+                    array_to_string(v_settle_roles, ', ')
+                    USING ERRCODE = 'insufficient_privilege';
+            END IF;
             RAISE EXCEPTION
                 'Assertion type % is Rye configuration: only % may close a suggestion of that type, because closing it is deciding it.',
                 v_candidate.assertion_type,
@@ -351,7 +425,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION reject_candidate(uuid, text, text, text) IS
-    'Close a live candidate with a reason and an optional outcome label, recording a candidate_rejected event. Refuses before it writes anything: a settle-gated configuration type is closed only by its settle roles, and an agent-shaped session closes only a candidate it authored. The rule itself is trg_assertions_reject_authority, which binds the raw route too.';
+    'Close a live candidate with a reason and an optional outcome label, recording a candidate_rejected event. Refuses before it writes anything: a settle-gated configuration type -- by stored spelling, canonical spelling, or 0036''s attrs.settle_gate marker -- is closed only by its settle roles, an agent may withdraw its own marked suggestion, and an agent-shaped session otherwise closes only a candidate it authored. The rule itself is trg_assertions_reject_authority, which binds the raw route too.';
 
 -- ---------------------------------------------------------------------------
 -- 4. An edge carries its own classification.

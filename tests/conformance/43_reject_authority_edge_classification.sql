@@ -941,4 +941,151 @@ BEGIN
 END
 $$;
 
+-- ---------------------------------------------------------------------------
+-- 43.16 A suggestion demoted under a pre-gate alias is configuration too.
+--
+-- 0036 demotes a write whose WRITTEN name is settle-gated even where the
+-- stored (canonical) type is not, and marks the row `attrs.settle_gate`
+-- with the allowed roles and the spelling that gated it. Its own guard reads
+-- that marker when it refuses acceptance. The rejection rule reads it for the
+-- same reason: closing such a suggestion is deciding it, and a role the
+-- demotion excluded must not be able to make sure it never reaches an admin.
+--
+-- The author may still withdraw its own, which is the correction route.
+-- ---------------------------------------------------------------------------
+DO $$
+DECLARE
+    v_alias   uuid;
+    v_core    uuid;
+    v_failed  boolean;
+    v_m1      uuid;
+    v_m2      uuid;
+    v_msg     text;
+    v_roles   text[];
+    v_row     assertions;
+    v_subject uuid;
+BEGIN
+    PERFORM set_config('app.current_role', 'admin', true);
+    PERFORM set_config('app.current_teams', '', true);
+
+    SELECT id INTO v_core FROM nodes
+    WHERE external_source = 'rye_registry' AND external_id = 'core' AND archived_at IS NULL;
+
+    SELECT allowed_roles INTO v_roles FROM assertion_type_access
+    WHERE assertion_type = 'review_policy' AND operation = 'settle';
+    IF v_roles IS NULL THEN
+        RAISE EXCEPTION 'Premise broken: review_policy is not settle-gated on this instance';
+    END IF;
+
+    -- The alias is recorded in the window before the type was gated, which is
+    -- the only window in which it can be recorded at all. Same fixture as
+    -- tests/conformance/42_leftovers.sql.
+    DELETE FROM assertion_type_access
+    WHERE assertion_type = 'review_policy' AND operation = 'settle';
+    v_alias := record_assertion(
+        'registry_entry', '{"value":"reject_probe_policy_note"}', v_core,
+        p_assertion_key := 'type_alias:assertion_type:review_policy',
+        p_status := 'accepted', p_basis := 'assumed'
+    );
+    INSERT INTO assertion_type_access (assertion_type, operation, allowed_roles)
+    VALUES ('review_policy', 'settle', v_roles);
+
+    IF canonical_type('assertion_type', 'review_policy') = 'review_policy' THEN
+        RAISE EXCEPTION
+            'Refusing to pass vacuously: review_policy still canonicalizes to itself, so no alias stands';
+    END IF;
+    IF assertion_settle_roles(canonical_type('assertion_type', 'review_policy')) IS NOT NULL THEN
+        RAISE EXCEPTION
+            'Refusing to pass vacuously: the alias target is itself gated, so the type lookup would catch it';
+    END IF;
+
+    INSERT INTO nodes (node_type, label) VALUES ('thing', 'Reject Marker Subject One')
+    RETURNING id INTO v_subject;
+
+    PERFORM set_config('app.current_role', 'agent:alpha', true);
+    v_m1 := record_assertion(
+        'review_policy', '{"review_policy":"open"}', v_subject,
+        p_assertion_key := 'default', p_status := 'accepted', p_basis := 'assumed'
+    );
+    SELECT * INTO v_row FROM assertions WHERE id = v_m1;
+    IF v_row.status <> 'candidate'
+       OR NOT (v_row.attrs->'settle_gate'->'allowed_roles' @> '["admin"]'::jsonb)
+       OR v_row.attrs->'settle_gate'->>'gated_as' IS DISTINCT FROM 'review_policy'
+    THEN
+        RAISE EXCEPTION
+            'Premise broken: the demotion under the pre-gate alias landed % with settle_gate %',
+            v_row.status, v_row.attrs->'settle_gate';
+    END IF;
+    IF assertion_settle_roles(v_row.assertion_type) IS NOT NULL THEN
+        RAISE EXCEPTION
+            'Refusing to pass vacuously: the stored type % is itself gated, so the marker decides nothing',
+            v_row.assertion_type;
+    END IF;
+    IF v_row.attrs->>'recorded_by' IS DISTINCT FROM 'agent:alpha' THEN
+        RAISE EXCEPTION 'Premise broken: the marked suggestion is not attributed to agent:alpha';
+    END IF;
+
+    -- A second one, identical, so the admin case has a live row of its own.
+    PERFORM set_config('app.current_role', 'agent:alpha', true);
+    v_m2 := record_assertion(
+        'review_policy', '{"review_policy":"candidates_only"}', v_subject,
+        p_assertion_key := 'second', p_status := 'accepted', p_basis := 'assumed'
+    );
+
+    -- team_member: a writing role the demotion excluded. Refused.
+    PERFORM set_config('app.current_role', 'team_member', true);
+    v_failed := false;
+    BEGIN
+        PERFORM reject_candidate(v_m1, 'closing a marked configuration suggestion');
+    EXCEPTION WHEN OTHERS THEN
+        v_failed := true;
+        v_msg := SQLERRM;
+    END;
+    IF NOT v_failed THEN
+        RAISE EXCEPTION
+            'team_member closed a suggestion carrying attrs.settle_gate that names only %',
+            v_roles;
+    END IF;
+    IF v_msg NOT LIKE '%Rye configuration%' THEN
+        RAISE EXCEPTION 'the marked suggestion refusal had the wrong reason: %', v_msg;
+    END IF;
+
+    -- Another agent is refused too: it is neither allowed nor the author.
+    PERFORM set_config('app.current_role', 'agent:beta', true);
+    v_failed := false;
+    BEGIN
+        PERFORM reject_candidate(v_m1, 'another agent closing it');
+    EXCEPTION WHEN OTHERS THEN
+        v_failed := true;
+    END;
+    IF NOT v_failed THEN
+        RAISE EXCEPTION 'agent:beta closed a marked configuration suggestion it did not write';
+    END IF;
+
+    PERFORM set_config('app.current_role', 'admin', true);
+    IF (SELECT superseded_at FROM assertions WHERE id = v_m1) IS NOT NULL THEN
+        RAISE EXCEPTION 'a refused caller closed the marked suggestion after all';
+    END IF;
+
+    -- The author withdraws its own: the correction route.
+    PERFORM set_config('app.current_role', 'agent:alpha', true);
+    PERFORM reject_candidate(v_m1, 'the author withdraws its own marked suggestion');
+    PERFORM set_config('app.current_role', 'admin', true);
+    IF (SELECT superseded_at FROM assertions WHERE id = v_m1) IS NULL THEN
+        RAISE EXCEPTION 'the authoring agent could not withdraw its own marked suggestion';
+    END IF;
+
+    -- An allowed role decides the other one.
+    PERFORM reject_candidate(v_m2, 'an admin decides the marked suggestion');
+    IF (SELECT superseded_at FROM assertions WHERE id = v_m2) IS NULL THEN
+        RAISE EXCEPTION 'an admin could not close a marked configuration suggestion';
+    END IF;
+
+    RAISE NOTICE 'PASS 43.16: a suggestion carrying attrs.settle_gate is closed by its allowed roles or by its author';
+
+    SET CONSTRAINTS ALL IMMEDIATE;
+    SET CONSTRAINTS ALL DEFERRED;
+END
+$$;
+
 ROLLBACK;

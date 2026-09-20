@@ -861,6 +861,15 @@ INSERT INTO access_grants (grantee, grant_type, resource_type, access_level, sco
     ('admin', 'role', 'node', 'read', '{"classification":"confidential"}'),
     ('admin', 'role', 'node', 'read', '{"classification":"restricted"}');
 
+-- The same grant for edges. Since 0037 an edge's own attrs.classification
+-- decides who may read it, with no admin exemption, exactly as for nodes. With
+-- the node rows alone an admin would keep every marked node and lose every
+-- marked edge the moment an operator marked one.
+INSERT INTO access_grants (grantee, grant_type, resource_type, access_level, scope) VALUES
+    ('admin', 'role', 'edge', 'read', '{"classification":"internal"}'),
+    ('admin', 'role', 'edge', 'read', '{"classification":"confidential"}'),
+    ('admin', 'role', 'edge', 'read', '{"classification":"restricted"}');
+
 -- Explicit access grants for M&A (only 3 users + specific roles)
 INSERT INTO access_grants (grantee, grant_type, resource_type, access_level, scope) VALUES
     ('user:ma-lead', 'user', 'node', 'read', '{"classification":"restricted"}'),

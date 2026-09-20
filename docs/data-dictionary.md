@@ -28,7 +28,10 @@ Directed relationships between nodes with optional temporal bounds and weights.
 `attrs.teams` decide who may read the edge, ANDed with the unchanged rule that
 both endpoints must be visible. `attrs.teams` without an
 `attrs.classification` is refused at write time. Assertions about a hidden edge
-are hidden with it, and traversal inherits the same answer. See
+are hidden with it, and traversal inherits the same answer. There is no admin
+exemption, so an operator marking the first edge gives `admin` — or whoever
+must keep seeing it — a matching team or an `access_grants` row with
+`resource_type = 'edge'`, exactly as for nodes. See
 `enforce_edge_classification_with_teams()`.
 
 #### `events` — Activity Log
@@ -928,6 +931,16 @@ bookkeeping:
 | named role with `may_write` | any **except** an assertion type carrying a `settle` row |
 | agent-shaped (`agent:<key>`) | only one whose `attrs.recorded_by` is its own role, and never a settle-gated type |
 | `viewer`, unset, unknown, `system:cdc` | none, as "who may write" already says |
+
+A type is settle-gated by its stored spelling, by the spelling
+`canonical_type()` resolves it to, or — where both are ungated — by
+`attrs.settle_gate.allowed_roles`, the marker `record_assertion()` writes when
+the **written** name was gated and the canonical one was not (`0036`). A row
+carrying that marker is a suggestion waiting for an admin, so the role the
+demotion excluded may not close it either. Its author is the one exception: an
+agent may withdraw its own marked suggestion, because the stored type is
+ungated and withdrawing your own words decides nothing. A row whose stored type
+is gated has no such exception.
 
 `reject_candidate()` refuses before it labels an outcome or marks the row, so a
 refused rejection records no `candidate_rejected` event and the candidate is
