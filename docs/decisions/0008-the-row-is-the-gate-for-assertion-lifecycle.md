@@ -105,10 +105,26 @@ successor, the acceptance event — treats "not visible" as failure, because the
 caller is claiming the row makes its write legitimate and an unreadable row
 proves nothing. A check that searches for a conflicting row — the accepted
 rival on a promotion, the superseded incumbent that earns the insert exemption
-— must not, because there invisibility withholds nothing from the caller and
-inverting it would refuse every promotion and demote every replacement. Both
-directions are already restrictive in the sense the settlement contract means:
-a caller that sees less gets less.
+— must not, because inverting it would refuse every promotion and demote every
+replacement for any caller who cannot see the whole tuple.
+
+**What the conflict searches cost, ruled 2026-09-20 by Casey: disclose it,
+change no code.** A caller who cannot read an accepted rival, because it is
+classified above the caller's level, can raw-promote a visible candidate on the
+same tuple and leave two accepted rows covering one instant. The
+inferred-displacement search has the same cause; no fixture could be built for
+it, so it is untested as well as open. An earlier draft of this record said the
+helper reads rivals the same way, and that is false in the reference install:
+`accept_assertion()` is `SECURITY DEFINER`, so where the table owner is a
+superuser — the Docker test database — it reads past RLS and ends the hidden
+incumbent, leaving one row, while the raw path leaves two. Where the owner is
+bound by RLS, as on Supabase, helper and raw path agree. A `SECURITY DEFINER`
+reader in the guard was rejected on three grounds: refusing on a row the caller
+may not see tells it that the row exists, it is a no-op in exactly the
+deployments Rye is written for, and reading past RLS to decide a caller's write
+is the route `design/model/deployment.md` refuses. A duplicate is not an
+erasure; both rows are visible to an admin, and this is the sixth stated limit
+in the contract.
 
 **Cost to `SECURITY INVOKER` versus `SECURITY DEFINER` helpers: none, and that
 is the point.** No helper changes. All five functions that update `assertions`
@@ -135,8 +151,9 @@ readable successor; rewrite `claim`,
 `basis`, `confidence`, `asserted_at`, `effective_at`, or the subject; delete
 `attrs` keys; set `classification` to anything but the derived value; un-set
 `superseded_at`; move an accepted row back to candidate; promote a candidate
-that is already superseded, or one with an accepted rival standing on its
-tuple, or one with no acceptance event. Can: label an outcome by hand; promote
+that is already superseded, or one with a readable accepted rival standing on
+its tuple, or one with no acceptance event. Can: label an outcome by hand;
+promote a candidate whose only rival is one this caller cannot read; promote
 a candidate that no rule refuses, if it also writes the acceptance event; land
 a candidate; supersede an accepted row by writing a genuine replacement. That
 last one is not a hole but the shape of the rule: the fact is replaced, not
@@ -480,6 +497,14 @@ with the matching `app.*_assertion_id` set to the target row.
     fail-closed rule did not catch a helper: `supersede_assertion()` on an
     `internal` assertion as a `team_member` still commits, and the replacement
     is readable by that role.
+18. A replacement that is a candidate is allowed, and the suite must pin that
+    rather than leave it to be discovered. End an accepted row naming a
+    readable same-tuple replacement that is a `candidate`: it commits, the
+    tuple then has no accepted value, and the content stands in `review_queue`
+    for an admin to accept. Reach the same state through `merge_nodes()` with
+    the canonical subject in a `strict` scope, which is why the rule is written
+    this way. Nothing is lost is the assertion under test, not "an accepted
+    value always stands".
 
 ## I. The protection boundary
 
@@ -493,10 +518,19 @@ instructions. It is not a defence against a hostile caller with a raw
 connection.
 
 Inside that, three claims hold for any caller at all, forged role included,
-because they read no role: an accepted assertion cannot be ended without a
-replacement of the same type and key; a window cannot be narrowed without a
-successor; and an assertion's claim, basis, confidence, and subject cannot be
-rewritten. Nothing anywhere may claim more than that.
+because they read no role: an accepted assertion is ended only by a readable
+assertion of the same type and key taking its place, accepted or waiting in
+`review_queue`; a window cannot be narrowed without a successor; and an
+assertion's claim, basis, confidence, and subject cannot be rewritten. Nothing
+anywhere may claim more than that.
+
+The first claim says "taking its place", not "accepted", on purpose. Requiring
+the replacement to be accepted would break `merge_nodes()` under a strict
+scope, where the copy is demoted to a candidate by the review policy — the
+default this decision already took in B. So a tuple can be left with its
+content in review and no current value. Nothing is lost and an admin can accept
+it, which is the promise; "never ends with nothing replacing it" read stronger
+than the rule and has been corrected here and in the contract.
 
 ## Cost
 

@@ -190,7 +190,7 @@ produced by the same `set_config()` this section closes.
 | Column | May change |
 |---|---|
 | `status` | `candidate` to `accepted` only. Never back. The row must be a live candidate; no accepted, unsuperseded assertion on the same subject, type, and key may cover the instant the promoted row takes effect, which is `greatest(coalesce(effective_at, now()), now())`; and the acceptance must be accompanied by an `assertion_accepted` event naming the row. An `agent:*` caller under `candidates_only` or `strict`, or on a `pattern_claim`, additionally needs `rye.authoritative.promote` for the governing scope, which is the rule `accept_assertion()` already applied. |
-| `superseded_at` | Null to non-null once, and never back. On a row that was `accepted`, only when `superseded_by` is set in the same statement. **An accepted assertion never ends with nothing replacing it.** A candidate may still be closed with `superseded_by` null, which is how `reject_candidate()` records a rejection. |
+| `superseded_at` | Null to non-null once, and never back. On a row that was `accepted`, only when `superseded_by` is set in the same statement. **An accepted assertion ends only when a readable assertion of the same type and key takes its place** — accepted, or waiting in `review_queue` where the scope's policy put it. What it never does is end with nothing. A candidate may still be closed with `superseded_by` null, which is how `reject_candidate()` records a rejection. |
 | `superseded_by` | Null to non-null once, together with `superseded_at`, never to the row itself. The replacement must carry the same `assertion_type` and `assertion_key`, and when the ended row was `accepted` it must be a row this caller can read at commit. The subject may differ, because `merge_nodes()` replaces a duplicate's assertion with the canonical node's. |
 | `effective_to` | Narrowing only, to a non-null instant after `effective_at`, before the previous `effective_to`, and in the future. A successor accepted assertion on the same subject, type, and key must start where the window now ends. |
 | `attrs` | Only as an outcome label: the result must name an `outcome` in the recorded set, and no existing key may be dropped or have its value changed except the keys an outcome labelling writes. |
@@ -244,9 +244,9 @@ write at a level the caller can read, or to record the statement as a
 suggestion. Every helper survives this, because each takes the replacement's
 classification from the row it replaces or from evidence the caller can already
 see. The conflict searches are the other way round and stay that way: an
-invisible accepted rival does not block a promotion, because there invisibility
-already withholds nothing from the caller, and inverting it would refuse every
-promotion.
+invisible accepted rival does not block a promotion, and inverting that would
+refuse every promotion to every caller who cannot see the whole tuple. What it
+costs is the sixth limit below.
 
 **What this protects and what it does not.** Rye's authorization is session
 variables. A caller holding a raw connection can set `app.current_role` to
@@ -257,11 +257,12 @@ review by accident or by following bad instructions. It is not a defence
 against a hostile caller with a raw connection.
 
 Inside that boundary, three claims hold for every caller, forged role included,
-because they do not read a role at all: an accepted assertion cannot be ended
-without a replacement of the same type and key; a window cannot be narrowed
-without a successor; and `claim`, `basis`, `confidence`, and the subject of an
-assertion cannot be rewritten. Everything else is as strong as the deployment's
-control of the session.
+because they do not read a role at all: an accepted assertion is ended only by
+a readable assertion of the same type and key taking its place, which is either
+accepted or waiting in `review_queue`; a window cannot be narrowed without a
+successor; and `claim`, `basis`, `confidence`, and the subject of an assertion
+cannot be rewritten. Everything else is as strong as the deployment's control
+of the session.
 
 **Only `agent:*` callers are policy-gated on promotion.** A `viewer`, a
 `team_member`, and an unset role are tested for the shape of the transition and
@@ -271,7 +272,7 @@ this section re-derives that rule rather than inventing a wider one. Who may
 accept, for every other role, is the settlement question, and `rye_settlers()`
 is advisory by contract.
 
-Five limits are stated rather than hidden. An outcome label is
+Six limits are stated rather than hidden. An outcome label is
 shape-constrained, not role-constrained, so a caller may still label an outcome
 by hand. `supersede_assertion()` does not consult the review policy, so a
 caller who supersedes and replaces an accepted row still writes an accepted
@@ -281,10 +282,26 @@ written after the assertion, so a scope reached only through
 `scope_governs_source` does not demote a raw insert. And a caller who may
 accept through `accept_assertion()` under an `open` policy is a caller whose
 raw promotion is refused only by the missing acceptance event, which is a
-record, not a lock. And the rival test for a promotion is taken at one instant,
+record, not a lock. The rival test for a promotion is taken at one instant,
 the one the promoted row takes effect at, so two accepted rows may still
 overlap earlier in history; `current_valid_assertions` is protected, a
 reconstruction of a past moment is not.
+
+The sixth is the one a client is most likely to meet. **A rival the caller
+cannot read does not stop a raw promotion.** A caller whose role hides an
+accepted assertion — classified above its read level — can promote a visible
+candidate on the same subject, type, and key and leave two accepted rows
+covering the same instant. The inferred-displacement test has the same cause
+and the same gap, and no fixture exercises it. Where the two paths differ is
+worth knowing: `accept_assertion()` is `SECURITY DEFINER`, so in a deployment
+whose table owner is a superuser — the Docker reference install — it reads past
+RLS and ends the hidden incumbent, leaving one row, while the raw path leaves
+two; where the owner is bound by RLS, as on Supabase, the helper sees no more
+than the caller and the two paths agree. Reading past RLS in the guard was
+rejected: it would tell a caller that a row it may not see exists, it does
+nothing at all where the owner is bound by RLS, and it is the kind of route
+`design/model/deployment.md` refuses. The consequence is a duplicate, not an
+erasure, and an admin sees both rows.
 
 ## Settlement lookup
 
