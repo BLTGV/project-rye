@@ -55,6 +55,77 @@ models, against the item's constraint. Rejected:
 writer and gives the instance no list of who its roles are while its policies
 depend on there being one — the same argument that settled the read side.
 
+### Corrected 2026-09-20, after verification: a policy conjunct is not enough
+
+The Verifier reproduced and committed the hole under `SET ROLE` to a
+non-superuser on the Docker test database, whose owner is a superuser: as
+`viewer`, `accept_assertion()` accepted a candidate and wrote the event,
+`reject_candidate()` closed one, and `mark_assertion_outcome()` rewrote `attrs`
+— the last also with no role set. All three are `SECURITY DEFINER` owned by that
+superuser, so RLS never ran and the conjunct never ran with it. On the
+non-superuser owner all three were refused. The work item's criterion says "by
+raw SQL or through any helper", and the repository's default test database is
+the superuser-owned one, so this counts.
+
+**The rule: the gate is a trigger, and the policy conjunct is the second line.**
+One function, `rye_gate_may_write()`, on each of the seven core tables,
+`BEFORE INSERT OR UPDATE OR DELETE ... FOR EACH ROW`, raising `42501` when
+`rye_role_may_write()` is false. A trigger fires for a superuser, inside a
+`SECURITY DEFINER` function, and on a raw write alike. The conjunct stays as the
+cheaper refusal where the owner is bound by RLS and because `USING` and
+`WITH CHECK` still carry the governance row test.
+
+Rejected: (a), a first-statement refusal in each definer writer —
+`accept_assertion`, `reject_candidate`, `mark_assertion_outcome`,
+`resolve_knowledge_gap`, `promote_candidate_node_to_assertion`,
+`agent_create_candidate`, `agent_submit_observation`, `score_due_predictions`,
+and whatever `prosecdef` writers 0016, 0022, 0024 and the profiles hold. It
+copies eight-plus function bodies forward for a one-line check, it collides with
+`0027`, which replaces `resolve_knowledge_gap()` and sorts later and would
+silently drop the gate, and the next definer helper anyone writes forgets it.
+The trigger needs no list and cannot be forgotten, which is the same reason
+`0007-configuration-writes-need-an-admin` put the settle gate in a trigger
+rather than in each helper.
+
+Rejected: a statement-level trigger, which is cheaper on bulk paths. A
+`BEFORE STATEMENT` trigger fires before every `BEFORE ROW` trigger whatever it
+is named, so on `assertions` it would take `trg_assertion_settle_gate`'s message
+away from `tests/conformance/30_configuration_gate.sql`, whose
+`%is Rye configuration%` assertions are load-bearing. Row-level also keeps one
+mechanism rather than two, and `rye_role_may_write()` is one lookup on an
+eight-row table.
+
+Trigger names are in the contract. The one that is a decision rather than a
+convention is `trg_assertions_gate_may_write`, verified by sorting under both
+collations to fall after `trg_assertion_settle_gate` and before
+`trg_assertions_immutable` and `trg_assertions_insert_review`, so the settle
+gate's message still wins and the shape guards still run after the role is
+settled.
+
+**Two shapes of refusal, by owner.** A `BEFORE ROW` trigger only sees rows RLS
+admitted, so a refused `UPDATE` or `DELETE` raises where the owner is a
+superuser and affects zero rows where the owner is bound by RLS. Both are
+refusals. Every test below asserts the row, not the error text.
+
+**The CDC path must not refuse.** `capture_domain_change()` runs inside the
+application's own transaction on its own domain table, in a session that may set
+no role at all. Refusing its `record_event()` would fail the application's
+`INSERT`, and Rye would be getting in the way of the system of record — the
+overlay promise, and the one thing that must not break. So
+`capture_domain_change()` asks `rye_role_may_write()` and returns without
+recording an event when the answer is false, exactly as it already returns
+silently for a row that maps to no node. The domain write always succeeds and
+the event is not written. Rejected: exempting the CDC insert with a named
+`app.write_path`, which any caller can set and which would therefore be a
+general bypass of this whole record. Rejected: letting the refusal propagate and
+telling operators to set a role on every application connection, which is the
+overlay promise traded for a rule about Rye's own bookkeeping. The cost is
+stated in the contract: a tracked table written by a session with no role
+produces no CDC event.
+
+`refresh_materialized_views()` and `log_agent_query()` write no core table and
+need nothing. Migrations set `admin` themselves, as D already required.
+
 Rejected, and worth recording: **no admin exemption on the row rules.** Nothing
 here weakens `docs/decisions/0008`. Every rule in this record reads the role in
 order to permit, which is what a role model is, and the contract says so in
@@ -261,12 +332,46 @@ and suites run as `rye_owner` with no `SET ROLE`.
 10. An admin is not exempt from the row rules. A raw
     `UPDATE assertions SET superseded_at = now()` as `admin` is still refused by
     `0025`, proving `0026` added a role model and did not open a bypass.
-11. Every existing suite passes unmodified except the eight files in D, and each
+11. **Every `SECURITY DEFINER` writer is refused for `viewer` and for an unset
+    role, under both owner types.** This is the case the first verification
+    missed, so it is asserted by effect and not by an error text: for each of
+    `accept_assertion`, `reject_candidate`, `mark_assertion_outcome`,
+    `resolve_knowledge_gap`, `promote_candidate_node_to_assertion`,
+    `agent_create_candidate`, `agent_submit_observation`, and
+    `score_due_predictions`, the target row is unchanged afterwards. Derive the
+    list for the suite by
+    `SELECT proname FROM pg_proc WHERE prosecdef` in the `rye` schema rather
+    than from this paragraph, and cover every one of them that writes a core
+    table, including any in 0016, 0022, 0024 and the profiles. Anti-vacuity:
+    the same calls as `admin` must succeed, on the same fixture, in the same
+    run.
+12. **Coverage that tests 30 and 31 used to get from `viewer` and an unset
+    role** moves here as refusals, because those two can no longer write at
+    all: `accept_assertion`, `supersede_assertion`, `schedule_assertion_change`,
+    `record_scope_policy`, `mark_assertion_outcome`, and a raw `UPDATE` with
+    each of the five forged write paths — `accept_assertion`,
+    `supersede_assertion`, `assertion_effective_window`,
+    `assertion_classification`, `assertion_outcome` — with the matching
+    `app.*_assertion_id` set to the target row. Each refused, each row unchanged
+    afterwards, under both owner types. Tests 30 and 31 keep their `agent:t` and
+    `team_member` cases unmodified, and test 30's `%is Rye configuration%`
+    assertions still pass for `viewer` because the settle gate sorts first.
+13. **The CDC path under an unset application session.** `track_table()` a
+    domain table, then write it with `app.current_role` unset: the domain
+    `INSERT`, `UPDATE`, and `DELETE` all succeed, and no `domain_change` event
+    is written. Then set `admin` and repeat: the domain write succeeds and the
+    event is written. Anti-vacuity is the second half — a suite that only
+    asserts "no event" passes on a broken trigger that never fires.
+    `tests/conformance/07_domain_integration.sh` is the file, and this replaces
+    the plain "set `admin`" fix listed for it in D.
+14. Every existing suite passes unmodified except the eight files in D, and each
     of those changes is one added `set_config` line. The report lists them.
-12. The suite fails on a tree without `0026`. Run it once against the previous
+15. The suite fails on a tree without `0026`. Run it once against the previous
     migration set and record that it fails, before running it against the new
-    one, under both owner types.
-13. `./scripts/test-all.sh` passes, on the builder's own `COMPOSE_PROJECT_NAME`
+    one, under both owner types. Obligation 11 in particular must fail on the
+    superuser-owned database without `0026`, because that is the case the
+    policy-only version passed.
+16. `./scripts/test-all.sh` passes, on the builder's own `COMPOSE_PROJECT_NAME`
     and an unused `RYE_POSTGRES_PORT`.
 
 ## What `0026` replaces, and what it must not touch
@@ -274,9 +379,11 @@ and suites run as `rye_owner` with no `SET ROLE`.
 Replaces: the `INSERT`, `UPDATE`, and `DELETE` policies on `nodes`, `edges`,
 `events`, `event_participants`, `assertions`, `assertion_evidence`, and
 `artifacts` — taking the live definition of each as the last one in migration
-order — plus `merge_nodes()` (0005) and `update_node_properties()` (0007). Adds
-`rye_role_may_write()`, the `may_write` column, and the `scope_status` settle
-row.
+order — plus `merge_nodes()` (0005), `update_node_properties()` (0007), and
+`capture_domain_change()` (0002). Adds `rye_role_may_write()`,
+`rye_gate_may_write()` and its seven triggers, the `may_write` column, and the
+`scope_status` settle row. It replaces no `SECURITY DEFINER` helper, which is
+the point of the trigger.
 
 Must not touch, because `0027` replaces them for work/010: `governing_scope()`,
 `supersede_assertion()`, `assertions_insert_review_guard()`, and
