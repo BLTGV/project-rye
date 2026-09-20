@@ -134,6 +134,10 @@ SELECT rye.create_agent_identity('api-candidate-agent', 'API Candidate Agent', '
 SELECT rye.create_agent_identity('api-reviewer-agent', 'API Reviewer Agent', 'conformance');
 SELECT rye.create_agent_identity('api-title-agent', 'API Title Agent', 'conformance');
 SELECT rye.create_agent_identity('api-nograntee-agent', 'API No Grant Agent', 'conformance');
+SELECT rye.create_agent_identity('api-expiry-agent', 'API Expiry Agent', 'conformance');
+SELECT rye.create_agent_identity('api-inactive-agent', 'API Inactive Agent', 'conformance');
+SELECT rye.create_agent_identity('api-domain-admin-agent', 'API Domain Admin Agent', 'conformance');
+SELECT rye.create_agent_identity('api-instancewide-agent', 'API Instance-Wide Agent', 'conformance');
 
 SELECT rye.grant_agent_capability('api-candidate-agent', 'rye.context.read', 'api-account-updates');
 SELECT rye.grant_agent_capability('api-candidate-agent', 'rye.candidate.create', 'api-account-updates');
@@ -149,6 +153,32 @@ SELECT rye.grant_agent_capability('api-title-agent', 'rye.context.read', 'api-ti
 SELECT rye.grant_agent_capability('api-title-agent', 'rye.review.read', 'api-title-diligence');
 
 -- api-nograntee-agent gets no grants at all: it proves deny by default.
+
+-- Decision 0013, obligation 42.7: a token whose only grant for a route's
+-- capability is expired, or inactive, reaches nothing. Seeded in the state
+-- the test checks first; the test flips each grant live and back to prove
+-- the refusal tracks grant state rather than a one-time seed.
+SELECT rye.grant_agent_capability(
+  'api-expiry-agent', 'rye.context.read', 'api-account-updates', NULL, now() - interval '1 hour'
+);
+SELECT rye.grant_agent_capability('api-inactive-agent', 'rye.context.read', 'api-account-updates');
+UPDATE rye.agent_capability_grants
+SET active = false
+WHERE agent_id = (SELECT id FROM rye.agent_identities WHERE agent_key = 'api_inactive_agent')
+  AND capability = 'rye.context.read';
+
+-- The domains `properties` gate (`rye.domain.admin`) inherits expiry from the
+-- same source (authenticate_agent_token) and nothing else pins it. This agent
+-- holds a live rye.context.read (so it can see the domain row at all) and an
+-- expired rye.domain.admin grant.
+SELECT rye.grant_agent_capability('api-domain-admin-agent', 'rye.context.read', 'api-account-updates');
+SELECT rye.grant_agent_capability(
+  'api-domain-admin-agent', 'rye.domain.admin', 'api-account-updates', NULL, now() - interval '1 hour'
+);
+
+-- Decision 0013, obligation 42.8: a grant that names no area is instance-wide
+-- and holds every area, including candidates that carry no area keys at all.
+SELECT rye.grant_agent_capability('api-instancewide-agent', 'rye.review.read');
 
 -- A candidate that carries no area keys. Only a grant naming no area sees it.
 SELECT rye.create_knowledge_candidate(
@@ -205,6 +235,39 @@ reviewer_token="$(issue_token api-reviewer-agent 'api security reviewer token')"
 title_token="$(issue_token api-title-agent 'api security title token')"
 nogrant_token="$(issue_token api-nograntee-agent 'api security no-grant token')"
 expired_token="$(issue_token api-reviewer-agent 'api security expired token' "now() - interval '1 hour'")"
+expiry_token="$(issue_token api-expiry-agent 'api security grant-expiry token')"
+inactive_token="$(issue_token api-inactive-agent 'api security grant-inactive token')"
+domainadmin_token="$(issue_token api-domain-admin-agent 'api security domain-admin token')"
+instancewide_token="$(issue_token api-instancewide-agent 'api security instance-wide token')"
+
+# grant_id_for <agent_key> <capability> — the id of that grant, direct from
+# the table, so the test can flip it live and back without re-seeding.
+grant_id_for() {
+  psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atq <<SQL
+SET search_path = rye, public, pg_catalog;
+SELECT set_config('app.current_role', 'admin', false) \g /dev/null
+SELECT g.id
+FROM rye.agent_capability_grants g
+JOIN rye.agent_identities a ON a.id = g.agent_id
+WHERE a.agent_key = '$1' AND g.capability = '$2'
+LIMIT 1;
+SQL
+}
+
+# set_grant_state <grant_id> <active: true|false> <expires_at SQL expr, e.g. NULL or now() - interval '1 hour'>
+set_grant_state() {
+  psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atq >/dev/null <<SQL
+SET search_path = rye, public, pg_catalog;
+SELECT set_config('app.current_role', 'admin', false);
+UPDATE rye.agent_capability_grants
+SET active = $2, expires_at = $3
+WHERE id = '$1'::uuid;
+SQL
+}
+
+expiry_grant_id="$(grant_id_for api_expiry_agent rye.context.read)"
+inactive_grant_id="$(grant_id_for api_inactive_agent rye.context.read)"
+domainadmin_grant_id="$(grant_id_for api_domain_admin_agent rye.domain.admin)"
 
 RYE_INSTANCES="[{\"id\":\"api-security\",\"label\":\"API Security\",\"databaseUrl\":\"${DATABASE_URL}\"}]" \
 DEFAULT_INSTANCE="api-security" \
@@ -373,6 +436,57 @@ expect_present "title agent sees its own area" "$title_domains_json" '"domain_ke
 expect_absent "title agent cannot see account area" "$title_domains_json" '"domain_key":"api_account_updates"'
 expect_absent "title agent cannot see account authority" "$title_domains_json" "api-account-authority-marker"
 expect_absent "title agent cannot see account channel" "$title_domains_json" "slack:#api-account-marker"
+
+# ---------------------------------------------------------------------------
+# Decision 0013, obligation 42.7: expired and inactive grants reach nothing.
+# authenticate_agent_token() already filters both out of `auth.capabilities`,
+# so every capability test in the Worker inherits the refusal; this pins that
+# from the HTTP side. Each grant is flipped live and back, so the check is
+# not proving a one-time seed.
+# ---------------------------------------------------------------------------
+
+expect_status "expired grant reaches nothing" 403 -H "$(auth "$expiry_token")" "${BASE_URL}/api/catalog"
+set_grant_state "$expiry_grant_id" true "NULL"
+expect_status "live grant restores access" 200 -H "$(auth "$expiry_token")" "${BASE_URL}/api/catalog"
+set_grant_state "$expiry_grant_id" true "now() - interval '1 hour'"
+expect_status "expiring the grant again refuses again" 403 -H "$(auth "$expiry_token")" "${BASE_URL}/api/catalog"
+
+expect_status "inactive grant reaches nothing" 403 -H "$(auth "$inactive_token")" "${BASE_URL}/api/catalog"
+set_grant_state "$inactive_grant_id" true "NULL"
+expect_status "reactivating the grant restores access" 200 -H "$(auth "$inactive_token")" "${BASE_URL}/api/catalog"
+set_grant_state "$inactive_grant_id" false "NULL"
+expect_status "deactivating the grant again refuses again" 403 -H "$(auth "$inactive_token")" "${BASE_URL}/api/catalog"
+
+# The domains `properties` gate follows the same grant's expiry, not its own
+# check (docs/decisions/0013-leftovers-fail-restrictive.md, section C).
+domainadmin_expired_json="$(curl -sS -H "$(auth "$domainadmin_token")" "${BASE_URL}/api/domains")"
+expect_absent "expired rye.domain.admin grant hides properties" \
+  "$domainadmin_expired_json" "secret_internal_note"
+set_grant_state "$domainadmin_grant_id" true "NULL"
+domainadmin_live_json="$(curl -sS -H "$(auth "$domainadmin_token")" "${BASE_URL}/api/domains")"
+expect_present "live rye.domain.admin grant reveals properties" \
+  "$domainadmin_live_json" "secret_internal_note"
+set_grant_state "$domainadmin_grant_id" true "now() - interval '1 hour'"
+domainadmin_reexpired_json="$(curl -sS -H "$(auth "$domainadmin_token")" "${BASE_URL}/api/domains")"
+expect_absent "re-expiring the rye.domain.admin grant hides properties again" \
+  "$domainadmin_reexpired_json" "secret_internal_note"
+
+# ---------------------------------------------------------------------------
+# Decision 0013, obligation 42.8: the instance-wide grant predicate is pinned
+# from outside (contracts/admin-api.md, "Row filtering"). A grant that names
+# no area holds every area, including candidates that carry no area keys.
+# ---------------------------------------------------------------------------
+
+instancewide_keyless="$(curl -sS -H "$(auth "$instancewide_token")" "${BASE_URL}/api/review-queue?include_closed=1&q=keyless")"
+expect_present "instance-wide grant sees the keyless candidate" \
+  "$instancewide_keyless" "keyless candidate marker"
+
+# Anti-vacuity: an area-named grant does not see it (already the rule for
+# reviewer_token/title_token below), and the instance-wide grant sees an
+# area-keyed candidate too, the same as an area-named token does.
+instancewide_mixed="$(curl -sS -H "$(auth "$instancewide_token")" "${BASE_URL}/api/review-queue?include_closed=1&q=mixedheldmarker")"
+expect_present "instance-wide grant also sees an area-keyed candidate" \
+  "$instancewide_mixed" "mixedheldmarker"
 
 # ---------------------------------------------------------------------------
 # Writes: the existing candidate lifecycle, unchanged.
@@ -549,7 +663,18 @@ DECLARE
   v_source uuid;
   v_digest uuid;
   v_newer uuid;
+  v_noise_node uuid;
 BEGIN
+  -- A live assertion candidate that never matches "apireviewmarker". Without
+  -- it, stats.total for a q-narrowed request could equal stats.filtered by
+  -- coincidence when this suite runs standalone, and the total-versus-filtered
+  -- check below would pass vacuously.
+  INSERT INTO nodes (node_type, label) VALUES ('account', 'API apisecuritynoise Account')
+  RETURNING id INTO v_noise_node;
+  PERFORM record_assertion(
+      'account_health', '{"health":"amber"}', v_noise_node,
+      p_confidence := 0.5, p_status := 'candidate', p_basis := 'assumed');
+
   INSERT INTO nodes (node_type, label) VALUES ('account', 'API apireviewmarker Account')
   RETURNING id INTO v_node;
   INSERT INTO nodes (node_type, label) VALUES ('person', 'API apireviewmarker Witness')
@@ -722,6 +847,21 @@ node -e "const d = JSON.parse(process.argv[1]);
   if (s.filtered < d.groups.length) { console.error('filtered under-counts the page'); process.exit(1); }
   if (s.filtered <= 1) { console.error('anti-vacuity: filtered is ' + s.filtered + ', paging is untested'); process.exit(1); }
 " "$counts_json"
+
+# total counts every tuple before the request's own q/assertion_type/
+# competingOnly filters; filtered counts what survives them. Narrowing the
+# request with q must not move total, and must move filtered — otherwise a
+# test could pass by comparing two numbers that happen to be equal.
+marker_counts_json="$(curl -sS -H "$(auth "$reviewer_token")" "${BASE_URL}/api/review/assertions?q=apireviewmarker")"
+unfiltered_total="$(json_get "$counts_json" "stats.total")"
+marker_total="$(json_get "$marker_counts_json" "stats.total")"
+marker_filtered="$(json_get "$marker_counts_json" "stats.filtered")"
+[[ "$unfiltered_total" == "$marker_total" ]] || {
+  fail "stats.total moved when q narrowed the request: unfiltered=$unfiltered_total, q=apireviewmarker=$marker_total"
+}
+node -e "const total = Number(process.argv[1]); const filtered = Number(process.argv[2]);
+  if (!(filtered < total)) { console.error('anti-vacuity: q=apireviewmarker did not narrow filtered (' + filtered + ') below total (' + total + ')'); process.exit(1); }
+" "$marker_total" "$marker_filtered"
 
 # ?state=rejected is the same route, and the two sets never mix.
 rejected_json="$(curl -sS -H "$(auth "$reviewer_token")" "${BASE_URL}/api/review/assertions?state=rejected&q=apireviewmarker")"
