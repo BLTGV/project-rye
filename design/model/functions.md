@@ -81,7 +81,7 @@ Steps:
 1. Validates both nodes exist and duplicate is not archived.
 2. Records the merge in `node_merges`.
 3. Records a `node_merge` event with both nodes as participants (`canonical` and `duplicate` roles).
-4. Redirects edges, assertions (with conflict resolution), event participations, artifacts, and source mappings.
+4. Redirects edges, assertions (with conflict resolution), event participations, artifacts, and source mappings. Every source mapping is re-pointed and none is deleted: `node_source_map` is keyed by the source row, so the canonical node ends up holding one mapping per merged source row and each row keeps its graph identity.
 5. Merges properties (canonical wins on conflicts).
 6. Archives the duplicate.
 
@@ -171,7 +171,7 @@ Creates a graph node and maps it back to the source table via `node_source_map`.
 
 Lookup order: checks `node_source_map` first (canonical path), then falls back to `external_id`/`external_source` on the nodes table. This handles cases where the source map was created manually without setting `external_id`.
 
-A unique index on `node_source_map(source_schema, source_table, source_id)` prevents orphaned or duplicate mappings.
+`node_source_map`'s primary key is `(source_schema, source_table, source_id)`, so a source row names exactly one node. After a merge the mapping points at the canonical node and this call returns it, creating nothing.
 
 ```sql
 CREATE FUNCTION link_record(

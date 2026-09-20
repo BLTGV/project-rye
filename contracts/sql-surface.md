@@ -9,10 +9,13 @@ client of it. This contract says what a client may depend on.
 
 - **Objects.** Six core tables, the supporting tables, the read views
   (`current_valid_assertions`, `node_context`, `review_queue`,
-  `competing_candidates`, `stale_digests`, `open_gaps`, `assertion_support`,
-  `current_assertions_weighted`), and the helper functions. Full inventory in
-  `docs/data-dictionary.md`; normative behaviour in
-  `design/model/core-contract-and-conformance.md`.
+  `competing_candidates`, `review_queue_candidates`, `rejected_candidates`,
+  `stale_digests`, `open_gaps`, `assertion_support`,
+  `current_assertions_weighted`, `candidate_assertions_weighted`,
+  `node_salience`, `agent_query_trace`), and the helper functions. Full
+  inventory in `docs/data-dictionary.md`; normative behaviour in
+  `design/model/core-contract-and-conformance.md`. The views added by `0035`
+  and `0034` are governed by "Review surfaces" and "Retrieval tracing" below.
 - **Writes go through helpers**: `record_event`, `record_assertion`,
   `accept_assertion`, `reject_candidate`, `supersede_assertion`,
   `record_distillation`, `schedule_assertion_change`, `resolve_knowledge_gap`,
@@ -23,7 +26,11 @@ client of it. This contract says what a client may depend on.
 - **Reads are views and `SELECT`-returning functions**: `rye_catalog()`,
   `rye_agent_context()`, `rye_categories()`, `rye_settlers()`,
   `settle_gate()`, `agent_node_summary()`, `rye_current_agent_key()`,
-  `rye_current_agent_id()`, and the views above. `rye_categories()` has its own
+  `rye_current_agent_id()`, `effective_confidence()`,
+  `projected_effective_confidence()`, and the views above. A read never
+  writes: no view and no read-returning function records an event, and
+  `log_agent_query()` — the one surface that does — is called by the client
+  and never by a read. `rye_categories()` has its own
   contract, `contracts/category-vocabulary.md`, which governs its jsonb shape;
   `rye_settlers()` is governed by the "Settlement lookup" section below.
   Base-table reads carry no promise beyond the data dictionary's columns.
@@ -733,6 +740,21 @@ configuration, so it does not need to be gated as configuration.
 `record_assertion()` canonicalizes before it inserts, so an alias of a gated
 type is gated.
 
+**`record_assertion()` judges the name the caller wrote as well** (migration
+`0036`). A type is gated for that helper when the canonical spelling has a
+`settle` row **or** the spelling passed in does, and the demotion's
+`attrs.settle_gate` gains `gated_as`, naming which one gated it. This closes an
+alias recorded *before* its type was gated, which `0028`'s rule — no new alias
+out of a gated type — cannot reach. `settle_gate(p_assertion_type)` answers by
+the same rule and gains `gated_as` beside `gated`, null when the given spelling
+is the gated one. The trigger is unchanged and still judges the stored
+spelling: it never sees the name a caller wrote. `supersede_assertion()` takes
+the type from the incumbent row and has no written name to judge. One residual
+is stated rather than closed: under a standing pre-gate alias,
+`record_distillation()` writes the alias target type, which Rye does not read as
+configuration — a policy no-op, not an escalation. Recorded in
+`docs/decisions/0013-leftovers-fail-restrictive.md`.
+
 **A gated type cannot be aliased away.** A `registry_entry` whose
 `assertion_key` is `type_alias:assertion_type:<T>`, where `T` is a type with a
 `settle` row, is refused for every caller at every status — candidate included —
@@ -1084,13 +1106,11 @@ that rule chooses which subject, not which scope. Type coverage still **raises**
 `Ambiguous governing scope for assertion type %` when two active scopes claim
 one type: that is an administrative error someone must fix, not a tie to break.
 
-Ranking is done by a new read-only helper,
+Ranking is done by a read-only helper,
 `scope_review_policy_rank(p_scope_id uuid) RETURNS int` — `0` for `strict`, `1`
-for `candidates_only`, `2` for anything else. It never raises. A scope carrying
-an unsupported policy value ranks as `open` for ordering and still raises from
-`scope_review_policy()` if it is the scope selected, which keeps today's failure
-surface exactly where it is instead of letting one broken scope refuse every
-write near it.
+for `candidates_only`, `2` for `open` and for a scope with no `review_policy`
+assertion at all. It never raises. Since `0036` an **unsupported stored value
+ranks `0`**, because it is read as `strict`; see the next subsection.
 
 What each caller of `governing_scope()` sees:
 
@@ -1108,6 +1128,170 @@ What each caller of `governing_scope()` sees:
 afterwards. The surviving node now reads the stricter of the two in either id
 order, and assertions copied onto it under `strict` land as candidates in
 `review_queue`. That is the answer a test may assert without pinning uuids.
+
+### An unsupported policy value is strict, and cannot be recorded
+
+A scope's `review_policy` claim carries `open`, `candidates_only`, or `strict`.
+Before `0036`, `scope_review_policy()` raised on anything else, and because
+every helper that inserts an assertion calls it, one scope carrying a typo
+refused every write it governed. From `0036` the rule is restrictive rather than
+fatal, and it is closed from both ends. Recorded in
+`docs/decisions/0013-leftovers-fail-restrictive.md`.
+
+- **Reading.** `scope_review_policy()` returns `strict` for a stored value it
+  does not recognise, and `scope_review_policy_rank()` ranks it `0`. Neither
+  raises, for any input. A scope with **no** `review_policy` assertion still
+  reads `open` and ranks `2`: absent is not broken.
+- **Writing.** `record_scope_policy()` refuses an unsupported value with
+  `Unsupported review_policy "%": use open, candidates_only, or strict`, and a
+  trigger on `assertions` refuses any `review_policy` assertion whose value is
+  outside the three — **at every status, candidate included, for every role**,
+  because it reads no role. An unsupported value cannot be parked as a
+  suggestion and accepted later.
+- **An instance that already holds one** keeps the row; no migration rewrites
+  data. That scope reads `strict` from the first call after `0036`, so writes it
+  governs land as candidates in `review_queue` instead of being refused. The fix
+  is an admin recording a supported value with `record_scope_policy()`, which
+  works even under the new `strict`, because `governing_scope()` returns null for
+  a scope node's own policy assertions.
+
+A client that recorded a policy value Rye does not know was already getting
+nothing it asked for. What changes is that it now finds out at the write.
+
+## Review surfaces
+
+What a reviewer's screen needs comes from the views, not from a client's own
+subqueries. Migration `0035` (core) and `0125` (crm profile) add it. Recorded in
+`docs/decisions/0012-review-surfaces-carry-what-the-screen-needs.md`. Nothing
+here removes or renames an object, narrows a signature, or changes an existing
+view column's name, type, position, or meaning, so no version moves.
+
+**A candidate has a projected confidence.** `effective_confidence()` is null for
+a candidate and stays null: it answers about the current value.
+`projected_effective_confidence(a assertions) RETURNS numeric` answers what a
+**live** row would carry — the same arithmetic, with the row excluded from its
+own competing-candidate discount, so a lone candidate projects the number it
+will read after acceptance. It is null for a row that is superseded or
+otherwise not live, and for a row in `current_valid_assertions` it equals
+`effective_confidence()` exactly. `candidate_assertions_weighted` is the
+candidate mirror of `current_assertions_weighted`: live candidates with the
+projection beside them.
+
+**`review_queue` says who, against what, and why it is waiting.** Its existing
+columns, `candidates` included, keep their names, types, order, and content.
+Appended: `subject_label`, `subject_node_type`, `newest_candidate_at`,
+`incumbent_assertion_id`, `incumbent_claim`, `incumbent_basis`,
+`incumbent_confidence`, `incumbent_effective_confidence`,
+`incumbent_asserted_at`, `incumbent_attrs`, `incumbent_is_current`,
+`waiting_reason`, `waiting_detail`. `competing_candidates` carries the same
+columns.
+
+The incumbent is the **accepted, unsuperseded** assertion on the same subject,
+canonical type, and key — the row an acceptance would supersede, which is not
+always the row that is currently effective; `incumbent_is_current` says whether
+it is also in `current_valid_assertions`. `waiting_reason` is `settle_gate`,
+`review_gate`, or `none` — never null — and `settle_gate` wins when candidates
+under one tuple carry both, because that demotion is the one that needs an
+admin. `waiting_detail` is the `attrs` object the reason came from.
+
+**`review_queue_candidates`** is one row per live candidate, for clients that
+were unnesting `candidates` to join `assertions`: the candidate's own columns
+plus `subject_label`, `projected_effective_confidence`, `basis_prior`,
+`waiting_reason`, `waiting_detail`, `incumbent_assertion_id`, and an evidence
+summary — `evidence_count`, `witness_count`, `evidence_kinds`,
+`latest_evidence_at`. It is a summary, not the evidence: a client that wants
+event summaries and witness labels still joins `assertion_support`.
+
+**`stale_digests` names the culprit.** Its booleans are unchanged; appended are
+`newer_assertion_ids`, `newer_latest_asserted_at`, and
+`overturned_source_assertion_ids`. The arrays are empty, never null, when the
+matching boolean is false, so `newer_subject_assertion` is exactly
+`cardinality(newer_assertion_ids) > 0`.
+
+**`rejected_candidates` is not `review_queue`.** `reject_candidate()` leaves
+`status` `candidate` and sets `superseded_at`, so the two sets are disjoint by
+construction — `review_queue` requires `superseded_at` null. The view carries
+the candidate's own columns plus `rejected_at`, `rejected_by`,
+`rejected_reason`, `rejected_outcome`, and `rejection_event_id`, read from the
+`candidate_rejected` event. Membership is a closed candidate with no
+`superseded_by`: a candidate closed by naming a replacement was displaced, not
+rejected. A candidate closed without an event still appears, with null
+`rejected_by` and `rejected_reason`; an unexplained rejection is shown as
+unexplained rather than hidden.
+
+**A matview says when it was taken.** `opportunities_active` carries
+`snapshot_at`: the instant the snapshot was computed, stamped by whatever
+refreshed it, including a raw `REFRESH MATERIALIZED VIEW`.
+`opportunities_active_freshness` reports `snapshot_at`, `age`, `stale_after`,
+`stale`, and `row_count`, where `stale_after` is
+`registry_value('matview_stale_after:opportunities_active')` and defaults to 15
+minutes. **It is an age marker, not change detection**: `stale` false does not
+promise the sources are unchanged, and `stale` true does not promise they are.
+The freshness rule for every profile matview is unchanged and is stated under
+"Freshness": stale until `refresh_materialized_views()` runs.
+
+**Visibility.** Every view here is `security_invoker` and none is
+`SECURITY DEFINER`; each shows a caller exactly the rows it could select from
+the base tables itself. RLS silence applies with one consequence worth naming: a
+visible candidate whose incumbent is classified above the caller's read level
+shows null `incumbent_*` and `incumbent_is_current` false, which reads like "no
+incumbent" and is not. Evidence counts count only evidence this caller can read,
+so two callers may see different numbers for one candidate. A materialized view
+is not subject to RLS on its base tables, as has always been true of the profile
+matviews.
+
+## Retrieval tracing
+
+An agent's retrieval is a loop, and the events it produces are only useful
+grouped. Tracing is **one convention on `log_agent_query()`**: no new table, no
+new event type, opt-in per call, caller-driven. Recorded in
+`docs/decisions/0011-retrieval-tracing-is-a-step-on-the-event.md`, migration
+`0034`.
+
+**The signature widens.** `log_agent_query(p_agent_id text, p_query_text text,
+p_result_summary text, p_nodes_referenced uuid[], p_trace jsonb DEFAULT NULL)`.
+Every existing four-argument call resolves and behaves exactly as before and
+writes no trace key. No four-argument overload exists beside it, because both
+would match and PostgreSQL would refuse the call as ambiguous.
+
+**The trace is a step.** `p_trace` is written to `properties.trace` on the
+`agent_query` event, and its field names are the ones
+`eval/retrieval/trace_format.md` already uses, so one analysis reads a harness
+trace and a production trace alike: `trace_id` (non-empty text, required),
+`seq` (integer at least 1, required, unique within the trace), and the optional
+`tool`, `intent`, `args`, `results`, `selected`. `properties.query` still holds
+the phrasing; `selected` names which step's phrasing produced the candidate that
+was used, as `{node_id, from_seq, from_phrasing}`. `results` may carry the
+candidates a step rejected, with `score`, `match_reason`, and `used` — callers
+are expected to cap them, because an event is immutable and there is no pruning
+path. A non-null `p_trace` without a usable `trace_id` and `seq` **raises**: a
+trace that cannot be grouped or ordered is worse than none.
+
+**Ordering is by `seq`, not by time.** `record_event()` stamps `occurred_at`
+with `now()`, which is transaction start, so every call in one loop inside one
+transaction shares a timestamp. `agent_query_trace` is the read surface — one
+row per traced `agent_query` event, `security_invoker`, ordered `trace_id`,
+`seq`, `occurred_at`, `event_id`.
+
+**Nothing auto-logs.** `find_nodes`, `find_nodes_batch`, `find_paths`,
+`neighborhood`, `agent_node_summary()`, and `node_context` write no event, and
+no read surface in this contract ever will. Tracing is something a caller does,
+not something a read does.
+
+**A read-only session cannot trace, by the rule that already exists.**
+`log_agent_query()` reaches `record_event()`, so "Who may write" governs it: a
+`viewer`, an unset role, and any role whose `may_write` is false are refused
+`42501`, traced or not. `skills/rye-knowledge-reader` forbids the call outright
+for that reason, and an eval harness therefore must not depend on production
+tracing — the agents most worth measuring are the ones that may not log. An
+`agent:*` session may write and may trace.
+
+**Retention is the caller's.** Events are immutable and Rye deletes none, so a
+trace written is a trace kept; there is no pruning path today and adding one is
+a new migration and an edit here first, as with `agent_action_log`. Trace the
+loops you will read — failures, a sample, an eval week — not every read.
+`node_salience` is unaffected and improves as a side effect: it reads
+`properties->>'agent_id'` and the participants, which tracing does not touch.
 
 ## Settlement lookup
 
