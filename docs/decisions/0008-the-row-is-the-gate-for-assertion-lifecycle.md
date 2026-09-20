@@ -135,6 +135,33 @@ supersede-then-insert from stranding a key with no accepted value, and it is
 narrowed to an incumbent that was accepted, so a caller cannot manufacture it
 by superseding a candidate it just wrote.
 
+**Correction, 2026-09-19, after verification.** As first written the exemption
+tested only that some superseded accepted row named `NEW.id`. The Verifier
+reproduced the consequence: supersede a row in an `open` scope, name a new id,
+then insert that id as accepted on a subject in a `strict` scope, and it
+commits accepted. `merge_nodes()` hits the same path by accident when the
+duplicate is in an open scope and the canonical in a strict one, which is
+obligation 11 failing. The exemption now also requires the incumbent to carry
+the same `subject_ref`, `assertion_type`, and `assertion_key` as the row being
+inserted. It is confined to the one tuple whose value would otherwise be
+stranded, which is the only thing it was ever for.
+
+Checked against every helper that inserts. `record_assertion()` supersedes
+`v_existing` on the same subject, type, and key and inserts on that tuple.
+`supersede_assertion()` refuses cross-tuple supersession outright, so its pair
+always matches. `record_distillation()` supersedes the `digest` incumbent at
+the same `subject_ref` and key. `accept_assertion()` does not insert, so the
+exemption never applies to it. `merge_nodes()` inserts the copy before it marks
+the duplicate's row, so the exemption cannot apply to it in either form, and
+with the tuple test the copy is judged by the canonical node's scope policy —
+which is the answer obligation 11 asks for.
+
+The Lead also proposed dropping the "incumbent pre-dates the transaction"
+requirement. Confirmed, and it was never expressible: nothing in the row
+records when it was written that a caller could not also write, and with the
+tuple test what remains open is exactly what `supersede_assertion()` already
+lets that caller do on that tuple, which is the separate gap recorded below.
+
 Two consequences to accept. A merge under a strict scope moves the copied
 assertions into review instead of carrying them across accepted; the content is
 preserved and an admin accepts it from `review_queue`. And the guard resolves
@@ -145,14 +172,53 @@ demote a raw insert. Both are in the contract.
 ## C. status and superseded_at, exactly
 
 - `status`: `candidate` to `accepted` only, on a row with `superseded_at` null,
-  with no accepted rival holding an overlapping window on the same
-  `subject_ref`, `assertion_type`, `assertion_key`, and with an
-  `assertion_accepted` event naming the row (deferred). An `agent:*` caller
+  with no accepted rival on the same `subject_ref`, `assertion_type`,
+  `assertion_key` covering the instant the promoted row takes effect, and with
+  an `assertion_accepted` event naming the row (deferred). An `agent:*` caller
   under `candidates_only` or `strict`, or on `pattern_claim`, additionally
   needs `agent_can_promote_in_scope()`, re-deriving the scope from the same
   witness query `accept_assertion()` uses. Any other change to `status` is
   refused, including `accepted` to `candidate`. `record_assertion()` demotes
   before it inserts, so no helper needs the reverse.
+- **The rival instant, corrected 2026-09-19 after verification.** "Any
+  overlapping window" was wrong, and the builder was right to avoid it:
+  `accept_assertion()` legitimately promotes a candidate covering now while a
+  future-effective accepted row stands. Skipping the test for a
+  future-effective candidate, as the builder then did, let a raw promotion
+  leave two accepted rows overlapping on one tuple where `accept_assertion()`
+  leaves one. The rule is the Lead's: refuse when an assertion other than this
+  one, on the same `subject_ref`, `assertion_type` and `assertion_key`, with
+  `status = 'accepted'` and `superseded_at` null, covers
+  `greatest(coalesce(NEW.effective_at, now()), now())`, where a row covers an
+  instant `T` when `(effective_at IS NULL OR effective_at <= T)` and
+  `(effective_to IS NULL OR effective_to > T)`.
+
+  Checked against what `accept_assertion()` really does: it takes its incumbent
+  from `current_valid_assertions`, which is accepted, unsuperseded, and
+  covering now, and supersedes it before the promotion, whatever the
+  candidate's own `effective_at`. A candidate effective now passes, because
+  that incumbent is already superseded. A future-effective candidate passes
+  too, because an incumbent with an open `effective_to` covers the future
+  instant as well and was superseded. What it now refuses is a promotion into
+  an instant held by a *scheduled* accepted row that `accept_assertion()` does
+  not supersede, which today leaves two overlapping accepted rows. That is a
+  deliberate narrowing of the helper, not a regression: the partial unique
+  index already refuses the same pair when the windows are identical, and this
+  closes the case where they merely overlap. A raw promotion of an expired
+  candidate while an unrelated current row stands is also refused, which is
+  stricter than overlap requires and matches what `accept_assertion()` would
+  have done to that row.
+- `classification`: tighter than first written, on the builder's finding and
+  verified safe. The row must have derivation evidence, and the new value must
+  equal `derived_assertion_classification()` of that evidence. The propagation
+  trigger fires only on a `derivation` evidence insert, so evidence always
+  exists on the one legitimate path, and requiring it removes the case where an
+  empty source set makes the derived value null and a hand-written null passes.
+- Only `agent:*` callers are policy-gated on promotion. Every other role is
+  tested for shape and for the settle gate and not for the review policy,
+  because `accept_assertion()` applies the policy to agent roles only and this
+  guard re-derives that rule rather than inventing a wider one. Said plainly in
+  the contract so nobody reads the guard as a role model.
 - `superseded_at`: null to non-null once, never back, never re-stamped. When
   `OLD.status = 'accepted'`, `NEW.superseded_by` must be non-null. This was
   checked against what the code does, not against what it looks like it does:
@@ -325,9 +391,11 @@ with the matching `app.*_assertion_id` set to the target row.
    caller cannot reach the same end by raw `UPDATE`.
 10. `reject_candidate()` still closes a candidate with `superseded_by` null,
     proving the accepted-row rule did not swallow the candidate case.
-11. `merge_nodes()` under a strict scope: assert what happens, which is that
-    the copied assertion lands as a candidate and appears in `review_queue`. If
-    it does anything else, the guard is wrong.
+11. `merge_nodes()` with the duplicate's subject in an `open` scope and the
+    canonical's in a `strict` one: the copied assertion lands as a candidate on
+    the canonical node and appears in `review_queue`. The duplicate's policy
+    must not carry across. Run the same-scope strict case too. If either does
+    anything else, the exemption is too wide.
 12. work/005 is unchanged: `tests/conformance/30_configuration_gate.sql` passes
     unmodified, including its `%is Rye configuration%` message assertions,
     which is the trigger-order check.
@@ -337,6 +405,20 @@ with the matching `app.*_assertion_id` set to the target row.
 14. `./scripts/docker-test.sh test --reset --profiles crm,pm` passes from an
     empty volume, on an unused `RYE_POSTGRES_PORT` and the builder's own
     `COMPOSE_PROJECT_NAME`.
+15. The cross-scope exemption attack, which is obligation 11's cause and must
+    be tested directly. As `agent:t`: take an accepted row on a subject in an
+    `open` scope, `UPDATE` it setting `superseded_at` and `superseded_by` to a
+    fresh uuid, then `INSERT` that uuid as an accepted assertion on a subject
+    in a `strict` scope. It must not commit accepted. Then run the honest
+    version — same subject, type, and key on both sides — and assert it does
+    commit accepted, because that is `supersede_assertion()`'s own shape and
+    refusing it would strand the key.
+16. Future-effective promotion. On one tuple, stand an accepted row and a
+    scheduled accepted row starting at `F`, then raw-promote a candidate whose
+    `effective_at` is `F`. It must be refused, and afterwards exactly one
+    accepted unsuperseded row may cover `F`. Assert the count, not the error
+    alone. Then show `accept_assertion()` still promotes a candidate covering
+    now while the scheduled row stands.
 
 ## I. The protection boundary
 
