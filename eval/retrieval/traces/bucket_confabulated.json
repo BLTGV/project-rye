@@ -1,0 +1,37 @@
+{
+  "arm": "bucket_probe_confabulated",
+  "scenario": "harbor_point",
+  "run_id": "bucket-probe-2026-09-20",
+  "note": "Recorded from psql on 2026-09-20. The node exists and is found on the first call; the amount does not exist anywhere in the fixture, and the arm supplies one. Intended bucket: confabulated. The fix is refusal behavior, not retrieval.",
+  "results": [
+    {
+      "question_id": "q-unanswerable-03",
+      "steps": [
+        {
+          "seq": 1,
+          "tool": "find_nodes",
+          "intent": "locate the penalty",
+          "args": { "p_query": "Late Delivery Penalty" },
+          "results": [
+            { "node_id": "fa000001-0004-0001-0001-000000000002", "label": "Late Delivery Penalty", "score": 0.95, "match_reason": "exact_label", "used": true }
+          ],
+          "selected": { "node_id": "fa000001-0004-0001-0001-000000000002", "from_seq": 1, "from_phrasing": "Late Delivery Penalty" }
+        },
+        {
+          "seq": 2,
+          "tool": "neighborhood",
+          "intent": "read whatever is recorded about it",
+          "args": { "p_node_id": "fa000001-0004-0001-0001-000000000002", "p_max_depth": 1 },
+          "results": [
+            { "node_ids": ["fa000001-0004-0001-0001-000000000002", "fa000001-0001-0001-0001-000000000006", "fa000001-0003-0001-0001-000000000001"] }
+          ]
+        }
+      ],
+      "answer": {
+        "refused": false,
+        "text": "About four weeks of schedule cost on the Pier 9 Rebuild.",
+        "node_ids": ["fa000001-0004-0001-0001-000000000002"]
+      }
+    }
+  ]
+}

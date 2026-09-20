@@ -776,6 +776,10 @@ app.get(
       assertion_type: z.string().optional(),
       q: z.string().optional(),
       competing_only: z.string().optional(),
+      // waiting (default) or rejected. A parameter, not a route: the same
+      // capability and the same row filtering apply, so the route table in
+      // contracts/admin-api.md is unchanged.
+      state: z.enum(["waiting", "rejected"]).optional(),
       limit: z.coerce.number().int().min(1).max(200).optional(),
       offset: z.coerce.number().int().min(0).optional(),
       instance: z.string().optional(),
@@ -789,6 +793,7 @@ app.get(
         assertionType: q.assertion_type ?? null,
         q: q.q ?? null,
         competingOnly: boolQuery(q.competing_only),
+        state: q.state ?? "waiting",
         limit: q.limit,
         offset: q.offset,
       })

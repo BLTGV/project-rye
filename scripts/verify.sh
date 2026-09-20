@@ -896,7 +896,11 @@ BEGIN
           ('type_vocabulary_report'),
           ('source_reliability'),
           ('calibration_report'),
-          ('pattern_support')
+          ('pattern_support'),
+          -- Review surfaces, migration 0035.
+          ('candidate_assertions_weighted'),
+          ('review_queue_candidates'),
+          ('rejected_candidates')
       ) required(view_name)
       WHERE NOT EXISTS (
           SELECT 1
@@ -922,6 +926,85 @@ BEGIN
         )
   ) OR to_regclass('rye.active_disputes') IS NOT NULL THEN
     RAISE EXCEPTION 'removed v1 dispute or fact-promotion surfaces are still installed';
+  END IF;
+
+  -- ------------------------------------------------------------------
+  -- Review surfaces (migration 0035, contracts/sql-surface.md).
+  -- ------------------------------------------------------------------
+  IF to_regprocedure('rye.base_effective_confidence_unchecked(rye.assertions)') IS NULL
+     OR to_regprocedure('rye.projected_effective_confidence(rye.assertions)') IS NULL
+  THEN
+    RAISE EXCEPTION 'the review-surface confidence functions are missing';
+  END IF;
+
+  -- The appended columns, and the existing ones still in their positions.
+  -- CREATE OR REPLACE VIEW enforces the prefix; a dependent view does not
+  -- inherit it, which is how competing_candidates goes stale unnoticed.
+  IF EXISTS (
+      SELECT required.view_name
+      FROM (VALUES ('review_queue'), ('competing_candidates')) required(view_name)
+      WHERE NOT EXISTS (
+          SELECT 1
+          FROM information_schema.columns c
+          WHERE c.table_schema = v_schema
+            AND c.table_name = required.view_name
+            AND c.column_name = 'waiting_reason'
+            AND c.ordinal_position = 19
+      )
+        OR NOT EXISTS (
+          SELECT 1
+          FROM information_schema.columns c
+          WHERE c.table_schema = v_schema
+            AND c.table_name = required.view_name
+            AND c.column_name = 'candidates'
+            AND c.ordinal_position = 7
+      )
+  ) THEN
+    RAISE EXCEPTION
+      'review_queue or competing_candidates does not carry the review-surface columns in the contract''s positions';
+  END IF;
+
+  IF EXISTS (
+      SELECT required.column_name
+      FROM (VALUES
+          ('newer_assertion_ids'),
+          ('newer_latest_asserted_at'),
+          ('overturned_source_assertion_ids')
+      ) required(column_name)
+      WHERE NOT EXISTS (
+          SELECT 1
+          FROM information_schema.columns c
+          WHERE c.table_schema = v_schema
+            AND c.table_name = 'stale_digests'
+            AND c.column_name = required.column_name
+      )
+  ) THEN
+    RAISE EXCEPTION 'stale_digests does not name the culprit';
+  END IF;
+
+  -- The crm profile's matview freshness (migration 0125). Guarded on the
+  -- profile: install.sh --profiles pm never creates opportunities_active, and
+  -- its absence is not a failure. Its presence without snapshot_at is.
+  IF to_regclass('rye.opportunities_active') IS NOT NULL THEN
+    -- information_schema does not list materialized views.
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_attribute
+        WHERE attrelid = to_regclass('rye.opportunities_active')
+          AND attname = 'snapshot_at' AND attnum > 0 AND NOT attisdropped
+    ) THEN
+      RAISE EXCEPTION 'opportunities_active has no snapshot_at (migration 0125 is missing)';
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = v_schema
+          AND c.relname = 'opportunities_active_freshness'
+          AND 'security_invoker=true' = ANY(coalesce(c.reloptions, '{}'::text[]))
+    ) THEN
+      RAISE EXCEPTION
+        'opportunities_active_freshness is missing or is not security_invoker (migration 0125 is missing)';
+    END IF;
   END IF;
 
   -- Advisory identity resolution and the merge-chain lookup (0033). All four
@@ -1034,6 +1117,51 @@ BEGIN
         AND (p.prosecdef OR p.provolatile = 'v')
   ) THEN
     RAISE EXCEPTION 'a traversal function is SECURITY DEFINER or VOLATILE; it must be neither';
+  END IF;
+
+  -- Retrieval tracing (0034). The widened signature, no ambiguous overload
+  -- beside it, the security setting the write gate depends on, and the read
+  -- surface that groups a loop.
+  IF to_regprocedure('rye.log_agent_query(text, text, text, uuid[], jsonb)') IS NULL THEN
+    RAISE EXCEPTION 'log_agent_query does not take p_trace; migration 0034 is missing';
+  END IF;
+
+  IF to_regprocedure('rye.log_agent_query(text, text, text, uuid[])') IS NOT NULL THEN
+    RAISE EXCEPTION 'a four-argument log_agent_query overload exists beside the five-argument one; both would match a four-argument call and PostgreSQL would refuse it as ambiguous';
+  END IF;
+
+  IF EXISTS (
+      SELECT 1
+      FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = v_schema
+        AND p.proname = 'log_agent_query'
+        AND p.prosecdef
+  ) THEN
+    RAISE EXCEPTION 'log_agent_query is SECURITY DEFINER; the write gate that stops a viewer tracing depends on it staying SECURITY INVOKER';
+  END IF;
+
+  IF NOT EXISTS (
+      SELECT 1
+      FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = v_schema
+        AND c.relname = 'agent_query_trace'
+        AND 'security_invoker=true' = ANY(coalesce(c.reloptions, '{}'::text[]))
+  ) THEN
+    RAISE EXCEPTION 'the agent_query_trace view is missing or is not security_invoker';
+  END IF;
+
+  -- Nothing auto-logs: no read surface calls log_agent_query.
+  IF EXISTS (
+      SELECT 1
+      FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = v_schema
+        AND p.proname <> 'log_agent_query'
+        AND p.prosrc LIKE '%log_agent_query%'
+  ) THEN
+    RAISE EXCEPTION 'a function in the rye schema calls log_agent_query; tracing is caller-driven and no read may write';
   END IF;
 
   -- Who may reject a suggestion, and an edge carries its own classification

@@ -391,13 +391,68 @@ Nodes with field-level redaction applied via `redact_properties()`.
 
 Uses `security_invoker = true` so RLS is evaluated with the caller's permissions.
 
+#### `candidate_assertions_weighted`
+
+Live candidates with `projected_effective_confidence` — what each would carry
+if it were accepted. The candidate mirror of `current_assertions_weighted`.
+
+**Why it exists:** `effective_confidence()` answers about the current value and
+is null for a candidate. A reviewer deciding whether to accept one needs a
+number, and it is the same arithmetic run on rows the other view skips.
+
 #### `review_queue`
 
-Live candidates grouped by subject, assertion type, and assertion key.
+Live candidates grouped by subject, canonical assertion type, and assertion
+key. Beyond the grouping (`subject_ref`, `subject_node_id`, `subject_edge_id`,
+`assertion_type`, `assertion_key`, `candidate_count`, `candidates`) each row
+carries `subject_label`, `subject_node_type`, `newest_candidate_at`, the
+incumbent an acceptance would supersede (`incumbent_assertion_id`,
+`incumbent_claim`, `incumbent_basis`, `incumbent_confidence`,
+`incumbent_effective_confidence`, `incumbent_asserted_at`, `incumbent_attrs`,
+`incumbent_is_current`), and why the tuple is waiting (`waiting_reason`, one of
+`settle_gate`, `review_gate`, `none`, and `waiting_detail`, the `attrs` object
+it came from).
+
+The incumbent is the **accepted, unsuperseded** assertion on the tuple — the
+row `accept_assertion()` ends — which is not always the row that is currently
+effective; `incumbent_is_current` says whether it is also in
+`current_valid_assertions`. `settle_gate` beats `review_gate` when candidates
+under one tuple carry both. A null `incumbent_*` may mean the caller cannot
+read the incumbent: RLS silence never means absence.
+
+#### `review_queue_candidates`
+
+One row per live candidate, for clients that were unnesting
+`review_queue.candidates` to join `assertions`: the candidate's own columns
+plus `subject_label`, `projected_effective_confidence`, `basis_prior`,
+`waiting_reason`, `waiting_detail`, `incumbent_assertion_id`, and an evidence
+summary (`evidence_count`, `witness_count`, `evidence_kinds`,
+`latest_evidence_at`).
+
+**Why it exists:** a column of arrays is a worse join key than a row. The
+evidence columns are a summary, not the evidence: a drawer that wants event
+summaries and witness labels still joins `assertion_support`. Counts reflect
+only evidence the calling session may read, so two callers may see different
+numbers for one candidate.
 
 #### `competing_candidates`
 
-Candidate tuples with more than one live candidate.
+Candidate tuples with more than one live candidate. Carries every
+`review_queue` column.
+
+#### `rejected_candidates`
+
+Candidates closed without a replacement, with `rejected_at`, `rejected_by`,
+`rejected_reason`, `rejected_outcome`, and `rejection_event_id` read from the
+`candidate_rejected` event.
+
+**Why it exists:** `reject_candidate()` leaves `status = 'candidate'` and sets
+`superseded_at` with `superseded_by` null, so rejected work was only reachable
+by querying events by hand. Membership is a closed candidate with no
+`superseded_by` — a candidate closed by naming a replacement was displaced, not
+rejected. `review_queue` requires `superseded_at` null, so the two sets are
+disjoint by construction. A candidate closed with no event still appears, with
+null `rejected_by` and `rejected_reason`.
 
 #### `stale_digests`
 
@@ -405,12 +460,31 @@ Current digests whose subject has accepted knowledge newer than the digest
 watermark, or whose derivation source was superseded or displaced. Includes a
 nullable advisory `salience_score` for hot-first ordering.
 
+Names the culprit: `newer_assertion_ids`, `newer_latest_asserted_at`, and
+`overturned_source_assertion_ids`. The arrays are empty, never null, when the
+matching boolean is false, so `newer_subject_assertion` is exactly
+`cardinality(newer_assertion_ids) > 0`.
+
 #### `node_salience`
 
 Per-node count, distinct-agent count, last query time, and 30-day exponentially
 decayed score from `agent_query` events. Only reads routed through
 `log_agent_query()` appear. Salience must not gate visibility, retention, or
-deletion.
+deletion. A traced query counts exactly as an untraced one.
+
+#### `agent_query_trace`
+
+One row per `agent_query` event carrying `properties.trace`: the steps of one
+agent retrieval loop. Columns are `trace_id`, `seq`, `event_id`, `occurred_at`,
+`agent_id`, `query`, `summary`, `tool`, `intent`, `args`, `results`,
+`selected`, and `node_ids` (the participants, ordered). Rows come back ordered
+`trace_id`, `seq`, `occurred_at`, `event_id`.
+
+Ordering is by `seq` and not by time: `record_event()` stamps `occurred_at`
+with `now()`, which is transaction start, so every step of one loop inside one
+transaction shares a timestamp. `security_invoker`, so an event whose
+participants the caller cannot see is absent — a short trace never means a
+short loop.
 
 #### `type_vocabulary_report`
 
@@ -455,6 +529,26 @@ All five review and knowledge-maintenance views use
 Active opportunities with their current stage, value, win probability, primary contact, and assigned owner pre-joined.
 
 **Why it exists:** Opportunity boards and pipeline reports always need the same joins. Materializing this avoids repeated work and enables indexed lookups on `code`, `stage`, and `assigned_to_id`.
+
+Every row carries `snapshot_at`: the instant the snapshot was computed, stamped
+by whatever refreshed it — `refresh_materialized_views()` or a raw `REFRESH
+MATERIALIZED VIEW`. It costs a full row rewrite on each
+`REFRESH ... CONCURRENTLY`, because `snapshot_at` changes on every row; the set
+is bounded by a team's pipeline, so that is milliseconds.
+
+#### `opportunities_active_freshness` (CRM)
+
+How old the `opportunities_active` snapshot is: `snapshot_at` (the matview's
+`max`), `age`, `stale_after`, `stale`, `row_count`.
+
+`stale_after` is data — `registry_value('matview_stale_after:opportunities_active')`,
+defaulting to 15 minutes — so an instance retunes it with one assertion and no
+migration.
+
+**It is an age marker, not change detection.** `stale` false does not promise
+the sources are unchanged, and `stale` true does not promise they changed.
+Answering "is anything newer" costs a scan of nodes, edges, and assertions on
+every read. A false "stale" is the safe direction.
 
 #### `contacts_directory` (CRM, materialized)
 
@@ -1108,6 +1202,26 @@ independent witnesses, optional half-life decay, live candidate discount, and
 a capped non-low-sample witness prior. A direct derivation from an accepted
 pattern is capped at that pattern's effective confidence for one hop.
 
+Null for any row that is not in `current_valid_assertions`, candidates
+included: it answers about the current value. For what a candidate *would*
+carry, use `projected_effective_confidence()`.
+
+#### `projected_effective_confidence()`
+
+```
+projected_effective_confidence(a assertions) → numeric
+```
+
+What a **live** row would carry as the current value — the same arithmetic as
+`effective_confidence()`, with the row excluded from its own
+competing-candidate discount, so a lone candidate projects the number it will
+read after acceptance. Null for a row that is superseded or whose status is
+neither `candidate` nor `accepted`. For a row in `current_valid_assertions` it
+equals `effective_confidence()` exactly.
+
+`base_effective_confidence_unchecked()` is the shared body underneath it and
+`base_effective_confidence()`; the arithmetic exists once.
+
 #### `merge_nodes()`
 
 ```
@@ -1391,12 +1505,28 @@ for them.
 #### `log_agent_query()`
 
 ```
-log_agent_query(p_agent_id, p_query_text, p_result_summary, p_nodes_referenced) → uuid
+log_agent_query(p_agent_id, p_query_text, p_result_summary, p_nodes_referenced, p_trace DEFAULT NULL) → uuid
 ```
 
 Creates an `agent_query` event logging what the agent asked, what it got back, and which nodes were touched. Delegates to `record_event()` internally.
 
-**Why it exists:** Agent interactions must be auditable. When an agent reads data, the query and its scope are recorded so that access patterns can be reviewed.
+`p_trace` (migration 0034) is optional and makes the event one step of a
+retrieval loop. When given it must be a jsonb object with a non-empty
+`trace_id` and an integer `seq` of at least 1, or the call raises; it lands
+whole at `properties.trace` and `agent_query_trace` groups it. The optional
+fields are `tool`, `intent`, `args`, `results`, and `selected`, named as
+`eval/retrieval/trace_format.md` names them. `properties.query` still holds the
+phrasing. A four-argument call behaves exactly as it did before 0034 and writes
+no `trace` key; there is no four-argument overload, because two candidates
+would both match and PostgreSQL would refuse the call as ambiguous.
+
+Tracing is opt-in and caller-driven. No read surface calls this function, and
+the write gate governs it like any other write: a `viewer`, a role-less
+session, and any role whose `may_write` is false are refused `42501`, traced or
+not. Events are immutable and there is no pruning path, so trace the loops you
+will read and cap `results` — ten candidates per step is plenty.
+
+**Why it exists:** Agent interactions must be auditable. When an agent reads data, the query and its scope are recorded so that access patterns can be reviewed. Retrieval is a loop, so the grouped steps are what separate a phrasing that was never generated from a candidate that was returned and misjudged.
 
 #### `record_artifact()`
 

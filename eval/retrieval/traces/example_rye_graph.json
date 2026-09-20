@@ -1,0 +1,470 @@
+{
+  "arm": "rye_graph",
+  "scenario": "harbor_point",
+  "run_id": "recorded-2026-09-20-pg15",
+  "note": "Every step's args and results were recorded by hand from psql against the seeded fixture on 2026-09-20 (PostgreSQL 15, pg_trgm, migration 0032 traversal surfaces): the node ids, scores, match reasons, and edge paths are what came back, not estimates. The answers are written by hand, because no model ran — they are chosen so that a spread of failure buckets fires and the scorer's own behavior is checkable without an LLM in the loop. There is no token or latency data for the same reason, so tokens_per_correct_answer reports n/a. The metrics here are a property of these hand-written answers, not a measurement of Rye.",
+  "results": [
+    {
+      "question_id": "q-entry-exact-01",
+      "steps": [
+        {
+          "seq": 1,
+          "tool": "find_nodes_batch",
+          "intent": "look up the named org",
+          "args": { "p_queries": ["Northwind Trading Co"], "p_node_types": ["org"] },
+          "results": [
+            { "query": "Northwind Trading Co", "node_id": "fa000001-0001-0001-0001-000000000005", "label": "Northwind Trading Co", "score": 0.95, "match_reason": "exact_label", "used": true }
+          ],
+          "selected": { "node_id": "fa000001-0001-0001-0001-000000000005", "from_seq": 1, "from_phrasing": "Northwind Trading Co" }
+        }
+      ],
+      "answer": { "refused": false, "text": "Northwind Trading Co is a customer.", "node_ids": ["fa000001-0001-0001-0001-000000000005"] }
+    },
+    {
+      "question_id": "q-entry-external-01",
+      "steps": [
+        {
+          "seq": 1,
+          "tool": "find_nodes",
+          "intent": "the question quotes an identifier, try it verbatim",
+          "args": { "p_query": "NW-4471" },
+          "results": [
+            { "node_id": "fa000001-0001-0001-0001-000000000005", "label": "Northwind Trading Co", "score": 1.0, "match_reason": "external_id", "used": true }
+          ],
+          "selected": { "node_id": "fa000001-0001-0001-0001-000000000005", "from_seq": 1, "from_phrasing": "NW-4471" }
+        }
+      ],
+      "answer": { "refused": false, "text": "NW-4471 is Northwind Trading Co.", "node_ids": ["fa000001-0001-0001-0001-000000000005"] }
+    },
+    {
+      "question_id": "q-entry-typo-01",
+      "steps": [
+        {
+          "seq": 1,
+          "tool": "find_nodes_batch",
+          "intent": "name looks misspelled, send it as written plus a guess",
+          "args": { "p_queries": ["Coastal Steal Supply", "Coastal Steel"], "p_node_types": ["org"] },
+          "results": [
+            { "query": "Coastal Steal Supply", "node_id": "fa000001-0001-0001-0001-000000000006", "label": "Coastal Steel Supply", "score": 0.6955, "match_reason": "label_similarity", "used": true },
+            { "query": "Coastal Steel", "node_id": "fa000001-0001-0001-0001-000000000006", "label": "Coastal Steel Supply", "score": 0.63, "match_reason": "label_similarity", "used": false }
+          ],
+          "selected": { "node_id": "fa000001-0001-0001-0001-000000000006", "from_seq": 1, "from_phrasing": "Coastal Steal Supply" }
+        }
+      ],
+      "answer": { "refused": false, "text": "Coastal Steel Supply is a steel supplier.", "node_ids": ["fa000001-0001-0001-0001-000000000006"] }
+    },
+    {
+      "question_id": "q-entry-confusable-01",
+      "steps": [
+        {
+          "seq": 1,
+          "tool": "find_nodes_batch",
+          "intent": "partial name, expect more than one hit",
+          "args": { "p_queries": ["Meridian Fencing"], "p_node_types": ["org"] },
+          "results": [
+            { "query": "Meridian Fencing", "node_id": "fa000001-0001-0001-0001-000000000003", "label": "Meridian Fencing Supply", "score": 0.6375, "match_reason": "label_similarity", "used": true },
+            { "query": "Meridian Fencing", "node_id": "fa000001-0001-0001-0001-000000000002", "label": "Meridian Fence & Gate", "score": 0.4875, "match_reason": "label_similarity", "used": true }
+          ]
+        }
+      ],
+      "answer": {
+        "refused": false,
+        "text": "Two entities match: Meridian Fencing Supply (supplier) and Meridian Fence & Gate (subcontractor). Which did you mean?",
+        "node_ids": ["fa000001-0001-0001-0001-000000000003", "fa000001-0001-0001-0001-000000000002"]
+      }
+    },
+    {
+      "question_id": "q-entry-abbrev-01",
+      "steps": [
+        {
+          "seq": 1,
+          "tool": "find_nodes_batch",
+          "intent": "try the name as the question gives it, plus a shortening",
+          "args": { "p_queries": ["Harbor Point Fabrication Drydock", "Harbor Point Fabrication drydock operation"], "p_node_types": ["org"] },
+          "results": [
+            { "query": "Harbor Point Fabrication Drydock", "node_id": "fa000001-0001-0001-0001-000000000001", "label": "Harbor Point Fabrication", "score": 0.6818, "match_reason": "label_similarity", "used": false },
+            { "query": "Harbor Point Fabrication drydock operation", "node_id": "fa000001-0001-0001-0001-000000000001", "label": "Harbor Point Fabrication", "score": 0.5769, "match_reason": "label_similarity", "used": false }
+          ]
+        },
+        {
+          "seq": 2,
+          "tool": "find_nodes",
+          "intent": "widen the threshold in case it is a spelling problem",
+          "args": { "p_query": "Harbor Point Fabrication Drydock", "p_node_types": ["org"], "p_threshold": 0.3 },
+          "results": [
+            { "node_id": "fa000001-0001-0001-0001-000000000001", "label": "Harbor Point Fabrication", "score": 0.6818, "match_reason": "label_similarity", "used": false }
+          ]
+        }
+      ],
+      "answer": { "refused": true, "text": "I can find Harbor Point Fabrication, but nothing called Harbor Point Fabrication Drydock." }
+    },
+    {
+      "question_id": "q-entry-paraphrase-01",
+      "steps": [
+        {
+          "seq": 1,
+          "tool": "find_nodes_batch",
+          "intent": "the question has no name in it, try the description",
+          "args": { "p_queries": ["fence company", "fencing"], "p_node_types": ["org"] },
+          "results": [
+            { "query": "fencing", "node_id": "fa000001-0001-0001-0001-000000000003", "label": "Meridian Fencing Supply", "score": 0.4, "match_reason": "label_contains", "used": false }
+          ]
+        },
+        {
+          "seq": 2,
+          "tool": "find_nodes_batch",
+          "intent": "guess how a fencing company would actually be named here",
+          "args": { "p_queries": ["Fence", "Fencing", "Gate"], "p_node_types": ["org"] },
+          "results": [
+            { "query": "Fence", "node_id": "fa000001-0001-0001-0001-000000000002", "label": "Meridian Fence & Gate", "score": 0.4, "match_reason": "label_contains", "used": true },
+            { "query": "Fencing", "node_id": "fa000001-0001-0001-0001-000000000003", "label": "Meridian Fencing Supply", "score": 0.4, "match_reason": "label_contains", "used": false },
+            { "query": "Gate", "node_id": "fa000001-0001-0001-0001-000000000002", "label": "Meridian Fence & Gate", "score": 0.4, "match_reason": "label_contains", "used": true }
+          ],
+          "selected": { "node_id": "fa000001-0001-0001-0001-000000000002", "from_seq": 2, "from_phrasing": "Fence" }
+        },
+        {
+          "seq": 3,
+          "tool": "neighborhood",
+          "intent": "disambiguate the two by what each does for us",
+          "args": { "p_node_id": "fa000001-0001-0001-0001-000000000002", "p_max_depth": 1 },
+          "results": [
+            { "node_ids": ["fa000001-0001-0001-0001-000000000002", "fa000001-0003-0001-0001-000000000001"] }
+          ]
+        }
+      ],
+      "answer": {
+        "refused": false,
+        "text": "Meridian Fence & Gate — they handle perimeter fencing and gate installation.",
+        "node_ids": ["fa000001-0001-0001-0001-000000000002"],
+        "cited_assertions": [
+          { "subject_node_id": "fa000001-0001-0001-0001-000000000002", "assertion_type": "subcontractor_role", "assertion_key": "default" }
+        ]
+      }
+    },
+    {
+      "question_id": "q-causal-01",
+      "steps": [
+        {
+          "seq": 1,
+          "tool": "find_nodes",
+          "intent": "locate the project",
+          "args": { "p_query": "Pier 9 Rebuild", "p_node_types": ["project"] },
+          "results": [
+            { "node_id": "fa000001-0003-0001-0001-000000000001", "label": "Pier 9 Rebuild", "score": 0.95, "match_reason": "exact_label", "used": true }
+          ],
+          "selected": { "node_id": "fa000001-0003-0001-0001-000000000001", "from_seq": 1, "from_phrasing": "Pier 9 Rebuild" }
+        },
+        {
+          "seq": 2,
+          "tool": "find_paths",
+          "intent": "walk upstream for causes only",
+          "args": { "p_from_node_id": "fa000001-0003-0001-0001-000000000001", "p_direction": "in", "p_semantics": ["causal"], "p_max_depth": 3 },
+          "results": [
+            {
+              "node_path": ["fa000001-0003-0001-0001-000000000001", "fa000001-0004-0001-0001-000000000001"],
+              "edge_path": ["fa000002-0002-0001-0001-000000000002"],
+              "edge_type_path": ["affects"],
+              "depth": 1
+            },
+            {
+              "node_path": ["fa000001-0003-0001-0001-000000000001", "fa000001-0004-0001-0001-000000000001", "fa000001-0001-0001-0001-000000000006"],
+              "edge_path": ["fa000002-0002-0001-0001-000000000002", "fa000002-0002-0001-0001-000000000001"],
+              "edge_type_path": ["affects", "affects"],
+              "depth": 2
+            }
+          ]
+        }
+      ],
+      "answer": {
+        "refused": false,
+        "text": "A rebar shortage delayed it, caused by Coastal Steel Supply missing two deliveries.",
+        "node_ids": ["fa000001-0004-0001-0001-000000000001", "fa000001-0001-0001-0001-000000000006"],
+        "cited_edge_ids": ["fa000002-0002-0001-0001-000000000001", "fa000002-0002-0001-0001-000000000002"],
+        "cited_assertions": [
+          { "subject_node_id": "fa000001-0004-0001-0001-000000000001", "assertion_type": "issue_cause", "assertion_key": "default" }
+        ]
+      }
+    },
+    {
+      "question_id": "q-causal-02",
+      "steps": [
+        {
+          "seq": 1,
+          "tool": "find_nodes",
+          "intent": "locate the supplier",
+          "args": { "p_query": "Coastal Steel Supply" },
+          "results": [
+            { "node_id": "fa000001-0001-0001-0001-000000000006", "label": "Coastal Steel Supply", "score": 0.95, "match_reason": "exact_label", "used": true }
+          ],
+          "selected": { "node_id": "fa000001-0001-0001-0001-000000000006", "from_seq": 1, "from_phrasing": "Coastal Steel Supply" }
+        },
+        {
+          "seq": 2,
+          "tool": "find_paths",
+          "intent": "any connection to the penalty, semantics left off",
+          "args": { "p_from_node_id": "fa000001-0001-0001-0001-000000000006", "p_to_node_id": "fa000001-0004-0001-0001-000000000002", "p_max_depth": 3, "p_direction": "out" },
+          "results": [
+            {
+              "node_path": ["fa000001-0001-0001-0001-000000000006", "fa000001-0004-0001-0001-000000000002"],
+              "edge_path": ["fa000002-0003-0001-0001-000000000001"],
+              "edge_type_path": ["regarding"],
+              "depth": 1
+            },
+            {
+              "node_path": ["fa000001-0001-0001-0001-000000000006", "fa000001-0004-0001-0001-000000000001", "fa000001-0003-0001-0001-000000000001", "fa000001-0004-0001-0001-000000000002"],
+              "edge_path": ["fa000002-0002-0001-0001-000000000001", "fa000002-0002-0001-0001-000000000002", "fa000002-0002-0001-0001-000000000003"],
+              "edge_type_path": ["affects", "affects", "affects"],
+              "depth": 3
+            }
+          ]
+        }
+      ],
+      "answer": {
+        "refused": false,
+        "text": "Yes — Coastal Steel Supply is directly linked to the late delivery penalty.",
+        "node_ids": ["fa000001-0004-0001-0001-000000000002"],
+        "cited_edge_ids": ["fa000002-0003-0001-0001-000000000001"]
+      }
+    },
+    {
+      "question_id": "q-causal-negative-01",
+      "steps": [
+        {
+          "seq": 1,
+          "tool": "find_nodes",
+          "intent": "locate the subcontractor",
+          "args": { "p_query": "Meridian Fence & Gate", "p_node_types": ["org"] },
+          "results": [
+            { "node_id": "fa000001-0001-0001-0001-000000000002", "label": "Meridian Fence & Gate", "score": 0.95, "match_reason": "exact_label", "used": true },
+            { "node_id": "fa000001-0001-0001-0001-000000000003", "label": "Meridian Fencing Supply", "score": 0.3774, "match_reason": "label_similarity", "used": false }
+          ],
+          "selected": { "node_id": "fa000001-0001-0001-0001-000000000002", "from_seq": 1, "from_phrasing": "Meridian Fence & Gate" }
+        },
+        {
+          "seq": 2,
+          "tool": "find_paths",
+          "intent": "causal link only — a mention is not a cause",
+          "args": { "p_from_node_id": "fa000001-0001-0001-0001-000000000002", "p_to_node_id": "fa000001-0003-0001-0001-000000000001", "p_semantics": ["causal"], "p_max_depth": 3, "p_direction": "any" },
+          "results": []
+        }
+      ],
+      "answer": {
+        "refused": false,
+        "text": "No. Meridian Fence & Gate is associated with the Pier 9 Rebuild but nothing records them as a cause of the delay.",
+        "node_ids": []
+      }
+    },
+    {
+      "question_id": "q-fact-01",
+      "steps": [
+        {
+          "seq": 1,
+          "tool": "find_nodes",
+          "intent": "locate the project",
+          "args": { "p_query": "Pier 9 Rebuild", "p_node_types": ["project"] },
+          "results": [
+            { "node_id": "fa000001-0003-0001-0001-000000000001", "label": "Pier 9 Rebuild", "score": 0.95, "match_reason": "exact_label", "used": true }
+          ],
+          "selected": { "node_id": "fa000001-0003-0001-0001-000000000001", "from_seq": 1, "from_phrasing": "Pier 9 Rebuild" }
+        },
+        {
+          "seq": 2,
+          "tool": "neighborhood",
+          "intent": "read the current accepted assertions on it",
+          "args": { "p_node_id": "fa000001-0003-0001-0001-000000000001", "p_max_depth": 0 },
+          "results": [{ "node_ids": ["fa000001-0003-0001-0001-000000000001"] }]
+        }
+      ],
+      "answer": {
+        "refused": false,
+        "text": "Delayed, with the milestone out about four weeks.",
+        "node_ids": ["fa000001-0003-0001-0001-000000000001"],
+        "cited_assertions": [
+          { "subject_node_id": "fa000001-0003-0001-0001-000000000001", "assertion_type": "project_status", "assertion_key": "default" }
+        ]
+      }
+    },
+    {
+      "question_id": "q-fact-02",
+      "steps": [
+        {
+          "seq": 1,
+          "tool": "find_nodes",
+          "intent": "locate the subcontractor by name",
+          "args": { "p_query": "Meridian Fence & Gate", "p_node_types": ["org"] },
+          "results": [
+            { "node_id": "fa000001-0001-0001-0001-000000000002", "label": "Meridian Fence & Gate", "score": 0.95, "match_reason": "exact_label", "used": true },
+            { "node_id": "fa000001-0001-0001-0001-000000000003", "label": "Meridian Fencing Supply", "score": 0.3774, "match_reason": "label_similarity", "used": false }
+          ],
+          "selected": { "node_id": "fa000001-0001-0001-0001-000000000002", "from_seq": 1, "from_phrasing": "Meridian Fence & Gate" }
+        },
+        {
+          "seq": 2,
+          "tool": "neighborhood",
+          "intent": "read what they do for us",
+          "args": { "p_node_id": "fa000001-0001-0001-0001-000000000002", "p_max_depth": 0 },
+          "results": [{ "node_ids": ["fa000001-0001-0001-0001-000000000002"] }]
+        }
+      ],
+      "answer": {
+        "refused": false,
+        "text": "Perimeter fencing and gate installation.",
+        "node_ids": ["fa000001-0001-0001-0001-000000000002"],
+        "cited_assertions": [
+          { "subject_node_id": "fa000001-0001-0001-0001-000000000002", "assertion_type": "subcontractor_role", "assertion_key": "default" }
+        ]
+      }
+    },
+    {
+      "question_id": "q-crosssubject-01",
+      "steps": [
+        {
+          "seq": 1,
+          "tool": "sql",
+          "intent": "find delayed projects",
+          "args": { "query": "SELECT subject_node_id FROM current_valid_assertions WHERE assertion_type = 'project_status'" },
+          "results": [{ "node_ids": ["fa000001-0003-0001-0001-000000000001"] }]
+        },
+        {
+          "seq": 2,
+          "tool": "find_paths",
+          "intent": "upstream causes for the one delayed project found",
+          "args": { "p_from_node_id": "fa000001-0003-0001-0001-000000000001", "p_direction": "in", "p_semantics": ["causal"], "p_max_depth": 3 },
+          "results": [
+            {
+              "node_path": ["fa000001-0003-0001-0001-000000000001", "fa000001-0004-0001-0001-000000000001"],
+              "edge_path": ["fa000002-0002-0001-0001-000000000002"],
+              "edge_type_path": ["affects"],
+              "depth": 1
+            },
+            {
+              "node_path": ["fa000001-0003-0001-0001-000000000001", "fa000001-0004-0001-0001-000000000001", "fa000001-0001-0001-0001-000000000006"],
+              "edge_path": ["fa000002-0002-0001-0001-000000000002", "fa000002-0002-0001-0001-000000000001"],
+              "edge_type_path": ["affects", "affects"],
+              "depth": 2
+            }
+          ]
+        }
+      ],
+      "answer": {
+        "refused": false,
+        "text": "The only delay I can account for is the rebar shortage on Pier 9. I cannot tell whether it is the most common cause.",
+        "node_ids": ["fa000001-0004-0001-0001-000000000001"]
+      }
+    },
+    {
+      "question_id": "q-crosssubject-02",
+      "steps": [
+        {
+          "seq": 1,
+          "tool": "find_nodes_batch",
+          "intent": "enumerate projects to check one at a time",
+          "args": { "p_queries": ["Pier", "Dock", "Slipway"], "p_node_types": ["project"] },
+          "results": [
+            { "query": "Dock", "node_id": "fa000001-0003-0001-0001-000000000002", "label": "Dock 4 Refit", "score": 0.4, "match_reason": "label_contains", "used": true },
+            { "query": "Pier", "node_id": "fa000001-0003-0001-0001-000000000001", "label": "Pier 9 Rebuild", "score": 0.4, "match_reason": "label_contains", "used": true },
+            { "query": "Slipway", "node_id": "fa000001-0003-0001-0001-000000000003", "label": "Slipway Extension", "score": 0.4, "match_reason": "label_contains", "used": true }
+          ]
+        },
+        {
+          "seq": 2,
+          "tool": "find_paths",
+          "intent": "causes upstream of Pier 9",
+          "args": { "p_from_node_id": "fa000001-0003-0001-0001-000000000001", "p_direction": "in", "p_semantics": ["causal"], "p_max_depth": 3 },
+          "results": [
+            { "node_path": ["fa000001-0003-0001-0001-000000000001", "fa000001-0004-0001-0001-000000000001"], "edge_path": ["fa000002-0002-0001-0001-000000000002"], "edge_type_path": ["affects"], "depth": 1 },
+            { "node_path": ["fa000001-0003-0001-0001-000000000001", "fa000001-0004-0001-0001-000000000001", "fa000001-0001-0001-0001-000000000006"], "edge_path": ["fa000002-0002-0001-0001-000000000002", "fa000002-0002-0001-0001-000000000001"], "edge_type_path": ["affects", "affects"], "depth": 2 }
+          ]
+        },
+        {
+          "seq": 3,
+          "tool": "find_paths",
+          "intent": "causes upstream of Dock 4",
+          "args": { "p_from_node_id": "fa000001-0003-0001-0001-000000000002", "p_direction": "in", "p_semantics": ["causal"], "p_max_depth": 3 },
+          "results": [
+            { "node_path": ["fa000001-0003-0001-0001-000000000002", "fa000001-0004-0001-0001-000000000003"], "edge_path": ["fa000002-0002-0001-0001-000000000005"], "edge_type_path": ["affects"], "depth": 1 },
+            { "node_path": ["fa000001-0003-0001-0001-000000000002", "fa000001-0004-0001-0001-000000000003", "fa000001-0001-0001-0001-000000000006"], "edge_path": ["fa000002-0002-0001-0001-000000000005", "fa000002-0002-0001-0001-000000000004"], "edge_type_path": ["affects", "affects"], "depth": 2 }
+          ]
+        },
+        {
+          "seq": 4,
+          "tool": "find_paths",
+          "intent": "causes upstream of Slipway Extension",
+          "args": { "p_from_node_id": "fa000001-0003-0001-0001-000000000003", "p_direction": "in", "p_semantics": ["causal"], "p_max_depth": 3 },
+          "results": [
+            { "node_path": ["fa000001-0003-0001-0001-000000000003", "fa000001-0004-0001-0001-000000000004"], "edge_path": ["fa000002-0002-0001-0001-000000000006"], "edge_type_path": ["affects"], "depth": 1 }
+          ]
+        }
+      ],
+      "answer": {
+        "refused": false,
+        "text": "Yes — Coastal Steel Supply is upstream of both the Pier 9 and Dock 4 delays.",
+        "node_ids": ["fa000001-0001-0001-0001-000000000006"]
+      }
+    },
+    {
+      "question_id": "q-unanswerable-01",
+      "steps": [
+        {
+          "seq": 1,
+          "tool": "find_nodes",
+          "intent": "locate the subcontractor",
+          "args": { "p_query": "Meridian Fence & Gate", "p_node_types": ["org"] },
+          "results": [
+            { "node_id": "fa000001-0001-0001-0001-000000000002", "label": "Meridian Fence & Gate", "score": 0.95, "match_reason": "exact_label", "used": true },
+            { "node_id": "fa000001-0001-0001-0001-000000000003", "label": "Meridian Fencing Supply", "score": 0.3774, "match_reason": "label_similarity", "used": false }
+          ]
+        },
+        {
+          "seq": 2,
+          "tool": "neighborhood",
+          "intent": "look for anything about terms",
+          "args": { "p_node_id": "fa000001-0001-0001-0001-000000000002", "p_max_depth": 1 },
+          "results": [{ "node_ids": ["fa000001-0001-0001-0001-000000000002", "fa000001-0003-0001-0001-000000000001"] }]
+        }
+      ],
+      "answer": { "refused": true, "text": "Nothing on record states payment terms for Meridian Fence & Gate.", "node_ids": [] }
+    },
+    {
+      "question_id": "q-unanswerable-02",
+      "steps": [
+        {
+          "seq": 1,
+          "tool": "find_nodes",
+          "intent": "locate the project",
+          "args": { "p_query": "Dock 4 Refit", "p_node_types": ["project"] },
+          "results": [
+            { "node_id": "fa000001-0003-0001-0001-000000000002", "label": "Dock 4 Refit", "score": 0.95, "match_reason": "exact_label", "used": true }
+          ]
+        },
+        {
+          "seq": 2,
+          "tool": "neighborhood",
+          "intent": "look for assigned people and roles",
+          "args": { "p_node_id": "fa000001-0003-0001-0001-000000000002", "p_max_depth": 2 },
+          "results": [{ "node_ids": ["fa000001-0003-0001-0001-000000000002", "fa000001-0004-0001-0001-000000000003", "fa000001-0001-0001-0001-000000000006"] }]
+        }
+      ],
+      "answer": { "refused": true, "text": "No safety officer is recorded for the Dock 4 Refit.", "node_ids": [] }
+    },
+    {
+      "question_id": "q-unanswerable-03",
+      "steps": [
+        {
+          "seq": 1,
+          "tool": "find_nodes",
+          "intent": "locate the penalty",
+          "args": { "p_query": "Late Delivery Penalty" },
+          "results": [
+            { "node_id": "fa000001-0004-0001-0001-000000000002", "label": "Late Delivery Penalty", "score": 0.95, "match_reason": "exact_label", "used": true }
+          ]
+        }
+      ],
+      "answer": {
+        "refused": false,
+        "text": "The late delivery penalty was roughly four weeks of schedule cost on Pier 9.",
+        "node_ids": ["fa000001-0004-0001-0001-000000000002"]
+      }
+    }
+  ]
+}

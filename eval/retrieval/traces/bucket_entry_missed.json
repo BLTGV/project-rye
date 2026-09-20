@@ -1,0 +1,33 @@
+{
+  "arm": "bucket_probe_entry_missed",
+  "scenario": "harbor_point",
+  "run_id": "bucket-probe-2026-09-20",
+  "note": "One question, recorded from psql on 2026-09-20 against the seeded fixture. The arm sends two description-shaped phrasings and stops. Neither reaches Meridian Fence & Gate; 'fencing' reaches the other Meridian, which is a candidate, not the expected entry. Intended bucket: entry_missed — and it stays entry_missed although the arm refused, because a refusal that follows never finding the entity is an entry-point problem.",
+  "results": [
+    {
+      "question_id": "q-entry-paraphrase-01",
+      "steps": [
+        {
+          "seq": 1,
+          "tool": "find_nodes_batch",
+          "intent": "the question names no company, try what it describes",
+          "args": { "p_queries": ["fence company", "the fence company"], "p_node_types": ["org"] },
+          "results": []
+        },
+        {
+          "seq": 2,
+          "tool": "find_nodes_batch",
+          "intent": "drop 'company' in case the label is just the trade",
+          "args": { "p_queries": ["fencing"], "p_node_types": ["org"] },
+          "results": [
+            { "query": "fencing", "node_id": "fa000001-0001-0001-0001-000000000003", "label": "Meridian Fencing Supply", "score": 0.4, "match_reason": "label_contains", "used": false }
+          ]
+        }
+      ],
+      "answer": {
+        "refused": true,
+        "text": "The only fencing name I can find is Meridian Fencing Supply, and that is a supplier rather than a company we work with."
+      }
+    }
+  ]
+}

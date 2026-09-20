@@ -310,10 +310,14 @@ export function acceptPmMilestonePlanCandidate(
   );
 }
 
+export type AssertionReviewState = "waiting" | "rejected";
+
 export interface AssertionReviewQueueOptions {
   assertionType?: string;
   q?: string;
   competingOnly?: boolean;
+  /** "waiting" lists suggestions waiting for a person; "rejected" lists declined ones. */
+  state?: AssertionReviewState;
   limit?: number;
   offset?: number;
 }
@@ -329,6 +333,7 @@ export function useAssertionReviewQueue(opts: AssertionReviewQueueOptions = {}) 
       }
       if (opts.q) params.set("q", opts.q);
       if (opts.competingOnly) params.set("competing_only", "true");
+      if (opts.state && opts.state !== "waiting") params.set("state", opts.state);
       if (opts.limit) params.set("limit", String(opts.limit));
       if (opts.offset) params.set("offset", String(opts.offset));
       const suffix = params.toString() ? `?${params.toString()}` : "";
@@ -683,8 +688,21 @@ export interface CrmOpportunity {
   created_at: string;
 }
 
+export interface MatviewFreshness {
+  snapshot_at: string | null;
+  age_seconds: number | null;
+  stale_after_seconds: number | null;
+  stale: boolean;
+  row_count: number;
+}
+
 export interface CrmWorkspaceResponse {
   generated_at: string;
+  /**
+   * When the deal snapshot was taken. An age marker, not change detection:
+   * stale false does not promise the underlying records are unchanged.
+   */
+  freshness: MatviewFreshness | null;
   opportunities: CrmOpportunity[];
   plans: WorkspacePlan[];
   source_policies: WorkspaceSourcePolicy[];
@@ -891,6 +909,9 @@ export interface AssertionEvidenceRow {
   recorded_at: string;
 }
 
+/** Why a suggestion is waiting. Never null: the view writes "none". */
+export type WaitingReason = "settle_gate" | "review_gate" | "none";
+
 export interface ReviewCandidateRow {
   id: string;
   claim: unknown;
@@ -898,11 +919,13 @@ export interface ReviewCandidateRow {
   classification: string | null;
   confidence: number | null;
   /**
-   * effective_confidence() is defined only over current_valid_assertions, so it
-   * is null for live candidates. basis_prior is the registry prior the helper
-   * would start from once the candidate is accepted.
+   * effective_confidence() answers about the current value, so it is null for
+   * every suggestion and stays null. Read projected_effective_confidence: what
+   * this suggestion would carry if it were accepted now.
    */
   effective_confidence: number | null;
+  projected_effective_confidence: number | null;
+  /** Deprecated by projected_effective_confidence; kept for one release. */
   basis_prior: number | null;
   asserted_at: string;
   effective_at: string | null;
@@ -910,6 +933,17 @@ export interface ReviewCandidateRow {
   attrs: Record<string, unknown>;
   witness_count: number;
   evidence: AssertionEvidenceRow[];
+  /**
+   * Evidence summary from review_queue_candidates. Counts only what this
+   * caller may read, so two people may see different numbers for one
+   * suggestion. That is visibility, not disagreement.
+   */
+  evidence_count: number;
+  evidence_kinds: string[];
+  latest_evidence_at: string | null;
+  waiting_reason: WaitingReason;
+  waiting_detail: Record<string, unknown> | null;
+  incumbent_assertion_id: string | null;
 }
 
 export interface ReviewIncumbentRow {
@@ -923,6 +957,12 @@ export interface ReviewIncumbentRow {
   effective_at: string | null;
   effective_to: string | null;
   attrs: Record<string, unknown>;
+  /**
+   * The incumbent is the accepted, unsuperseded answer an acceptance would
+   * replace — not always the one in effect right now. is_current says whether
+   * it is also the answer Rye gives today.
+   */
+  is_current: boolean;
 }
 
 export interface ReviewQueueGroup {
@@ -935,19 +975,52 @@ export interface ReviewQueueGroup {
   assertion_key: string;
   candidate_count: number;
   newest_candidate_at: string | null;
+  /** Null here can be RLS silence rather than absence. Never read it as "none exists". */
   incumbent: ReviewIncumbentRow | null;
   candidates: ReviewCandidateRow[];
+  waiting_reason: WaitingReason;
+  waiting_detail: Record<string, unknown> | null;
+}
+
+export interface RejectedSuggestionRow {
+  id: string;
+  subject_ref: string;
+  subject_node_id: string | null;
+  subject_edge_id: string | null;
+  subject_label: string | null;
+  assertion_type: string;
+  stored_assertion_type: string;
+  assertion_key: string;
+  claim: unknown;
+  basis: AssertionBasis | string;
+  classification: string | null;
+  confidence: number | null;
+  attrs: Record<string, unknown>;
+  asserted_at: string;
+  rejected_at: string | null;
+  /** Null when the suggestion was closed without a recorded decision. */
+  rejected_by: string | null;
+  rejected_reason: string | null;
+  rejected_outcome: string | null;
+  rejection_event_id: string | null;
+  evidence: AssertionEvidenceRow[];
 }
 
 export interface AssertionReviewQueueResponse {
   groups: ReviewQueueGroup[];
   types: { assertion_type: string; count: number }[];
   stats: {
+    /** Header metrics for the live queue; the same in both states. */
     tuples: number;
     competing_tuples: number;
     candidates: number;
+    /** Rows this state can return before the request's own filters. */
+    total: number;
+    /** Rows that survive them, before limit and offset. */
     filtered: number;
   };
+  state: AssertionReviewState;
+  rejected: RejectedSuggestionRow[];
 }
 
 export interface OpenGapRow {
@@ -979,6 +1052,10 @@ export interface StaleDigestRow {
   watermark: string | null;
   newer_subject_assertion: boolean;
   overturned_source: boolean;
+  /** What made it stale, by id. Empty, never null, when the boolean is false. */
+  newer_assertion_ids: string[];
+  newer_latest_asserted_at: string | null;
+  overturned_source_assertion_ids: string[];
   claim: Record<string, unknown>;
   asserted_at: string;
 }
