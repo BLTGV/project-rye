@@ -1181,6 +1181,105 @@ Run it as `admin`. Rows it returns are not followed by `resolve_merged_node()`
 when the duplicate is live; for the rest, decide by hand — `node_merges` is
 insert-only, so a wrong row is corrected by a real merge, not by deleting it.
 
+#### `find_nodes()` / `find_nodes_batch()`
+
+```
+find_nodes(p_query, p_node_types, p_limit, p_threshold, p_scope)
+  → (node_id, node_type, label, score, match_reason)
+
+find_nodes_batch(p_queries[], p_node_types, p_limit_per_query, p_threshold, p_scope)
+  → (query, node_id, node_type, label, score, match_reason)
+```
+
+Ranked entry-point lookup. Matches exact external identity, exact label, then
+trigram similarity and literal substring containment, returning the best
+reason per node. Results carry `score` and `match_reason` so the caller can
+judge rather than trust an opaque rank.
+
+The containment tier is literal, not a pattern language: `%`, `_`, and `\` in
+the query match themselves (`rye_like_literal()` escapes them and the `ILIKE`
+carries an explicit `ESCAPE '\'`). A one-character query is a one-character
+query, not a wildcard.
+
+**Why it exists:** these are primitives for an agent's search loop, not a
+search engine. The agent owns semantic matching — it knows the domain
+vocabulary, and it can reformulate ("the fence company" → "Meridian Fence"),
+decompose, or narrow by type. So the batch form takes many query strings in
+one round trip, and `p_threshold` is a per-call argument with the registry
+value as its default rather than as fixed policy.
+
+Widening the threshold does not solve paraphrase; reformulating does. The
+threshold floors at the `pg_trgm.similarity_threshold` GUC (0.3 by default),
+since the `%` operator is what keeps the GIN index usable.
+
+Property values are deliberately not searched. `field_classifications` redacts
+individual property paths, so a match on a raw property would let a caller
+confirm the contents of a field it cannot read.
+
+#### `find_paths()`
+
+```
+find_paths(p_from_node_id, p_to_node_id, p_max_depth, p_edge_types,
+           p_semantics, p_as_of, p_direction, p_max_paths, p_scope)
+  → (node_path, edge_path, edge_type_path, depth, path_weight)
+```
+
+Bounded multi-hop traversal. Depth is capped by registry key `max_path_depth`
+(core default 3) — a caller may request less, never more. Edges participate
+only while live at `p_as_of`, so a past timestamp reconstructs historical
+connectivity. Paths never revisit a node.
+
+`p_direction` defaults to `out` because an edge asserts something in its
+direction. Use `any` for undirected connectivity questions, never for causal
+reasoning. `p_semantics` filters by `edge_semantics()`.
+
+Both are closed sets, and an unrecognized value raises `22023` naming the
+accepted ones — `out`, `in`, `any` for the direction; `causal`, `structural`,
+`associative`, `temporal` for the semantics. An unknown value must never widen
+the answer, and a misspelled direction used to fall through to the undirected
+walk. `neighborhood()` refuses the same two arguments the same way, with `any`
+as its direction default.
+
+#### `neighborhood()`
+
+```
+neighborhood(p_node_id, p_max_depth, p_edge_types, p_semantics, p_as_of,
+             p_direction, p_max_nodes, p_max_assertions_per_node, p_scope) → jsonb
+```
+
+Bounded subgraph with each node's current accepted assertions attached, under
+explicit node and per-node assertion budgets. Node properties are redacted per
+role. Knowledge comes from `current_valid_assertions`, so a candidate never
+appears — not one written as a candidate, not one a review policy demoted, and
+not one `reject_candidate()` closed, which leaves `status = 'candidate'` with
+`superseded_at` set. A superseded incumbent is excluded for the same reason.
+
+`truncated` reports that the node budget was reached. It is not a visibility
+signal — nodes pruned by RLS are absent and uncounted.
+
+#### `edge_semantics()`
+
+```
+edge_semantics(p_edge_type, p_scope) → text
+```
+
+Resolves `edge_semantics:<edge_type>` to `causal`, `structural`,
+`associative`, or `temporal`. Unregistered types resolve to `associative`, so
+an unclassified vocabulary can never be mistaken for causation. It reads the
+registry under the caller's RLS, so a registry entry a caller cannot see reads
+as `associative` for that caller: blindness narrows a causal traversal, never
+widens it.
+
+**Why it exists:** `caused_by` is a claim; `mentioned_alongside` is not. This
+makes the distinction a filter predicate instead of a prompt instruction.
+
+**Read-only.** All five of these are `STABLE` and `SECURITY INVOKER`, and none
+writes — no event, no salience, no audit row. A caller that wants a read to
+count calls `log_agent_query()` itself. That is what lets a `viewer` and a
+session that sets no role call them at all: after migration 0026 those two
+sessions may not write the core tables, so a function that logged would refuse
+for them.
+
 #### `log_agent_query()`
 
 ```
