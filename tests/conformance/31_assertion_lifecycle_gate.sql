@@ -1874,4 +1874,347 @@ BEGIN
 END
 $$;
 
+-- --------------------------------------------------------------------------
+-- Obligation 20. The hidden rival, measured rather than described.
+--
+-- Contract: the stated limit in "The row is the gate, not the route" that
+-- begins "A rival the caller cannot read does not stop a raw promotion", and
+-- the sentence in it about the inferred-displacement search, which said no
+-- fixture exercised it. This is the fixture.
+--
+-- The conflict searches in the guard are SECURITY INVOKER and do not fail
+-- closed, on purpose: inverting them would refuse every promotion by a caller
+-- who cannot see the whole tuple. So a non-inferred accepted incumbent that is
+-- classified above the caller's read level is not found, and the inferred
+-- candidate the rule exists to stop is promoted anyway.
+--
+-- Two paths, and they do not agree everywhere:
+--   * the raw path is the guard, which is SECURITY INVOKER, so it measures the
+--     same under both owner types;
+--   * accept_assertion() is SECURITY DEFINER, so where the table owner is a
+--     superuser (the Docker reference install) it reads past RLS, finds the
+--     hidden incumbent, and refuses; where the owner is bound by RLS
+--     (scripts/test-nonsuperuser-owner.sh, and Supabase) it sees no more than
+--     the caller and promotes.
+-- The owner type is read from pg_class rather than assumed, and each case
+-- asserts the value for the owner it is running against.
+--
+-- team_member is the acting role: it can write under every migration in this
+-- tree, and role_classification_access gives it public and internal, so a
+-- `confidential` incumbent is invisible to it and visible to the admin that
+-- reads the results back.
+-- --------------------------------------------------------------------------
+DO $$
+DECLARE
+    v_accepted_now integer;
+    v_cand         uuid;
+    v_event        uuid;
+    v_failed       boolean;
+    v_hidden       uuid;
+    v_hidden_raw   uuid;
+    v_msg          text;
+    v_owner_super  boolean;
+    v_raw_cand     uuid;
+    v_rows         integer;
+    v_seen         integer;
+    v_subject      uuid;
+    v_visible      uuid;
+BEGIN
+    -- The obligation 8 block ends with SET CONSTRAINTS ALL IMMEDIATE, which
+    -- outlives it. record_assertion() writes the assertion before its
+    -- evidence, so the deferred evidence check has to be deferred again here.
+    SET CONSTRAINTS ALL DEFERRED;
+
+    SELECT r.rolsuper INTO v_owner_super
+    FROM pg_class c
+    JOIN pg_roles r ON r.oid = c.relowner
+    WHERE c.oid = 'rye.assertions'::regclass;
+    IF v_owner_super IS NULL THEN
+        RAISE EXCEPTION 'Could not read the owner of rye.assertions';
+    END IF;
+
+    PERFORM set_config('app.current_role', 'admin', true);
+    PERFORM set_config('app.current_user_id', 'test:lifecycle-gate', true);
+    PERFORM set_config('app.current_teams', '', true);
+
+    INSERT INTO nodes (node_type, label, properties)
+    VALUES ('thing', 'Tobin hidden rival subject', '{"suite":"lifecycle_gate"}')
+    RETURNING id INTO v_subject;
+
+    -- Three tuples on one subject: one hidden incumbent for the helper path,
+    -- one hidden incumbent for the raw path, one readable incumbent as the
+    -- control that shows the search works when it can see.
+    v_hidden := record_assertion(
+        'hidden_rival_probe', '{"value":"standing"}', v_subject,
+        p_assertion_key := 'helper', p_basis := 'assumed',
+        p_classification := 'confidential'
+    );
+    v_hidden_raw := record_assertion(
+        'hidden_rival_probe', '{"value":"standing"}', v_subject,
+        p_assertion_key := 'raw', p_basis := 'assumed',
+        p_classification := 'confidential'
+    );
+    v_visible := record_assertion(
+        'hidden_rival_probe', '{"value":"standing"}', v_subject,
+        p_assertion_key := 'visible', p_basis := 'assumed'
+    );
+    IF (SELECT count(*) FROM assertions
+        WHERE id IN (v_hidden, v_hidden_raw, v_visible)
+          AND status = 'accepted' AND superseded_at IS NULL AND basis <> 'inferred') <> 3
+    THEN
+        RAISE EXCEPTION 'Premise broken: the three incumbents are not accepted non-inferred rows';
+    END IF;
+
+    -- The fixture is only a fixture if the hiding works and the subject does
+    -- not disappear with it.
+    PERFORM set_config('app.current_role', 'team_member', true);
+    SELECT count(*) INTO v_seen FROM assertions WHERE id IN (v_hidden, v_hidden_raw);
+    IF v_seen <> 0 THEN
+        RAISE EXCEPTION
+            'Refusing to pass vacuously: a team_member can read the confidential incumbents, so nothing is hidden';
+    END IF;
+    SELECT count(*) INTO v_seen FROM assertions WHERE id = v_visible;
+    IF v_seen <> 1 THEN
+        RAISE EXCEPTION
+            'Refusing to pass vacuously: a team_member cannot read the control incumbent either, so the control proves nothing';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM nodes WHERE id = v_subject) THEN
+        RAISE EXCEPTION 'Refusing to pass vacuously: the subject node is invisible to the acting role';
+    END IF;
+
+    -- ==================================================================
+    -- Control. The same attack on the readable incumbent is refused, on
+    -- both paths. This is what makes the hidden cases a measurement of
+    -- blindness rather than of a dead check.
+    -- ==================================================================
+    v_event := record_event(
+        p_event_type := 'hidden_rival_probe_note',
+        p_summary := 'Evidence for the inferred candidate',
+        p_participant_ids := ARRAY[v_subject],
+        p_participant_roles := ARRAY['subject'::text]
+    );
+    v_cand := record_assertion(
+        'hidden_rival_probe', '{"value":"inferred replacement"}', v_subject,
+        p_assertion_key := 'visible',
+        p_status := 'candidate', p_basis := 'inferred',
+        p_effective_at := now() - interval '1 day',
+        p_evidence := ARRAY[jsonb_build_object('kind', 'source', 'event_id', v_event)]
+    );
+
+    v_failed := false;
+    BEGIN
+        PERFORM accept_assertion(v_cand);
+    EXCEPTION WHEN OTHERS THEN
+        v_failed := true;
+        v_msg := SQLERRM;
+    END;
+    IF NOT v_failed THEN
+        RAISE EXCEPTION
+            'Control broken: accept_assertion() promoted an inferred candidate over a readable non-inferred incumbent';
+    END IF;
+    IF v_msg NOT LIKE '%cannot displace%' THEN
+        RAISE EXCEPTION 'Control broken: accept_assertion() refused for the wrong reason: %', v_msg;
+    END IF;
+
+    v_failed := false;
+    BEGIN
+        PERFORM set_config('app.write_path', 'supersede_assertion', true);
+        PERFORM set_config('app.supersede_assertion_id', v_visible::text, true);
+        UPDATE assertions SET superseded_at = now(), superseded_by = v_cand
+        WHERE id = v_visible;
+        PERFORM set_config('app.write_path', 'accept_assertion', true);
+        PERFORM set_config('app.accept_assertion_id', v_cand::text, true);
+        UPDATE assertions SET status = 'accepted' WHERE id = v_cand;
+    EXCEPTION WHEN OTHERS THEN
+        v_failed := true;
+        v_msg := SQLERRM;
+    END;
+    PERFORM set_config('app.write_path', '', true);
+    PERFORM set_config('app.supersede_assertion_id', '', true);
+    PERFORM set_config('app.accept_assertion_id', '', true);
+    IF NOT v_failed THEN
+        RAISE EXCEPTION
+            'Control broken: a raw promotion displaced a readable non-inferred incumbent with an inferred row';
+    END IF;
+    IF v_msg NOT LIKE '%cannot displace%' THEN
+        RAISE EXCEPTION 'Control broken: the raw promotion was refused for the wrong reason: %', v_msg;
+    END IF;
+
+    -- ==================================================================
+    -- The helper path under a hidden rival. The answer depends on the
+    -- owner, and both answers are asserted rather than tolerated.
+    -- ==================================================================
+    PERFORM set_config('app.current_role', 'team_member', true);
+    v_cand := record_assertion(
+        'hidden_rival_probe', '{"value":"inferred replacement"}', v_subject,
+        p_assertion_key := 'helper',
+        p_status := 'candidate', p_basis := 'inferred',
+        p_effective_at := now() - interval '1 day',
+        p_evidence := ARRAY[jsonb_build_object('kind', 'source', 'event_id', v_event)]
+    );
+
+    v_failed := false;
+    BEGIN
+        PERFORM accept_assertion(v_cand);
+    EXCEPTION WHEN OTHERS THEN
+        v_failed := true;
+        v_msg := SQLERRM;
+    END;
+
+    PERFORM set_config('app.current_role', 'admin', true);
+    IF v_owner_super THEN
+        -- SECURITY DEFINER reads past RLS: the helper sees the incumbent the
+        -- caller cannot and refuses, so the hidden rival is protected here and
+        -- nowhere else.
+        IF NOT v_failed THEN
+            RAISE EXCEPTION
+                'On a superuser owner accept_assertion() promoted an inferred candidate over a hidden non-inferred incumbent';
+        END IF;
+        IF v_msg NOT LIKE '%cannot displace%' THEN
+            RAISE EXCEPTION
+                'On a superuser owner accept_assertion() refused for the wrong reason: %', v_msg;
+        END IF;
+        IF (SELECT status FROM assertions WHERE id = v_cand) <> 'candidate' THEN
+            RAISE EXCEPTION 'The refused candidate did not stay a candidate';
+        END IF;
+    ELSE
+        -- Bound by RLS, the helper sees no more than the caller: it finds no
+        -- incumbent, supersedes nothing, and promotes. The cost is a
+        -- duplicate, not an erasure.
+        IF v_failed THEN
+            RAISE EXCEPTION
+                'On an RLS-bound owner accept_assertion() refused the hidden-rival promotion: %', v_msg;
+        END IF;
+        IF (SELECT status FROM assertions WHERE id = v_cand) <> 'accepted' THEN
+            RAISE EXCEPTION 'On an RLS-bound owner the hidden-rival candidate was not promoted';
+        END IF;
+        SELECT count(*) INTO v_accepted_now
+        FROM assertions
+        WHERE subject_node_id = v_subject
+          AND assertion_type = 'hidden_rival_probe'
+          AND assertion_key = 'helper'
+          AND status = 'accepted'
+          AND superseded_at IS NULL;
+        IF v_accepted_now <> 2 THEN
+            RAISE EXCEPTION
+                'On an RLS-bound owner the helper path left % accepted rows on the tuple, expected the stated duplicate of 2',
+                v_accepted_now;
+        END IF;
+        IF (SELECT superseded_at FROM assertions WHERE id = v_hidden) IS NOT NULL THEN
+            RAISE EXCEPTION 'The hidden incumbent was ended by a caller that cannot see it';
+        END IF;
+    END IF;
+
+    -- ==================================================================
+    -- The raw path under a hidden rival, which is the guard's own
+    -- inferred-displacement search and is SECURITY INVOKER, so it measures
+    -- the same under both owners.
+    --
+    -- Measured: the search is unreachable in this direction. To make an
+    -- inferred row displace an incumbent a caller has to name it, and an
+    -- UPDATE applies the SELECT policies to the rows it scans, so a row the
+    -- caller cannot read cannot be pointed at anything: the statement
+    -- affects zero rows and raises nothing. What is left is the promotion
+    -- itself, which the rival search does not stop, and that leaves the
+    -- duplicate the limit describes -- not a displacement.
+    -- ==================================================================
+    PERFORM set_config('app.current_role', 'team_member', true);
+    v_raw_cand := record_assertion(
+        'hidden_rival_probe', '{"value":"inferred replacement"}', v_subject,
+        p_assertion_key := 'raw',
+        p_status := 'candidate', p_basis := 'inferred',
+        p_effective_at := now() - interval '1 day',
+        p_evidence := ARRAY[jsonb_build_object('kind', 'source', 'event_id', v_event)]
+    );
+
+    -- assertion_update_policy is keyed on app.write_path and the row id and
+    -- never on visibility, so the forged settings are admitted -- and the row
+    -- is still not there to update, because the scan is filtered by
+    -- assertion_read_policy. Zero rows, no error.
+    v_failed := false;
+    BEGIN
+        PERFORM set_config('app.write_path', 'supersede_assertion', true);
+        PERFORM set_config('app.supersede_assertion_id', v_hidden_raw::text, true);
+        UPDATE assertions SET superseded_at = now(), superseded_by = v_raw_cand
+        WHERE id = v_hidden_raw;
+        GET DIAGNOSTICS v_rows = ROW_COUNT;
+    EXCEPTION WHEN OTHERS THEN
+        v_failed := true;
+        v_msg := SQLERRM;
+    END;
+    PERFORM set_config('app.write_path', '', true);
+    PERFORM set_config('app.supersede_assertion_id', '', true);
+    IF v_failed THEN
+        RAISE EXCEPTION
+            'Ending a hidden incumbent raised instead of matching no rows: %', v_msg;
+    END IF;
+    IF v_rows <> 0 THEN
+        RAISE EXCEPTION
+            'A caller ended % rows it cannot read; the inferred-displacement search is reachable after all and this limit is understated',
+            v_rows;
+    END IF;
+
+    v_failed := false;
+    BEGIN
+        PERFORM set_config('app.write_path', 'accept_assertion', true);
+        PERFORM set_config('app.accept_assertion_id', v_raw_cand::text, true);
+        UPDATE assertions SET status = 'accepted' WHERE id = v_raw_cand;
+        PERFORM set_config('app.write_path', '', true);
+        PERFORM set_config('app.accept_assertion_id', '', true);
+        PERFORM record_event(
+            p_event_type := 'assertion_accepted',
+            p_summary := 'Raw promotion over a hidden rival',
+            p_properties := jsonb_build_object('assertion_id', v_raw_cand),
+            p_participant_ids := ARRAY[v_subject],
+            p_participant_roles := ARRAY['subject'::text]
+        );
+        SET CONSTRAINTS trg_assertions_transition_complete IMMEDIATE;
+    EXCEPTION WHEN OTHERS THEN
+        v_failed := true;
+        v_msg := SQLERRM;
+    END;
+    SET CONSTRAINTS trg_assertions_transition_complete DEFERRED;
+    PERFORM set_config('app.write_path', '', true);
+    PERFORM set_config('app.accept_assertion_id', '', true);
+
+    IF v_failed THEN
+        RAISE EXCEPTION
+            'The raw hidden-rival promotion was refused: %. The stated limit says the rival search does not stop it, so either the limit or this fixture is now wrong.',
+            v_msg;
+    END IF;
+
+    PERFORM set_config('app.current_role', 'admin', true);
+    IF (SELECT status FROM assertions WHERE id = v_raw_cand) <> 'accepted' THEN
+        RAISE EXCEPTION 'The raw hidden-rival promotion did not stand';
+    END IF;
+    -- Nothing was displaced: the incumbent the caller cannot read is still
+    -- accepted and still unsuperseded, beside the row that now covers the
+    -- same instant. A duplicate, not an erasure, and an admin sees both.
+    IF (SELECT superseded_at FROM assertions WHERE id = v_hidden_raw) IS NOT NULL THEN
+        RAISE EXCEPTION 'The hidden incumbent was ended by a caller that cannot read it';
+    END IF;
+    SELECT count(*) INTO v_accepted_now
+    FROM assertions
+    WHERE subject_node_id = v_subject
+      AND assertion_type = 'hidden_rival_probe'
+      AND assertion_key = 'raw'
+      AND status = 'accepted'
+      AND superseded_at IS NULL;
+    IF v_accepted_now <> 2 THEN
+        RAISE EXCEPTION
+            'The raw path left % accepted rows on the tuple, expected the stated duplicate of 2',
+            v_accepted_now;
+    END IF;
+
+    RAISE NOTICE
+        'Obligation 20 measured: owner rolsuper=%; raw path left two accepted rows and displaced nothing; helper path %.',
+        v_owner_super,
+        CASE WHEN v_owner_super THEN 'refused (SECURITY DEFINER read past RLS)'
+             ELSE 'promoted and left two accepted rows' END;
+
+    SET CONSTRAINTS ALL IMMEDIATE;
+    SET CONSTRAINTS ALL DEFERRED;
+END
+$$;
+
 ROLLBACK;
