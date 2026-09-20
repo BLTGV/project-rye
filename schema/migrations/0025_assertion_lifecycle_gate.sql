@@ -162,24 +162,35 @@ DECLARE
         'n:' || NEW.subject_node_id::text, 'e:' || NEW.subject_edge_id::text
     );
 BEGIN
+    -- Exactly one subject, refused first and at any status. assertion_has_subject
+    -- is OR, not XOR, so a row carrying both columns is insertable, and
+    -- governing_scope() raises on it. Skipping the review rules for such a row
+    -- let a caller write an accepted assertion onto a node in a strict scope:
+    -- subject_ref resolves to the node, so it is the node's row in
+    -- current_valid_assertions, but the gate never looked at it.
+    --
+    -- Refusing loses nothing. record_assertion() already raises "Exactly one of
+    -- subject_node_id or subject_edge_id is required", so no helper writes this
+    -- shape and nothing legitimate depends on it. Existing rows are untouched:
+    -- this is INSERT only, and the UPDATE guard refuses only a status change.
+    IF (NEW.subject_node_id IS NULL) = (NEW.subject_edge_id IS NULL) THEN
+        RAISE EXCEPTION
+            'Exactly one of subject_node_id or subject_edge_id is required on an assertion';
+    END IF;
+
     IF NEW.status IS DISTINCT FROM 'accepted' THEN
         RETURN NEW;
     END IF;
 
     -- Every branch of governing_scope() returns a non-archived onboarding_scope
     -- node, so with none there is nothing to decide and the policy is open.
-    -- This is the hot path on an ordinary instance.
+    -- This is the hot path on an ordinary instance, and it is not a weakening:
+    -- record_assertion() resolves the same scope from the same rows and lands
+    -- the same answer.
     IF NOT EXISTS (
         SELECT 1 FROM nodes
         WHERE node_type = 'onboarding_scope' AND archived_at IS NULL
     ) THEN
-        RETURN NEW;
-    END IF;
-
-    -- governing_scope() needs exactly one subject. The table constraint allows
-    -- both columns to be set; such a row is left alone here rather than raising
-    -- a confusing scope error.
-    IF (NEW.subject_node_id IS NULL) = (NEW.subject_edge_id IS NULL) THEN
         RETURN NEW;
     END IF;
 
@@ -211,7 +222,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION assertions_insert_review_guard() IS
-    'Judge a direct INSERT of an accepted assertion by the same review policy record_assertion() applies, and demote it to candidate where that policy demotes. Nothing said is lost. Exempts a row that an already superseded, formerly accepted assertion on the same subject_ref, assertion_type and assertion_key names as its replacement, so supersede-then-insert does not strand that key with no accepted value. The exemption does not carry across tuples, so a merge_nodes() copy is judged by the canonical node''s policy.';
+    'Refuse an assertion that does not carry exactly one subject, at any status, because governing_scope() cannot read that shape and no helper writes it. Otherwise judge a direct INSERT of an accepted assertion by the same review policy record_assertion() applies, and demote it to candidate where that policy demotes. Nothing said is lost. Exempts a row that an already superseded, formerly accepted assertion on the same subject_ref, assertion_type and assertion_key names as its replacement, so supersede-then-insert does not strand that key with no accepted value. The exemption does not carry across tuples, so a merge_nodes() copy is judged by the canonical node''s policy.';
 
 DROP TRIGGER IF EXISTS trg_assertions_insert_review ON assertions;
 CREATE TRIGGER trg_assertions_insert_review
@@ -277,6 +288,17 @@ BEGIN
     -- could have produced.
     -- ----------------------------------------------------------------------
     IF NEW.status IS DISTINCT FROM OLD.status THEN
+        -- A two-subject row is refused before any other status rule, for the
+        -- same reason the insert guard refuses it: governing_scope() cannot
+        -- read it, so the agent capability check would be skipped and an agent
+        -- could promote under a strict policy. Only a status change is refused,
+        -- so a row that pre-dates this migration can still be superseded and
+        -- labelled.
+        IF (NEW.subject_node_id IS NULL) = (NEW.subject_edge_id IS NULL) THEN
+            RAISE EXCEPTION
+                'Assertion % carries both a node and an edge subject and cannot be accepted. Record it with record_assertion(), which requires exactly one.',
+                NEW.id;
+        END IF;
         IF OLD.status <> 'candidate' OR NEW.status <> 'accepted' THEN
             RAISE EXCEPTION
                 'Assertion status may only move candidate to accepted. An accepted assertion is replaced, never demoted.';
@@ -337,9 +359,7 @@ BEGIN
         -- the role only in order to refuse. Only agent:* callers are
         -- policy-gated on promotion, because that is the rule the helper
         -- applies; this guard does not invent a wider role model.
-        IF v_role LIKE 'agent:%'
-           AND (NEW.subject_node_id IS NULL) <> (NEW.subject_edge_id IS NULL)
-        THEN
+        IF v_role LIKE 'agent:%' THEN
             SELECT ae.witness_node_id INTO v_witness
             FROM assertion_evidence ae
             WHERE ae.assertion_id = NEW.id

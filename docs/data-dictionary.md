@@ -926,7 +926,13 @@ so the rules are about the row rather than the route.
 BEFORE INSERT trigger on `assertions` (`trg_assertions_insert_review`). A direct
 `INSERT` of an `accepted` row is judged by the same review policy
 `record_assertion()` applies, and lands as a `candidate` where that policy
-demotes. Nothing said is lost. One exemption, confined to a single tuple: a row
+demotes. It first refuses, at any status, a row that does not carry exactly one
+subject: `assertion_has_subject` is `OR`, not `XOR`, so a row with both
+`subject_node_id` and `subject_edge_id` is insertable, `governing_scope()`
+cannot read it, and it would escape the review rules while still appearing as
+the node's row in `current_valid_assertions`. `record_assertion()` already
+refuses that shape, so nothing legitimate writes it. Nothing said is lost. One
+exemption, confined to a single tuple: a row
 is left accepted when an already superseded, formerly accepted assertion **on
 the same `subject_ref`, `assertion_type` and `assertion_key`** names it as its
 replacement, so the supersede-then-insert order the helpers use does not strand

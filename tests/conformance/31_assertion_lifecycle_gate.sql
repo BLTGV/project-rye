@@ -82,8 +82,10 @@ $$;
 -- --------------------------------------------------------------------------
 DO $$
 DECLARE
+    v_any_edge     uuid;
     v_attempt      integer;
     v_before       assertions;
+    v_two_subject  uuid;
     v_canonical    uuid;
     v_cand         uuid;
     v_copied       assertions;
@@ -661,6 +663,11 @@ BEGIN
     -- governing_scope() picks the lowest scope id. The fixture ids are
     -- pinned so the strict scope wins, and the policy is re-probed after
     -- the merge rather than assumed.
+    --
+    -- That id ordering is the pre-existing gap, not this gate's: which of
+    -- two governing scopes wins a merged node is its own item. Until it
+    -- lands, this case's result depends on the pinned uuids, and the
+    -- re-probe below is what keeps it honest rather than lucky.
     -- ==================================================================
     INSERT INTO nodes (id, node_type, label)
     VALUES ('d1e51fe0-0025-4000-8000-0000000000f0', 'onboarding_scope', 'Lifecycle gate open scope')
@@ -903,6 +910,113 @@ BEGIN
         RAISE EXCEPTION
             'accept_assertion could not promote a candidate covering now while a scheduled row stands';
     END IF;
+
+    -- ==================================================================
+    -- Obligation 17. A row carrying BOTH a node and an edge subject does
+    -- not escape the gate. assertion_has_subject is OR, not XOR, so the
+    -- shape is insertable and subject_ref resolves to the node, which made
+    -- it the node's row in current_valid_assertions while governing_scope()
+    -- could not read it at all.
+    -- ==================================================================
+    PERFORM set_config('app.current_role', 'admin', true);
+    INSERT INTO nodes (node_type, label) VALUES ('thing', 'Two subject endpoint')
+    RETURNING id INTO v_other;
+    INSERT INTO edges (edge_type, source_id, target_id)
+    VALUES ('relates_to', v_gov, v_other) RETURNING id INTO v_any_edge;
+
+    FOREACH v_role IN ARRAY v_roles LOOP
+        PERFORM set_config('app.current_role', v_role, true);
+        IF current_setting('app.current_role', true) IS DISTINCT FROM v_role THEN
+            RAISE EXCEPTION 'app.current_role did not read back as "%"', v_role;
+        END IF;
+
+        -- The control: the same write with only the node column is demoted,
+        -- so the two-subject case below is compared against a live rule.
+        v_id := gen_random_uuid();
+        INSERT INTO assertions (id, assertion_type, assertion_key, status, basis, subject_node_id, claim)
+        VALUES (v_id, 'two_subject_probe', 'control_' || coalesce(nullif(v_role, ''), 'unset'),
+                'accepted', 'assumed', v_gov, '{"v":"control"}');
+        IF (SELECT status FROM assertions WHERE id = v_id) <> 'candidate' THEN
+            RAISE EXCEPTION
+                'Premise broken: role "%" single-subject control landed %, so the attack proves nothing',
+                v_role, (SELECT status FROM assertions WHERE id = v_id);
+        END IF;
+
+        -- The attack: accepted, both columns set, node in a strict scope.
+        v_failed := false;
+        v_id := gen_random_uuid();
+        BEGIN
+            INSERT INTO assertions (
+                id, assertion_type, assertion_key, status, basis,
+                subject_node_id, subject_edge_id, claim
+            ) VALUES (
+                v_id, 'two_subject_probe', 'attack_' || coalesce(nullif(v_role, ''), 'unset'),
+                'accepted', 'assumed', v_gov, v_any_edge, '{"v":"BOTH"}'
+            );
+        EXCEPTION WHEN OTHERS THEN
+            v_failed := true;
+            v_msg := SQLERRM;
+        END;
+        IF NOT v_failed THEN
+            RAISE EXCEPTION
+                'Role "%" inserted a two-subject accepted assertion (status %)',
+                v_role, (SELECT status FROM assertions WHERE id = v_id);
+        END IF;
+        IF v_msg NOT LIKE '%Exactly one of subject_node_id or subject_edge_id%' THEN
+            RAISE EXCEPTION
+                'Role "%" two-subject INSERT failed for the wrong reason: %', v_role, v_msg;
+        END IF;
+        IF EXISTS (SELECT 1 FROM assertions WHERE id = v_id) THEN
+            RAISE EXCEPTION 'Role "%" left a two-subject row behind', v_role;
+        END IF;
+
+        -- The promotion attack, end to end: land the two-subject row as a
+        -- candidate, write the acceptance event by hand so the deferred check
+        -- is not what refuses it, then promote. On a tree without the fix the
+        -- whole sequence commits as agent:t under strict, where the
+        -- single-subject control raises the capability error. The sequence
+        -- must break, and it must break on the subject rule.
+        v_failed := false;
+        v_two_subject := gen_random_uuid();
+        BEGIN
+            INSERT INTO assertions (
+                id, assertion_type, assertion_key, status, basis,
+                subject_node_id, subject_edge_id, claim
+            ) VALUES (
+                v_two_subject, 'two_subject_probe',
+                'promote_' || coalesce(nullif(v_role, ''), 'unset'),
+                'candidate', 'assumed', v_gov, v_any_edge, '{"v":"BOTH"}'
+            );
+            PERFORM record_event(
+                p_event_type := 'assertion_accepted',
+                p_summary := 'Hand written acceptance for the two-subject probe',
+                p_properties := jsonb_build_object('assertion_id', v_two_subject),
+                p_participant_ids := ARRAY[v_gov],
+                p_participant_roles := ARRAY['subject'],
+                p_actor := 'test:lifecycle-gate'
+            );
+            PERFORM set_config('app.write_path', 'accept_assertion', true);
+            PERFORM set_config('app.accept_assertion_id', v_two_subject::text, true);
+            UPDATE assertions SET status = 'accepted' WHERE id = v_two_subject;
+            GET DIAGNOSTICS v_rows = ROW_COUNT;
+        EXCEPTION WHEN OTHERS THEN
+            v_failed := true;
+            v_msg := SQLERRM;
+        END;
+        PERFORM set_config('app.write_path', '', true);
+        IF NOT v_failed AND v_rows <> 0 THEN
+            RAISE EXCEPTION
+                'Role "%" promoted a two-subject row to accepted under a strict scope',
+                v_role;
+        END IF;
+        IF v_msg NOT LIKE '%subject_node_id%' AND v_msg NOT LIKE '%subject%' THEN
+            RAISE EXCEPTION
+                'Role "%" two-subject promotion failed for the wrong reason: %', v_role, v_msg;
+        END IF;
+        IF EXISTS (SELECT 1 FROM assertions WHERE id = v_two_subject AND status = 'accepted') THEN
+            RAISE EXCEPTION 'Role "%" left a two-subject row accepted', v_role;
+        END IF;
+    END LOOP;
 
     -- This suite rolls back, so the deferred checks would never fire and
     -- every write above would be proven only to statement level. Force them.
