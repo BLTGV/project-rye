@@ -557,10 +557,22 @@ Deterministic resolution belongs only where the process is predefined —
 tabular imports with a declared key, `link_record()` mirroring of a domain
 table, connector syncs with stable external ids.
 
+A former name is searchable: an archived, merged-away node whose label is
+similar surfaces its live survivor, as `ambiguous`, with the old name in
+`matched_former_label`.
+
 A stale reference follows `resolve_merged_node()` to the surviving node.
 `node_merges` is read under the caller's own visibility, so a chain through a
 node the caller cannot see stops at the last visible link rather than
 disclosing it.
+
+`node_merges` is written by `merge_nodes()` and holds to the shape a merge
+leaves, whoever inserts the row: never an agent or `system:cdc`, `merged_at`
+equal to the transaction's `now()`, distinct ids, an unarchived duplicate with
+no earlier merge record, an unarchived canonical, no cycle, and — at commit —
+an archived duplicate and a `node_merge` event naming the pair. The lookup
+distrusts the table anyway, because rows written before that rule may be any
+shape.
 
 ## Outcome Label Convention
 

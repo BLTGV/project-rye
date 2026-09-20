@@ -815,6 +815,44 @@ BEGIN
       'the identity functions must be SECURITY INVOKER and set their own search_path';
   END IF;
 
+  -- node_merges is the first table 0033 reads, so its rows are held to the
+  -- shape merge_nodes() leaves: a BEFORE ROW trigger sorting after 0029's
+  -- gate, and a deferred constraint trigger for the two facts merge_nodes()
+  -- establishes after its insert.
+  IF to_regprocedure('rye.rye_node_merge_shape_gate()') IS NULL THEN
+    RAISE EXCEPTION 'rye_node_merge_shape_gate function missing';
+  END IF;
+  IF to_regprocedure('rye.rye_node_merge_shape_complete()') IS NULL THEN
+    RAISE EXCEPTION 'rye_node_merge_shape_complete function missing';
+  END IF;
+  IF EXISTS (
+      SELECT required.tgname
+      FROM (VALUES
+          ('trg_node_merges_shape', false),
+          ('trg_node_merges_shape_complete', true)
+      ) required(tgname, deferred)
+      WHERE NOT EXISTS (
+          SELECT 1
+          FROM pg_trigger tg
+          JOIN pg_class c ON c.oid = tg.tgrelid
+          JOIN pg_namespace n ON n.oid = c.relnamespace
+          WHERE n.nspname = v_schema
+            AND c.relname = 'node_merges'
+            AND tg.tgname = required.tgname
+            AND NOT tg.tgisinternal
+            AND tg.tgdeferrable = required.deferred
+            AND tg.tginitdeferred = required.deferred
+      )
+  ) THEN
+    RAISE EXCEPTION
+      'trg_node_merges_shape or trg_node_merges_shape_complete is missing or not deferred as expected';
+  END IF;
+  -- The shape gate must sort after 0029's gate, so a read-only or system:cdc
+  -- session still gets that gate's "who may write" message.
+  IF 'trg_node_merges_shape' <= 'trg_node_merges_gate' THEN
+    RAISE EXCEPTION 'the node_merges shape trigger no longer fires after the write gate';
+  END IF;
+
   -- Identity resolution is advisory: nothing in the write path calls it.
   IF EXISTS (
       SELECT 1

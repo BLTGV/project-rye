@@ -520,18 +520,26 @@ This call is advisory. It writes nothing and blocks nothing, and no write
 helper consults it — the decision is yours. Route `ambiguous` to
 `create_knowledge_candidate()` and batch review by resolved cluster rather
 than by row, or a large import will stall on individual near-misses. Do not
-try to clean up an `ambiguous` verdict yourself: `merge_nodes()` refuses an
-agent, by design. Record the duplicate and ask a person.
+try to clean up an `ambiguous` verdict yourself. Merging is for people, and
+the rule is about the row, not the route: `merge_nodes()` refuses an
+agent-shaped session by name, and a direct write to `node_merges` is refused
+the same way — along with any row that is not the shape a real merge leaves.
+Record the duplicate and ask a person.
 
 `new` means nothing matched *that you can see*. A node hidden from you by
 classification is not matched, so a duplicate is possible across an access
 boundary. Where that matters, run intake under a role that can see the whole
 population for the node type.
 
+Searching an old name still works. When a node was merged away, its label went
+with it, so a similar former name surfaces the node's **live survivor** as a
+candidate with `match_reason` `former_label_similarity` and the old name in
+`matched_former_label`. Like any label match, it is `ambiguous`, never `match`.
+
 Hold an id that may be stale? `resolve_merged_node(id)` follows `node_merges`
 to the surviving node. It reads under your own visibility: if a node in the
 chain is hidden from you, the answer is the last link you can see, not an
-error.
+error. A merge cycle answers too — it stops rather than raising.
 
 ## Other safe writes
 

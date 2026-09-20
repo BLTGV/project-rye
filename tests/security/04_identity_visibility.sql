@@ -26,7 +26,8 @@
 -- verdict that differs from a genuinely absent node. If D3 is adopted, these
 -- assertions must be changed on purpose rather than discovered failing.
 --
--- Invented names only: Hidden Identity Org, Idvis Stale/Bridge/Survivor.
+-- Invented names only: Hidden Identity Org, Ashfield Relay, Marlow Freight,
+-- Tamsin Group, Kestrel Supply.
 
 SET search_path = rye, public, pg_catalog;
 BEGIN;
@@ -39,6 +40,7 @@ DECLARE
     v_hidden uuid;
     v_res jsonb;
     v_role text;
+    v_relay uuid;
     v_stale uuid;
     v_super boolean;
     v_survivor uuid;
@@ -93,20 +95,28 @@ BEGIN
             '{"classification":"confidential","teams":["locked"]}')
     RETURNING id INTO v_hidden;
 
-    -- A merge chain whose middle node is the hidden one:
-    --   Idvis Stale -> Hidden Identity Org -> Idvis Survivor
-    INSERT INTO nodes (node_type, label) VALUES ('idvis_org', 'Idvis Stale')
+    -- A merge chain whose middle node is classified:
+    --   Marlow Freight -> Ashfield Relay (hidden) -> Tamsin Group
+    -- Built with merge_nodes(), the only thing that may write node_merges:
+    -- since 0033 a raw pair is refused unless it matches the shape a real
+    -- merge leaves. The classified link carries no properties, so nothing
+    -- about it reaches the survivor and the identity fixture above stays
+    -- the only hidden identity.
+    INSERT INTO nodes (node_type, label, attrs)
+    VALUES ('idvis_org', 'Ashfield Relay',
+            '{"classification":"confidential","teams":["locked"]}')
+    RETURNING id INTO v_relay;
+    INSERT INTO nodes (node_type, label) VALUES ('idvis_org', 'Marlow Freight')
     RETURNING id INTO v_stale;
-    INSERT INTO nodes (node_type, label) VALUES ('idvis_org', 'Idvis Survivor')
+    INSERT INTO nodes (node_type, label) VALUES ('idvis_org', 'Tamsin Group')
     RETURNING id INTO v_survivor;
     -- ...and a chain with nothing hidden in it, as the control.
-    INSERT INTO nodes (node_type, label) VALUES ('idvis_org', 'Idvis Bridge')
+    INSERT INTO nodes (node_type, label) VALUES ('idvis_org', 'Kestrel Supply')
     RETURNING id INTO v_bridge;
 
-    INSERT INTO node_merges (duplicate_id, canonical_id, merged_by) VALUES
-        (v_stale,  v_hidden,    'test'),
-        (v_hidden, v_survivor,  'test'),
-        (v_bridge, v_survivor,  'test');
+    PERFORM merge_nodes(v_stale, v_relay, 'test:identity-visibility');
+    PERFORM merge_nodes(v_relay, v_survivor, 'test:identity-visibility');
+    PERFORM merge_nodes(v_bridge, v_survivor, 'test:identity-visibility');
 
     -- ------------------------------------------------------------------
     -- Cleared caller: an ordinary writing role on the team that owns the
@@ -134,6 +144,19 @@ BEGIN
     END IF;
     RAISE NOTICE 'PASS: a cleared caller follows a merge chain through a classified node';
 
+    -- The former name of the merged-away node resolves to its live survivor
+    -- for a caller that can see the whole chain.
+    v_res := resolve_node_identity('idvis_org', 'Marlow Freight');
+    IF (v_res->>'former_label_count')::int < 1
+       OR NOT EXISTS (
+           SELECT 1 FROM jsonb_array_elements(v_res->'candidates') c
+           WHERE c->>'node_id' = v_survivor::text
+             AND c->>'match_reason' = 'former_label_similarity'
+       ) THEN
+        RAISE EXCEPTION 'cleared caller did not get the former name''s survivor: %', v_res;
+    END IF;
+    RAISE NOTICE 'PASS: a cleared caller sees a former name resolve to its survivor';
+
     -- ------------------------------------------------------------------
     -- Uncleared callers: same role with no team, and an unknown role. Only
     -- visibility changes.
@@ -158,11 +181,26 @@ BEGIN
         IF jsonb_array_length(v_res->'candidates') <> 0 THEN
             RAISE EXCEPTION 'hidden node leaked into the candidate list for role "%"', v_role;
         END IF;
-        IF (v_res->>'exact_count')::int <> 0 OR (v_res->>'fuzzy_count')::int <> 0 THEN
+        IF (v_res->>'exact_count')::int <> 0
+           OR (v_res->>'fuzzy_count')::int <> 0
+           OR (v_res->>'former_label_count')::int <> 0 THEN
             RAISE EXCEPTION 'hidden node leaked as a count for role "%": %', v_role, v_res;
         END IF;
         IF v_res::text LIKE '%Hidden Identity Org%' OR v_res::text LIKE '%' || v_hidden::text || '%' THEN
             RAISE EXCEPTION 'the verdict payload names the hidden node for role "%"', v_role;
+        END IF;
+
+        -- The former-name branch prunes the same way: this caller can read
+        -- the archived node but not the classified link out of it, so it is
+        -- told nothing about the survivor.
+        v_res := resolve_node_identity('idvis_org', 'Marlow Freight');
+        IF (v_res->>'former_label_count')::int <> 0 THEN
+            RAISE EXCEPTION
+                'role "%" was told a former name resolves through a link it cannot see: %',
+                v_role, v_res;
+        END IF;
+        IF v_res::text LIKE '%' || v_relay::text || '%' THEN
+            RAISE EXCEPTION 'the classified link leaked into the answer for role "%"', v_role;
         END IF;
 
         -- A genuinely absent identity is indistinguishable from the hidden

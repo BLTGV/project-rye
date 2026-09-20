@@ -9,7 +9,8 @@
 -- Negative control: without 0033 this suite fails on its first call, because
 -- normalize_identity_value() does not exist.
 --
--- Invented names only: Northwind, Ident Merge A/B/C, Ident Cycle X/Y.
+-- Invented names only: Northwind, Vantage Interiors, Bramble Union, Corwin
+-- Works, Delphine Labs, Everly Mill, Orbit One, Orbit Two.
 
 SET search_path = rye, public, pg_catalog;
 BEGIN;
@@ -186,6 +187,7 @@ DECLARE
     v_cyc_x uuid;
     v_cyc_y uuid;
     v_failed boolean;
+    v_msg text;
     v_merge_d uuid;
     v_merge_e uuid;
     v_org1 uuid;
@@ -393,22 +395,28 @@ BEGIN
     RAISE NOTICE 'PASS: viewer and role-less sessions read the resolver';
 
     -- ------------------------------------------------------------------
-    -- Merge chains resolve transitively, under 0029's RLS on node_merges.
+    -- Merge chains, built by the helper that owns them.
     -- ------------------------------------------------------------------
-    INSERT INTO nodes (node_type, label) VALUES ('ident_org', 'Ident Merge A') RETURNING id INTO v_dup_a;
-    INSERT INTO nodes (node_type, label) VALUES ('ident_org', 'Ident Merge B') RETURNING id INTO v_dup_b;
-    INSERT INTO nodes (node_type, label) VALUES ('ident_org', 'Ident Merge C') RETURNING id INTO v_dup_c;
-    INSERT INTO nodes (node_type, label) VALUES ('ident_org', 'Ident Merge D') RETURNING id INTO v_merge_d;
-    INSERT INTO nodes (node_type, label) VALUES ('ident_org', 'Ident Merge E') RETURNING id INTO v_merge_e;
-    INSERT INTO nodes (node_type, label) VALUES ('ident_org', 'Ident Cycle X') RETURNING id INTO v_cyc_x;
-    INSERT INTO nodes (node_type, label) VALUES ('ident_org', 'Ident Cycle Y') RETURNING id INTO v_cyc_y;
+    -- A chain is A into B, then B into C. The second merge is legal because
+    -- merge_nodes() archives the DUPLICATE, so B is still live when it
+    -- becomes the second duplicate.
+    INSERT INTO nodes (node_type, label) VALUES ('ident_org', 'Vantage Interiors') RETURNING id INTO v_dup_a;
+    INSERT INTO nodes (node_type, label) VALUES ('ident_org', 'Bramble Union') RETURNING id INTO v_dup_b;
+    INSERT INTO nodes (node_type, label) VALUES ('ident_org', 'Corwin Works') RETURNING id INTO v_dup_c;
+    INSERT INTO nodes (node_type, label) VALUES ('ident_org', 'Delphine Labs') RETURNING id INTO v_merge_d;
+    INSERT INTO nodes (node_type, label) VALUES ('ident_org', 'Everly Mill') RETURNING id INTO v_merge_e;
+    INSERT INTO nodes (node_type, label) VALUES ('ident_org', 'Orbit One') RETURNING id INTO v_cyc_x;
+    INSERT INTO nodes (node_type, label) VALUES ('ident_org', 'Orbit Two') RETURNING id INTO v_cyc_y;
 
     IF resolve_merged_node(v_dup_a) <> v_dup_a THEN
         RAISE EXCEPTION 'an unmerged node must resolve to itself';
     END IF;
+    IF resolve_merged_node(NULL) IS NOT NULL THEN
+        RAISE EXCEPTION 'null input must resolve to null';
+    END IF;
 
-    INSERT INTO node_merges (duplicate_id, canonical_id, merged_by)
-    VALUES (v_dup_a, v_dup_b, 'test'), (v_dup_b, v_dup_c, 'test');
+    PERFORM merge_nodes(v_dup_a, v_dup_b, 'test:identity-resolution');
+    PERFORM merge_nodes(v_dup_b, v_dup_c, 'test:identity-resolution');
 
     IF resolve_merged_node(v_dup_a) <> v_dup_c THEN
         RAISE EXCEPTION 'merge chain did not resolve transitively';
@@ -416,22 +424,19 @@ BEGIN
     IF resolve_merged_node(v_dup_b) <> v_dup_c THEN
         RAISE EXCEPTION 'partial merge chain did not resolve';
     END IF;
-    IF resolve_merged_node(NULL) IS NOT NULL THEN
-        RAISE EXCEPTION 'null input must resolve to null';
-    END IF;
-    RAISE NOTICE 'PASS: merge chains resolve transitively';
-
-    -- The real write path: merge_nodes() archives the duplicate, and the
-    -- archived id still traces to the survivor. 0029 made node_merges forced
-    -- RLS and insert-only; this is the check that the lookup survived it.
-    PERFORM merge_nodes(v_merge_d, v_merge_e, 'test:identity-resolution');
-    IF resolve_merged_node(v_merge_d) <> v_merge_e THEN
-        RAISE EXCEPTION 'a merge recorded by merge_nodes() did not resolve';
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM nodes WHERE id = v_merge_d AND archived_at IS NOT NULL) THEN
+    IF NOT EXISTS (SELECT 1 FROM nodes WHERE id = v_dup_a AND archived_at IS NOT NULL) THEN
         RAISE EXCEPTION 'fixture invalid: merge_nodes() did not archive the duplicate';
     END IF;
-    RAISE NOTICE 'PASS: an archived duplicate traces to the surviving node';
+    RAISE NOTICE 'PASS: merge_nodes() chains resolve transitively to the live node';
+
+    -- A team_member merges too, and the record it leaves resolves.
+    PERFORM set_config('app.current_role', 'team_member', true);
+    PERFORM merge_nodes(v_merge_d, v_merge_e, 'test:identity-resolution');
+    PERFORM set_config('app.current_role', 'admin', true);
+    IF resolve_merged_node(v_merge_d) <> v_merge_e THEN
+        RAISE EXCEPTION 'a merge recorded by a team_member did not resolve';
+    END IF;
+    RAISE NOTICE 'PASS: merge_nodes() still works for admin and team_member';
 
     -- Every role that can see both nodes gets the chain. node_merges'
     -- read policy anchors on node visibility, exactly as edges do, so this
@@ -449,19 +454,201 @@ BEGIN
     PERFORM set_config('app.current_role', 'admin', true);
     RAISE NOTICE 'PASS: the merge chain resolves for every role that can see the nodes';
 
-    INSERT INTO node_merges (duplicate_id, canonical_id, merged_by)
-    VALUES (v_cyc_x, v_cyc_y, 'test'), (v_cyc_y, v_cyc_x, 'test');
+    -- A former name is searchable. The merged-away label surfaces its LIVE
+    -- survivor, and never as a match: a label is not evidence of identity,
+    -- whichever node carried it.
+    v_res := resolve_node_identity('ident_org', 'Vantage Interiors');
+    IF v_res->>'verdict' <> 'ambiguous' THEN
+        RAISE EXCEPTION 'a merged-away name should be ambiguous, got %', v_res->>'verdict';
+    END IF;
+    IF (v_res->>'former_label_count')::int < 1 THEN
+        RAISE EXCEPTION 'the merged-away name produced no former-label candidate: %', v_res;
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM jsonb_array_elements(v_res->'candidates') c
+        WHERE c->>'node_id' = v_dup_c::text
+          AND c->>'match_reason' = 'former_label_similarity'
+          AND c->>'matched_former_label' = 'Vantage Interiors'
+          AND c->>'exact' = 'false'
+    ) THEN
+        RAISE EXCEPTION 'the former-name candidate did not name the live survivor: %', v_res;
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM jsonb_array_elements(v_res->'candidates') c
+        WHERE c->>'node_id' = v_dup_a::text
+    ) THEN
+        RAISE EXCEPTION 'the archived node itself was offered as a candidate: %', v_res;
+    END IF;
+    RAISE NOTICE 'PASS: a former name resolves to the live survivor, ambiguous';
 
+    -- ------------------------------------------------------------------
+    -- node_merges holds to the shape a merge leaves (the row is the gate).
+    -- ------------------------------------------------------------------
+    -- 1. An agent forges a merge. merge_nodes() refuses an agent by name, so
+    --    the raw insert is the same act and is refused too.
+    PERFORM set_config('app.current_role', 'agent:probe', true);
     v_failed := false;
     BEGIN
-        PERFORM resolve_merged_node(v_cyc_x);
+        INSERT INTO node_merges (duplicate_id, canonical_id, merged_by)
+        VALUES (v_cyc_x, v_cyc_y, 'agent:probe');
+    EXCEPTION WHEN others THEN
+        v_failed := true; v_msg := SQLERRM;
+    END;
+    IF NOT v_failed THEN
+        RAISE EXCEPTION 'agent:probe forged a merge record';
+    END IF;
+    IF v_msg NOT LIKE '%not available to an agent%' THEN
+        RAISE EXCEPTION 'agent:probe was refused for the wrong reason: %', v_msg;
+    END IF;
+    PERFORM set_config('app.current_role', 'admin', true);
+    IF resolve_merged_node(v_cyc_x) <> v_cyc_x THEN
+        RAISE EXCEPTION 'the agent forgery moved the lookup';
+    END IF;
+    RAISE NOTICE 'PASS: an agent cannot record a merge, and the lookup is unmoved';
+
+    -- 2. A team_member future-dates a row to outrank a genuine merge.
+    PERFORM set_config('app.current_role', 'team_member', true);
+    FOREACH v_role IN ARRAY ARRAY['1 hour', '-1 hour'] LOOP
+        v_failed := false;
+        BEGIN
+            INSERT INTO node_merges (duplicate_id, canonical_id, merged_by, merged_at)
+            VALUES (v_cyc_x, v_cyc_y, 'team_member', now() + v_role::interval);
+        EXCEPTION WHEN others THEN
+            v_failed := true; v_msg := SQLERRM;
+        END;
+        IF NOT v_failed THEN
+            RAISE EXCEPTION 'a merge record dated % was accepted', v_role;
+        END IF;
+        IF v_msg NOT LIKE '%moment of the merge%' THEN
+            RAISE EXCEPTION 'a %-dated row was refused for the wrong reason: %', v_role, v_msg;
+        END IF;
+    END LOOP;
+    -- ...and even correctly dated, a second row for a node already merged
+    -- away is refused, so the genuine record cannot be outranked at all.
+    v_failed := false;
+    BEGIN
+        INSERT INTO node_merges (duplicate_id, canonical_id, merged_by)
+        VALUES (v_merge_d, v_cyc_y, 'team_member');
+    EXCEPTION WHEN others THEN
+        v_failed := true; v_msg := SQLERRM;
+    END;
+    IF NOT v_failed THEN
+        RAISE EXCEPTION 'a second merge record for one duplicate was accepted';
+    END IF;
+    -- A node that really was merged away is also archived, so either guard
+    -- may speak first; both say the same thing.
+    IF v_msg NOT LIKE '%merged away once%' AND v_msg NOT LIKE '%already archived%' THEN
+        RAISE EXCEPTION 'the second record was refused for the wrong reason: %', v_msg;
+    END IF;
+    PERFORM set_config('app.current_role', 'admin', true);
+    IF resolve_merged_node(v_merge_d) <> v_merge_e THEN
+        RAISE EXCEPTION 'a forged row changed where a genuine merge resolves';
+    END IF;
+    RAISE NOTICE 'PASS: back-dated, future-dated, and second merge records are refused';
+
+    -- 3. A self-merge, and a merge into an archived node.
+    v_failed := false;
+    BEGIN
+        INSERT INTO node_merges (duplicate_id, canonical_id, merged_by)
+        VALUES (v_cyc_x, v_cyc_x, 'admin');
     EXCEPTION WHEN others THEN
         v_failed := true;
     END;
     IF NOT v_failed THEN
-        RAISE EXCEPTION 'merge cycle did not raise';
+        RAISE EXCEPTION 'a self-merge record was accepted';
     END IF;
-    RAISE NOTICE 'PASS: merge cycles raise instead of looping';
+
+    v_failed := false;
+    BEGIN
+        INSERT INTO node_merges (duplicate_id, canonical_id, merged_by)
+        VALUES (v_cyc_x, v_dup_a, 'admin');
+    EXCEPTION WHEN others THEN
+        v_failed := true; v_msg := SQLERRM;
+    END;
+    IF NOT v_failed THEN
+        RAISE EXCEPTION 'a merge into an archived node was accepted';
+    END IF;
+    IF v_msg NOT LIKE '%archived%' THEN
+        RAISE EXCEPTION 'merging into an archived node was refused for the wrong reason: %', v_msg;
+    END IF;
+    RAISE NOTICE 'PASS: a self-merge and a merge into an archived node are refused';
+
+    -- 4. The cycle: merge_nodes(C, A) after A was merged into C. The second
+    --    merge aborts at its insert and the first one stands.
+    v_failed := false;
+    BEGIN
+        PERFORM merge_nodes(v_dup_c, v_dup_a, 'test:identity-resolution');
+    EXCEPTION WHEN others THEN
+        v_failed := true; v_msg := SQLERRM;
+    END;
+    IF NOT v_failed THEN
+        RAISE EXCEPTION 'merge_nodes() closed a merge cycle';
+    END IF;
+    IF v_msg NOT LIKE '%cycle%' AND v_msg NOT LIKE '%archived%' THEN
+        RAISE EXCEPTION 'the cycle merge was refused for the wrong reason: %', v_msg;
+    END IF;
+    IF resolve_merged_node(v_dup_a) <> v_dup_c THEN
+        RAISE EXCEPTION 'the refused merge disturbed the chain that stands';
+    END IF;
+    IF EXISTS (SELECT 1 FROM nodes WHERE id = v_dup_c AND archived_at IS NOT NULL) THEN
+        RAISE EXCEPTION 'the refused merge archived the surviving node';
+    END IF;
+    RAISE NOTICE 'PASS: a merge that would close a cycle is refused and the chain stands';
+
+    -- 5. A row that pre-dates this guard may be any shape at all. The lookup
+    --    treats the table as untrusted: a row whose duplicate is still live
+    --    is not a merge, so it is not followed. This plants exactly that
+    --    shape -- legal at insert time, never completed -- without needing
+    --    the table's owner to disable a trigger.
+    INSERT INTO node_merges (duplicate_id, canonical_id, merged_by)
+    VALUES (v_cyc_x, v_cyc_y, 'pre-guard');
+    IF EXISTS (SELECT 1 FROM nodes WHERE id = v_cyc_x AND archived_at IS NOT NULL) THEN
+        RAISE EXCEPTION 'fixture invalid: the planted duplicate is archived';
+    END IF;
+    FOREACH v_role IN ARRAY ARRAY['admin', 'team_member', 'viewer', ''] LOOP
+        PERFORM set_config('app.current_role', v_role, true);
+        IF resolve_merged_node(v_cyc_x) <> v_cyc_x THEN
+            RAISE EXCEPTION
+                'role "%" followed a merge row whose duplicate is still live', v_role;
+        END IF;
+    END LOOP;
+    PERFORM set_config('app.current_role', 'admin', true);
+    RAISE NOTICE 'PASS: a row whose duplicate is still live is not followed';
+
+    -- ...and it cannot be joined by a second row either: one merge record per
+    -- duplicate, so no later row can outrank an earlier one.
+    v_failed := false;
+    BEGIN
+        INSERT INTO node_merges (duplicate_id, canonical_id, merged_by)
+        VALUES (v_cyc_x, v_merge_e, 'second');
+    EXCEPTION WHEN others THEN
+        v_failed := true; v_msg := SQLERRM;
+    END;
+    IF NOT v_failed THEN
+        RAISE EXCEPTION 'a second merge record for a live duplicate was accepted';
+    END IF;
+    IF v_msg NOT LIKE '%merged away once%' THEN
+        RAISE EXCEPTION 'the second record was refused for the wrong reason: %', v_msg;
+    END IF;
+    RAISE NOTICE 'PASS: a duplicate carries at most one merge record';
+
+    -- ...and that row does not survive a commit: the deferred check wants an
+    -- archived duplicate and a node_merge event. Forced immediate here,
+    -- because a suite that ends in ROLLBACK never reaches commit.
+    v_failed := false;
+    BEGIN
+        SET CONSTRAINTS trg_node_merges_shape_complete IMMEDIATE;
+    EXCEPTION WHEN others THEN
+        v_failed := true; v_msg := SQLERRM;
+    END;
+    SET CONSTRAINTS ALL DEFERRED;
+    IF NOT v_failed THEN
+        RAISE EXCEPTION 'an incomplete merge record survived the commit-time check';
+    END IF;
+    IF v_msg NOT LIKE '%not archived%' AND v_msg NOT LIKE '%no node_merge event%' THEN
+        RAISE EXCEPTION 'the commit-time check refused for the wrong reason: %', v_msg;
+    END IF;
+    RAISE NOTICE 'PASS: an incomplete merge record is refused at commit';
 END
 $$;
 

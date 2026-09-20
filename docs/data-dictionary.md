@@ -1034,6 +1034,14 @@ trigram label similarity.
 Fuzzy label matching never produces `match` — a similar name is grounds for
 review, not evidence of identity.
 
+A **former name** is searchable. When a node was merged away its label went
+with it, so an archived, merged-away node whose label is similar surfaces its
+live survivor as a candidate with `match_reason` `former_label_similarity` and
+the old name in `matched_former_label`, counted in `former_label_count`. It is
+a label match, so it is `ambiguous`, never `match`. Without it an agent
+searching an old name would be told `new` and would recreate the entity that
+was just deduplicated.
+
 **Why it exists:** Agents perform graph inserts; the database gates outcomes,
 not steps. This is a read an intake agent consults before creating a node. It
 writes nothing, blocks nothing, and no write helper calls it — a deterministic
@@ -1091,6 +1099,48 @@ so the lookup works for every role that can see the nodes involved without any
 elevated privilege. A chain through a node the caller cannot see stops at the
 last visible link: no id behind the policy is ever returned, and a caller with
 wider access gets the whole chain on a re-run.
+
+**The table is read as untrusted.** A merge archives its duplicate, so a row
+whose duplicate is still live is not a merge and is not followed. Several rows
+for one duplicate resolve by earliest `merged_at`, then `id`, so a later row
+cannot outrank an earlier one. A cycle stops and returns the last node reached
+rather than raising — this is a read an agent calls, and one bad row must not
+break every lookup that passes through it.
+
+**Rows written before `0033`** were subject to no rule beyond "a role that may
+write", so an upgraded instance should be checked once. Every row a real merge
+left is archived, unique per duplicate, and has a `node_merge` event; anything
+else predates the guard and may be forged:
+
+```sql
+SELECT m.id, m.duplicate_id, m.canonical_id, m.merged_at, m.merged_by,
+       CASE
+         WHEN d.archived_at IS NULL THEN 'duplicate is not archived'
+         WHEN c.archived_at IS NOT NULL THEN 'canonical is archived'
+         WHEN (SELECT count(*) FROM rye.node_merges x
+                WHERE x.duplicate_id = m.duplicate_id) > 1
+              THEN 'more than one merge record for this duplicate'
+         ELSE 'no node_merge event'
+       END AS why
+FROM rye.node_merges m
+JOIN rye.nodes d ON d.id = m.duplicate_id
+JOIN rye.nodes c ON c.id = m.canonical_id
+WHERE d.archived_at IS NULL
+   OR c.archived_at IS NOT NULL
+   OR (SELECT count(*) FROM rye.node_merges x
+        WHERE x.duplicate_id = m.duplicate_id) > 1
+   OR NOT EXISTS (
+        SELECT 1 FROM rye.events e
+        WHERE e.event_type = 'node_merge'
+          AND e.properties->>'duplicate_id' = m.duplicate_id::text
+          AND e.properties->>'canonical_id' = m.canonical_id::text
+   )
+ORDER BY m.merged_at;
+```
+
+Run it as `admin`. Rows it returns are not followed by `resolve_merged_node()`
+when the duplicate is live; for the rest, decide by hand — `node_merges` is
+insert-only, so a wrong row is corrected by a real merge, not by deleting it.
 
 #### `log_agent_query()`
 
