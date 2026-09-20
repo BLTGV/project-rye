@@ -223,12 +223,20 @@ inserting an event.
 The other supporting tables were surveyed under both owner types with a
 `viewer` and an unset session, and each refuses every insert, update, and
 delete: `access_grants`, `field_classifications`, `assertion_type_access`,
-`role_classification_access`, and all nine governance tables. Two have no RLS
-at all and are left that way deliberately, because neither changes what Rye
-records or decides: `node_merges` is the dedup audit trail `merge_nodes()`
-writes, and `crm_code_counters` is a counter for human-readable codes that
-`generate_crm_code()` bumps from inside helpers, including in sessions with no
-role.
+`role_classification_access`, and all nine governance tables. Two had no RLS at
+all, and `0029` closes them, because leaving them open did change what Rye
+records: a `viewer` could rewind or delete a row of `crm_code_counters` and the
+next `create_task()` collided on `idx_nodes_external_unique`, and a read-only
+session could forge a row of `node_merges` and delete real ones. Both are now
+enabled and forced. `crm_code_counters` is readable by every role and movable
+only by a role that may write, only forward, and only by the one step
+`generate_crm_code()` takes; no counter is ever deleted. `node_merges` is
+readable by an admin or by a caller who can see both nodes, insertable by a
+role that may write, and never updated or deleted. Each rule is an RLS policy
+and a `BEFORE ROW` trigger, so it binds a superuser owner too. Drawing a code
+is a write from `0029` on: a session with no role is refused, which costs
+nothing, because such a session cannot create the node the code would name
+either.
 
 The same test stays as a conjunct on all twenty-one write policies: it is the
 cheaper refusal where the owner is bound by RLS, and it keeps `USING` and

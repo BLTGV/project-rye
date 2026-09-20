@@ -118,6 +118,8 @@ Records which nodes were merged into which canonical nodes, and by whom.
 
 **Key columns:** `duplicate_id` (absorbed node), `canonical_id` (surviving node), `merged_by`, `confidence`.
 
+**RLS (0029):** enabled and forced. Readable by an `admin`, or by a caller who can see both nodes — node visibility is the anchor here as it is for edges. Insertable by a role that may write (`rye_role_may_write()`), which is the role test `merge_nodes()` itself applies, and it is `SECURITY INVOKER` so its insert runs as the caller. Never updated and never deleted, by anyone: it is history. `trg_node_merges_gate` repeats the rule as a trigger so it also binds a superuser owner and any `SECURITY DEFINER` helper.
+
 #### `assertion_type_access` — Assertion Type Gating
 
 Controls which roles can read, write, or settle specific assertion types. An assertion type with no row for an operation is unrestricted for that operation.
@@ -322,6 +324,8 @@ Counters for generating sequential codes in the format `{PREFIX}-{YYMM}-{SEQ}`.
 **Why it exists:** UUIDs are unambiguous but unfriendly. People say "OPP-2403-0042", not a UUID. This table provides concurrency-safe, human-readable codes that reset per month per prefix.
 
 **Key columns:** `prefix`, `year_month`, `next_val`. Used by `generate_crm_code()`.
+
+**RLS (0029):** enabled and forced. Readable by every role. Written only by a role that may write (`rye_role_may_write()`), and `trg_crm_code_counters_gate` holds the row to the shape `generate_crm_code()` writes: `prefix` and `year_month` never change, `next_val` may only become `next_val + 1`, and no counter is ever deleted — not by an `admin` either, because a restarted series re-issues codes that already name a node. Before this a `viewer` could rewind or delete a counter and jam every code-issuing helper. Drawing a code is therefore a write: a session with no `app.current_role` is refused, and it could not create the task or opportunity the code names anyway.
 
 ---
 
@@ -1061,7 +1065,7 @@ Refreshes all profile materialized views (`opportunities_active`, `contacts_dire
 generate_crm_code(p_prefix) → text
 ```
 
-Generates a human-readable code like `OPP-2403-0042`. Uses `INSERT ... ON CONFLICT DO UPDATE` on `crm_code_counters` for concurrency safety.
+Generates a human-readable code like `OPP-2403-0042`. Uses `INSERT ... ON CONFLICT DO UPDATE` on `crm_code_counters` for concurrency safety. `SECURITY INVOKER`: the counter moves as the caller, so the caller must be a role that may write (0029).
 
 **Why it exists:** UUIDs are identifiers for machines. Codes like `TSK-2403-0187` are identifiers for humans. This function provides sequential, collision-free codes without a global sequence lock.
 

@@ -250,6 +250,78 @@ BEGIN
     END LOOP;
 
     -- ==================================================================
+    -- Case 1b. The two routes the work/011 Verifier checked by hand:
+    -- schedule_assertion_change(), which reaches record_assertion(), and a
+    -- future-effective record_assertion(), which takes the scheduling branch
+    -- and supersedes a same-instant incumbent before inserting. Both refused,
+    -- for a writing role and for an admin.
+    -- ==================================================================
+    FOREACH v_role IN ARRAY ARRAY['admin', 'team_member', 'agent:t'] LOOP
+        PERFORM set_config('app.current_role', v_role, true);
+
+        v_failed := false;
+        BEGIN
+            PERFORM schedule_assertion_change(
+                p_subject_node_id := v_core,
+                p_subject_edge_id := NULL,
+                p_assertion_type  := 'registry_entry',
+                p_assertion_key   := 'type_alias:assertion_type:registry_entry',
+                p_claim           := '{"value":"decoy_type"}',
+                p_effective_at    := now() + interval '1 day',
+                p_basis           := 'assumed'
+            );
+        EXCEPTION WHEN OTHERS THEN
+            v_failed := true;
+            v_msg := SQLERRM;
+        END;
+        IF NOT v_failed THEN
+            RAISE EXCEPTION
+                'Role "%" scheduled a type alias out of a gated type', v_role;
+        END IF;
+        IF v_role IN ('admin', 'team_member')
+           AND v_msg NOT LIKE '%Cannot record a type alias from%'
+        THEN
+            RAISE EXCEPTION
+                'Role "%" scheduled alias failed for the wrong reason: %', v_role, v_msg;
+        END IF;
+
+        v_failed := false;
+        BEGIN
+            PERFORM record_assertion(
+                'registry_entry', '{"value":"decoy_type"}', v_core,
+                p_assertion_key := 'type_alias:assertion_type:review_policy',
+                p_effective_at := now() + interval '2 days',
+                p_status := 'accepted', p_basis := 'assumed'
+            );
+        EXCEPTION WHEN OTHERS THEN
+            v_failed := true;
+            v_msg := SQLERRM;
+        END;
+        IF NOT v_failed THEN
+            RAISE EXCEPTION
+                'Role "%" recorded a future-effective type alias out of a gated type', v_role;
+        END IF;
+        IF v_role IN ('admin', 'team_member')
+           AND v_msg NOT LIKE '%Cannot record a type alias from%'
+        THEN
+            RAISE EXCEPTION
+                'Role "%" future-effective alias failed for the wrong reason: %', v_role, v_msg;
+        END IF;
+    END LOOP;
+
+    PERFORM set_config('app.current_role', 'admin', true);
+    IF EXISTS (
+        SELECT 1 FROM assertions
+        WHERE assertion_type = 'registry_entry'
+          AND assertion_key IN (
+              'type_alias:assertion_type:registry_entry',
+              'type_alias:assertion_type:review_policy'
+          )
+    ) THEN
+        RAISE EXCEPTION 'A scheduled or future-effective alias out of a gated type survived';
+    END IF;
+
+    -- ==================================================================
     -- Case 2. A scoped alias is the same alias. registry_value() reads a
     -- scope's own registry entries before the core ones, so an alias
     -- recorded on a scope node routes writes in that scope; the rule reads
