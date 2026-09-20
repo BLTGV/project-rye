@@ -290,6 +290,15 @@ slugify() {
     | sed -E 's/^-?$/scope/'
 }
 
+# An unknown --scope is answered, never substituted
+# (contracts/category-vocabulary.md; docs/decisions/0013-leftovers-fail-restrictive.md).
+# A key that matches nothing used to yield NULL, which rye_categories() and
+# rye_agent_context() read as "no scope given" and answered with automatic scope
+# selection -- a different scope's answer, returned without a word. Coalescing an
+# unresolved key to the nil uuid makes a key and a uuid take the identical path,
+# so both get the documented empty answer with scope_found false.
+RYE_NIL_UUID='00000000-0000-0000-0000-000000000000'
+
 scope_sql_expr() {
   local scope="${1:-}"
   if [[ -z "$scope" ]]; then
@@ -302,10 +311,20 @@ scope_sql_expr() {
     return
   fi
 
-  printf '(SELECT id FROM rye.nodes WHERE archived_at IS NULL AND node_type = %s AND external_source = %s AND external_id = %s LIMIT 1)' \
+  printf '(SELECT coalesce((SELECT id FROM rye.nodes WHERE archived_at IS NULL AND node_type = %s AND external_source = %s AND external_id = %s LIMIT 1), %s::uuid))' \
     "$(sql_literal "onboarding_scope")" \
     "$(sql_literal "rye_onboarding_scope")" \
-    "$(sql_literal "$scope")"
+    "$(sql_literal "$scope")" \
+    "$(sql_literal "$RYE_NIL_UUID")"
+}
+
+# The caller asked about something that does not exist, so the exit status says
+# so. The answer is still printed first, verbatim under --json, because the
+# schema's empty answer is the answer.
+scope_answer_found() {
+  local out
+  out="$(psql_json "$1" | tr -d '[:space:]')"
+  [[ "$out" == "true" || "$out" == "t" ]]
 }
 
 cmd_local() {
@@ -796,8 +815,16 @@ EOF
   local scope_expr
   scope_expr="$(scope_sql_expr "$scope")"
 
+  local scope_missing=0
+  if [[ -n "$scope" ]]; then
+    if ! scope_answer_found "SELECT rye.rye_categories(${scope_expr})->'scope'->>'scope_found';"; then
+      scope_missing=1
+    fi
+  fi
+
   if [[ "$OUTPUT_JSON" -eq 1 ]]; then
     psql_json "SELECT rye.rye_categories(${scope_expr});"
+    [[ "$scope_missing" -eq 0 ]] || { echo "scope not found: ${scope}" >&2; return 1; }
     return
   fi
 
@@ -827,6 +854,8 @@ SELECT
   j->>'category_count' AS category_count,
   j->>'empty' AS empty
 FROM answer;"
+
+  [[ "$scope_missing" -eq 0 ]] || { echo "scope not found: ${scope}" >&2; return 1; }
 }
 
 # Who may settle a claim. Advisory: it reports, it never refuses, and no
@@ -985,11 +1014,12 @@ an assertion of it accepted, and whether this session may. Ask before offering
 to record configuration: a gated type recorded by anyone else lands as a
 candidate waiting for one of the allowed roles, and nothing said is lost.
 
-The type is matched as stored, with no alias resolution, because that is how
-every reader of configuration matches it. The CLI sets no app.current_role, so
-may_settle answers for a session with no role, which is never an allowed one:
-read `gated` and `allowed_roles` to learn what the type is, and `may_settle`
-for the session the CLI itself opened.
+A type is gated when the spelling given has a settle row or its canonical
+spelling does, which is the rule record_assertion() applies. `gated_as` names
+the other spelling and is empty when the spelling given is itself the gated
+one. The CLI sets no app.current_role, so may_settle answers for a session with
+no role, which is never an allowed one: read `gated` and `allowed_roles` to
+learn what the type is, and `may_settle` for the session the CLI itself opened.
 EOF
         return
         ;;
@@ -1021,6 +1051,7 @@ WITH answer AS (
 SELECT
   j->>'assertion_type' AS assertion_type,
   j->>'gated' AS gated,
+  coalesce(j->>'gated_as', '') AS gated_as,
   coalesce(j->'allowed_roles' #>> '{}', '') AS allowed_roles,
   coalesce(j->>'current_role', '') AS \"current_role\",
   j->>'may_settle' AS may_settle
@@ -1052,8 +1083,16 @@ EOF
   local scope_expr
   scope_expr="$(scope_sql_expr "$scope")"
 
+  local scope_missing=0
+  if [[ -n "$scope" ]]; then
+    if ! scope_answer_found "SELECT rye.rye_agent_context(${scope_expr})->'scope_selection'->>'selected_scope_found';"; then
+      scope_missing=1
+    fi
+  fi
+
   if [[ "$OUTPUT_JSON" -eq 1 ]]; then
     psql_json "SELECT rye.rye_agent_context(${scope_expr});"
+    [[ "$scope_missing" -eq 0 ]] || { echo "scope not found: ${scope}" >&2; return 1; }
     return
   fi
 
@@ -1083,6 +1122,8 @@ SELECT
   j->'skills'->'totals'->>'skills' AS skills,
   j->'capabilities'->'totals'->>'capabilities' AS capabilities
 FROM ctx;"
+
+  [[ "$scope_missing" -eq 0 ]] || { echo "scope not found: ${scope}" >&2; return 1; }
 }
 
 cmd_sources() {

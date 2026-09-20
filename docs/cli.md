@@ -102,8 +102,15 @@ on its rows and which are required, the relationships it takes part in, whether
 it is on or off in the scope, its usage count, and the plugins that declare it.
 Categories that are off are listed as off, not omitted. Scope selection works as
 it does for `context`: one active scope is selected automatically, otherwise pass
-`--scope`. An unknown scope returns an empty list rather than an error, and
-`--json` emits the function's output verbatim
+`--scope`.
+
+**An unknown `--scope` is answered, never substituted.** A key that names nothing
+and a uuid that names nothing take the identical path: `scope_found` is `false`,
+`mode` is `explicit`, `categories` is `[]`, and the command exits non-zero, because
+the caller asked about something that does not exist. `--json` emits that answer
+verbatim; without `--json` the CLI prints `scope not found: <value>`. The same rule
+governs `context --scope`. Before this, an unknown *key* fell back to automatic
+scope selection and returned another scope's vocabulary with no warning
 (see `contracts/category-vocabulary.md`).
 
 Descriptions live in the graph, not in a file. Record one with
@@ -200,16 +207,18 @@ one:
 ```
 
 This calls `settle_gate()` and reports `gated` (is this type Rye's own
-configuration), `allowed_roles` (who may make it accepted), and `may_settle`
-for the session the CLI opened. A gated type recorded by anyone else is not
-refused: it lands as a candidate carrying `attrs.settle_gate`, waiting in
-`review_queue` for one of the allowed roles, so nothing said is lost.
+configuration), `gated_as` (which spelling gated it), `allowed_roles` (who may
+make it accepted), and `may_settle` for the session the CLI opened. A gated type
+recorded by anyone else is not refused: it lands as a candidate carrying
+`attrs.settle_gate`, waiting in `review_queue` for one of the allowed roles, so
+nothing said is lost.
 
-The type is matched as stored, with no alias resolution, because that is how
-every reader of configuration matches it. The CLI sets no `app.current_role`,
-so `may_settle` is false for a gated type — that is the answer for a session
-with no role, not a claim about the caller's person. It reports, it never
-refuses, and it writes nothing.
+A type is gated when the spelling given has a `settle` row or its canonical
+spelling does, which is the rule `record_assertion()` applies. `gated_as` names
+the other spelling and is empty when the spelling given is itself the gated one.
+The CLI sets no `app.current_role`, so `may_settle` is false for a gated type —
+that is the answer for a session with no role, not a claim about the caller's
+person. It reports, it never refuses, and it writes nothing.
 
 ## Onboarding Scope
 
@@ -248,7 +257,10 @@ Select a specific scope by UUID or scope key:
 ```
 
 This calls `rye_agent_context(scope_id)`. If exactly one scope is active, Rye
-selects it automatically. If multiple scopes are active, pass `--scope`.
+selects it automatically. If multiple scopes are active, pass `--scope`. A
+`--scope` value that names nothing answers with `selected_scope_found: false`,
+prints `scope not found: <value>` without `--json`, and exits non-zero; it never
+falls back to automatic selection.
 
 ## Source Commands
 
