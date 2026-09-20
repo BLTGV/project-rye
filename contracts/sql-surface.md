@@ -492,8 +492,8 @@ the row rules in "The row is the gate, not the route" and the type rules in
 still a `no`.
 
 `node_source_map` follows the same rule as the core tables: only a role that may
-write can insert, update, or delete a mapping, by raw SQL or through
-`link_record()`, enforced by the same trigger and policy conjunct. A mapping
+write can insert or update a mapping, by raw SQL or through `link_record()`,
+and deleting one still needs an admin or manager as it did before, enforced by the same trigger and policy conjunct. A mapping
 decides which node a tracked table's change events attach to, so a session that
 may not write must not be able to create or re-point one.
 
