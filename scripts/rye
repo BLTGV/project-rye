@@ -26,6 +26,7 @@ Usage:
   ./scripts/rye settlers --claim <assertion-type> [--subject <uuid>] [--speaker <uuid>]
                          [--speaker-ref <source-identity>] [--domain <key>]
                          [--speech-act <act>] [--as-of <timestamp>] [--scope <ref>] [--json]
+  ./scripts/rye settle-gate <assertion-type> [--json]
   ./scripts/rye context [--scope <uuid-or-key>] [--json]
   ./scripts/rye sources inventory|pending-context [--json]
   ./scripts/rye agents create|grant|issue-token|revoke-token|list|audit [--json]
@@ -967,6 +968,65 @@ SELECT
 FROM answer;"
 }
 
+# Is this assertion type Rye's own configuration, and who may make it
+# accepted. Advisory: it reports, it never refuses, and it writes nothing.
+cmd_settle_gate() {
+  local assertion_type=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h|--help)
+        cat <<'EOF'
+Usage:
+  ./scripts/rye settle-gate <assertion-type> [--json]
+
+Whether this assertion type is Rye's own configuration, which roles may make
+an assertion of it accepted, and whether this session may. Ask before offering
+to record configuration: a gated type recorded by anyone else lands as a
+candidate waiting for one of the allowed roles, and nothing said is lost.
+
+The type is matched as stored, with no alias resolution, because that is how
+every reader of configuration matches it. The CLI sets no app.current_role, so
+may_settle answers for a session with no role, which is never an allowed one:
+read `gated` and `allowed_roles` to learn what the type is, and `may_settle`
+for the session the CLI itself opened.
+EOF
+        return
+        ;;
+      -*)
+        die "Unknown settle-gate option: $1"
+        ;;
+      *)
+        [[ -z "$assertion_type" ]] || die "settle-gate takes one assertion type"
+        assertion_type="$1"
+        shift
+        ;;
+    esac
+  done
+
+  [[ -n "$assertion_type" ]] || die "settle-gate requires <assertion-type>"
+
+  local call
+  call="rye.settle_gate($(sql_literal "$assertion_type"))"
+
+  if [[ "$OUTPUT_JSON" -eq 1 ]]; then
+    psql_json "SELECT ${call};"
+    return
+  fi
+
+  psql_exec "SET search_path = rye, public, pg_catalog;
+WITH answer AS (
+  SELECT ${call} AS j
+)
+SELECT
+  j->>'assertion_type' AS assertion_type,
+  j->>'gated' AS gated,
+  coalesce(j->'allowed_roles' #>> '{}', '') AS allowed_roles,
+  coalesce(j->>'current_role', '') AS session_role,
+  j->>'may_settle' AS may_settle
+FROM answer;"
+}
+
 cmd_context() {
   local scope=""
 
@@ -1460,6 +1520,9 @@ main() {
       ;;
     settlers)
       cmd_settlers "$@"
+      ;;
+    settle-gate)
+      cmd_settle_gate "$@"
       ;;
     context)
       cmd_context "$@"

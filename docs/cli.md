@@ -189,6 +189,28 @@ never means nobody is authorized; it means nobody is authorized and visible to
 this caller. `--json` emits the function's output verbatim (see the "Settlement
 lookup" section of `contracts/sql-surface.md`).
 
+## Settle Gate
+
+Some assertion types are not knowledge about the world; they are Rye's own
+configuration, and only an admin settles them. Ask before offering to record
+one:
+
+```bash
+./scripts/rye settle-gate registry_entry
+```
+
+This calls `settle_gate()` and reports `gated` (is this type Rye's own
+configuration), `allowed_roles` (who may make it accepted), and `may_settle`
+for the session the CLI opened. A gated type recorded by anyone else is not
+refused: it lands as a candidate carrying `attrs.settle_gate`, waiting in
+`review_queue` for one of the allowed roles, so nothing said is lost.
+
+The type is matched as stored, with no alias resolution, because that is how
+every reader of configuration matches it. The CLI sets no `app.current_role`,
+so `may_settle` is false for a gated type — that is the answer for a session
+with no role, not a claim about the caller's person. It reports, it never
+refuses, and it writes nothing.
+
 ## Onboarding Scope
 
 Create and activate the first onboarding scope:
