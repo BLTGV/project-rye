@@ -4,13 +4,23 @@
 -- Companion to schema/migrations/0029_supporting_tables_rls.sql, which makes
 -- generate_crm_code() widen a sequence past 9999 instead of truncating it.
 --
--- add_comment() links codes mentioned in a comment body, and its pattern
--- assumed exactly four sequence digits, so it would stop seeing a code the
--- moment a month passed 9999. It lives here rather than in 0029 because
--- scripts/migrate.sh applies files in name order and 0110 would overwrite a
--- 0029 definition on a fresh install.
+-- add_comment() links codes mentioned in a comment body. Two things were wrong
+-- with the pattern it was carried forward with, and both are fixed here.
 --
--- Carried forward from 0110 unchanged except that one quantifier.
+-- 1. It assumed exactly four sequence digits, so it would stop seeing a code
+--    the moment a month passed 9999 and generate_crm_code() widened one.
+-- 2. It was written `\\d`. The body is dollar-quoted, but the pattern is an
+--    ordinary SQL string literal inside it, and with standard_conforming_strings
+--    on a backslash is a backslash: the stored pattern asked for a literal
+--    backslash followed by `d`, which no comment contains. Mention linking has
+--    therefore never worked -- not for four-digit codes either. Single
+--    backslashes now, and tests/conformance/36_pm_comment_mentions.sql measures
+--    the participants rather than the pattern.
+--
+-- It lives here rather than in 0029 because scripts/migrate.sh applies files in
+-- name order and 0110 would overwrite a 0029 definition on a fresh install.
+--
+-- Carried forward from 0110 unchanged except that one line.
 
 SET search_path = rye, pg_catalog, public;
 
@@ -25,7 +35,7 @@ AS $$
 DECLARE
     v_event_id uuid;
     v_task_code text;
-    v_code_pattern text := '(?:OPP|TSK|PRJ|CON|MIL|SPR)-\\d{4}-\\d{4,}';
+    v_code_pattern text := '(?:OPP|TSK|PRJ|CON|MIL|SPR)-\d{4}-\d{4,}';
     v_match text;
     v_mentioned_id uuid;
 BEGIN
