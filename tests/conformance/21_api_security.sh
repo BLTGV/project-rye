@@ -16,6 +16,10 @@ fi
 # declare. Runs standalone as: cd admin && npm run check:routes
 npm --prefix admin run --silent check:routes
 
+# Static check that every database call still goes through ryeQuery() in
+# admin/src/server/db.ts. Runs standalone as: cd admin && npm run check:db
+npm --prefix admin run --silent check:db
+
 pick_port() {
   node -e "const net = require('node:net'); const server = net.createServer(); server.listen(0, '127.0.0.1', () => { console.log(server.address().port); server.close(); });"
 }
