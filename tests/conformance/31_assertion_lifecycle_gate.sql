@@ -117,7 +117,13 @@ DECLARE
         'accept_assertion', 'supersede_assertion', 'assertion_effective_window',
         'assertion_classification', 'assertion_outcome'
     ];
-    v_roles        text[] := ARRAY['agent:t', 'viewer', 'team_member', ''];
+    -- Since migration 0026 (docs/decisions/0009-who-may-write.md) `viewer` and
+    -- an unset role may not write the core tables at all, so they never reach
+    -- the row rules below: their INSERTs raise 42501 and their UPDATEs affect
+    -- zero rows silently. Their refusals are covered by
+    -- tests/conformance/32_who_may_write.sql. What is left here is the set of
+    -- non-admin roles that still write, which is what these rules are for.
+    v_roles        text[] := ARRAY['agent:t', 'team_member'];
 BEGIN
     PERFORM set_config('app.current_role', 'admin', true);
     PERFORM set_config('app.current_user_id', 'test:lifecycle-gate', true);
