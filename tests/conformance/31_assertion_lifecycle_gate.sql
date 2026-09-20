@@ -1309,6 +1309,74 @@ BEGIN
             'The cross-subject candidate replacement from merge_nodes() is not in review_queue';
     END IF;
 
+    -- ==================================================================
+    -- Obligation 19. The key test is window-blind, on purpose, and that is
+    -- pinned here so nobody reads it as a bug. Contract: "The test does not
+    -- read the window: the surviving row may be past or future, as
+    -- supersede_assertion() with a future effective date already leaves
+    -- it." A rule promising a CURRENT value would refuse that helper.
+    --
+    -- A tuple with a stale accepted row (effective_to in the past) plus the
+    -- current one: ending the current one naming a same-subject candidate
+    -- commits, because the stale row is still accepted and unsuperseded,
+    -- and current_valid_assertions is then empty for the key.
+    -- ==================================================================
+    PERFORM set_config('app.current_role', 'admin', true);
+    INSERT INTO nodes (node_type, label) VALUES ('thing', 'Window blind subject')
+    RETURNING id INTO v_other;
+    v_id := record_assertion(
+        'window_blind_probe', '{"value":"stale"}', v_other,
+        p_assertion_key := 'default',
+        p_effective_at := now() - interval '30 days',
+        p_effective_to := now() - interval '1 day',
+        p_basis := 'assumed'
+    );
+    v_incumbent := record_assertion(
+        'window_blind_probe', '{"value":"current"}', v_other,
+        p_assertion_key := 'default',
+        p_effective_at := now() - interval '1 hour',
+        p_basis := 'assumed'
+    );
+    IF (SELECT count(*) FROM assertions
+        WHERE id IN (v_id, v_incumbent)
+          AND status = 'accepted' AND superseded_at IS NULL) <> 2
+    THEN
+        RAISE EXCEPTION
+            'Premise broken: the window-blind fixture does not have a stale and a current accepted row';
+    END IF;
+    IF (SELECT count(*) FROM current_valid_assertions
+        WHERE subject_node_id = v_other AND assertion_type = 'window_blind_probe') <> 1
+    THEN
+        RAISE EXCEPTION 'Premise broken: the stale row is still current';
+    END IF;
+
+    v_smuggled := gen_random_uuid();
+    PERFORM set_config('app.write_path', 'supersede_assertion', true);
+    PERFORM set_config('app.supersede_assertion_id', v_incumbent::text, true);
+    UPDATE assertions SET superseded_at = now(), superseded_by = v_smuggled
+    WHERE id = v_incumbent;
+    PERFORM set_config('app.write_path', '', true);
+    INSERT INTO assertions (
+        id, assertion_type, assertion_key, status, basis, subject_node_id, claim
+    ) VALUES (
+        v_smuggled, 'window_blind_probe', 'default', 'candidate', 'assumed',
+        v_other, '{"value":"waiting for review"}'
+    );
+    SET CONSTRAINTS trg_assertions_transition_complete IMMEDIATE;
+    SET CONSTRAINTS trg_assertions_transition_complete DEFERRED;
+
+    IF (SELECT superseded_by FROM assertions WHERE id = v_incumbent) IS DISTINCT FROM v_smuggled THEN
+        RAISE EXCEPTION
+            'The key test read the window: a stale accepted row did not satisfy it';
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM current_valid_assertions
+        WHERE subject_node_id = v_other AND assertion_type = 'window_blind_probe'
+    ) THEN
+        RAISE EXCEPTION
+            'The window-blind case left a current value; the fixture no longer proves anything';
+    END IF;
+
     -- Cross-subject born closed: refused. The named row on another subject is
     -- tested directly, so a closed one ends nothing.
     FOREACH v_role IN ARRAY v_roles LOOP

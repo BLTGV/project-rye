@@ -590,7 +590,10 @@ BEGIN
         -- unsuperseded assertion. The named row need not be it. Two
         -- record_assertion() calls on one key in one transaction leave
         -- I -> B -> C with B superseded by commit, and the chain may pass
-        -- through anything as long as it ends somewhere current.
+        -- through anything as long as it ends on a row that is accepted and
+        -- not superseded. The test does not read the window: the surviving row
+        -- may be past or future, as supersede_assertion() with a future
+        -- effective date already leaves it.
         --
         -- On a DIFFERENT subject -- the merge_nodes() shape -- the named row
         -- itself is tested: readable, same type and key, and live at commit. A
