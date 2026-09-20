@@ -10,8 +10,31 @@ if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
   exit 0
 fi
 
+# Every skill and plugin manifest against the schema beside it.
+# contracts/plugin-manifest.md calls a manifest that fails its schema a build
+# failure, so it fails the suite here. Needs no database and no server, which
+# is why it runs before either is set up. Runs standalone as:
+# node skills/validate_manifests.mjs
+npm --prefix skills/rye-source-context-intake run --silent check
+
 pick_port() {
   node -e "const net = require('node:net'); const server = net.createServer(); server.listen(0, '127.0.0.1', () => { console.log(server.address().port); server.close(); });"
+}
+
+# grep with three outcomes, not two: found (0), not found (1), and broken.
+# grep exits 2 on an error and bash returns 127 when the command is missing,
+# and either of those must fail the test. The checks below used ripgrep, which
+# a GitHub runner does not have: `if rg ...; then fail` then read as "not
+# found" and passed vacuously. POSIX ERE only, no \( or \. — literal
+# parentheses and dots are bracketed, which every grep reads the same way.
+grep_text() {
+  local pattern="$1" file="$2" status=0
+  grep -nE -- "$pattern" "$file" >/dev/null || status=$?
+  if (( status > 1 )); then
+    echo "grep exited ${status} while checking ${file} for /${pattern}/" >&2
+    exit 1
+  fi
+  return "$status"
 }
 
 PORT="${RYE_MCP_SECURITY_TEST_PORT:-$(pick_port)}"
@@ -33,6 +56,7 @@ status_code() {
 
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q <<'SQL' >/dev/null
 SET search_path = rye, public, pg_catalog;
+SELECT set_config('app.current_role', 'admin', false);
 SELECT rye.ensure_knowledge_domain('mcp-account-updates', 'MCP Account Updates', 'MCP security simulation domain.');
 SELECT rye.create_agent_identity('mcp-read-agent', 'MCP Read Agent', 'conformance');
 SELECT rye.create_agent_identity('mcp-candidate-agent', 'MCP Candidate Agent', 'conformance');
@@ -44,11 +68,13 @@ SQL
 
 read_token="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atq <<'SQL'
 SET search_path = rye, public, pg_catalog;
+SELECT set_config('app.current_role', 'admin', false) \gset
 SELECT rye.issue_agent_token('mcp-read-agent', 'mcp read token');
 SQL
 )"
 candidate_token="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atq <<'SQL'
 SET search_path = rye, public, pg_catalog;
+SELECT set_config('app.current_role', 'admin', false) \gset
 SELECT rye.issue_agent_token('mcp-candidate-agent', 'mcp candidate token');
 SQL
 )"
@@ -75,7 +101,7 @@ fi
 
 node --check "$MCP_SCRIPT"
 
-if rg -n "db_url|docker_container|docker_user|docker_db" "$MCP_SCRIPT" >/dev/null; then
+if grep_text 'db_url|docker_container|docker_user|docker_db' "$MCP_SCRIPT"; then
   echo "Secure MCP server must not accept DB or Docker target override fields" >&2
   exit 1
 fi
@@ -107,7 +133,7 @@ if [[ "$candidate_tools" == *"promote"* || "$read_tools" == *"promote"* ]]; then
   exit 1
 fi
 
-if ! rg -n "maxPayloadBytes|ensurePayloadSize|statement: z\\.string\\(\\)\\.min\\(1\\)\\.max\\(4000\\)" "$MCP_SCRIPT" >/dev/null; then
+if ! grep_text 'maxPayloadBytes|ensurePayloadSize|statement: z[.]string[(][)][.]min[(]1[)][.]max[(]4000[)]' "$MCP_SCRIPT"; then
   echo "Secure MCP server is missing oversized or invalid payload guards" >&2
   exit 1
 fi

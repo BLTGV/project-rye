@@ -29,6 +29,7 @@ DECLARE
     v_prediction_correct uuid;
     v_prediction_incorrect uuid;
     v_prediction_unresolved uuid;
+    v_scored int;
     v_source uuid;
     v_subject uuid;
     v_subjects uuid[] := '{}'::uuid[];
@@ -271,10 +272,18 @@ BEGIN
         '{"stage":"closed_won"}', 0.7, v_horizon, v_witness
     );
 
-    PERFORM score_due_predictions();
-    IF (SELECT attrs->>'outcome' FROM assertions WHERE id = v_prediction_correct) <> 'correct'
-       OR (SELECT attrs->>'outcome' FROM assertions WHERE id = v_prediction_incorrect) <> 'incorrect'
-       OR (SELECT attrs->>'outcome' FROM assertions WHERE id = v_prediction_unresolved) <> 'unresolvable'
+    -- score_due_predictions() must label the three due predictions. It takes a
+    -- row lock, and a row lock is filtered by the UPDATE policy, so on an
+    -- install whose owner is not a superuser this scored nothing and still
+    -- returned. Compare with IS DISTINCT FROM: `NULL <> 'correct'` is NULL,
+    -- so a plain <> chain reports success when the label is simply missing.
+    v_scored := score_due_predictions();
+    IF v_scored < 3 THEN
+        RAISE EXCEPTION 'score_due_predictions scored % of 3 due predictions', v_scored;
+    END IF;
+    IF (SELECT attrs->>'outcome' FROM assertions WHERE id = v_prediction_correct) IS DISTINCT FROM 'correct'
+       OR (SELECT attrs->>'outcome' FROM assertions WHERE id = v_prediction_incorrect) IS DISTINCT FROM 'incorrect'
+       OR (SELECT attrs->>'outcome' FROM assertions WHERE id = v_prediction_unresolved) IS DISTINCT FROM 'unresolvable'
     THEN
         RAISE EXCEPTION 'prediction scoring outcomes are wrong';
     END IF;
@@ -448,10 +457,10 @@ BEGIN
 
     SELECT correction_rate, predictions_incorrect INTO v_rate, v_pi
     FROM source_reliability WHERE witness_node_id = v_witness;
-    IF v_pi <> 1 THEN
+    IF v_pi IS DISTINCT FROM 1 THEN
         RAISE EXCEPTION 'missed prediction not visible in predictions_incorrect (got %)', v_pi;
     END IF;
-    IF v_rate <> 0 THEN
+    IF v_rate IS DISTINCT FROM 0 THEN
         RAISE EXCEPTION 'prediction miss leaked into correction_rate (got %)', v_rate;
     END IF;
     RAISE NOTICE 'PASS: prediction misses excluded from factual correction_rate';

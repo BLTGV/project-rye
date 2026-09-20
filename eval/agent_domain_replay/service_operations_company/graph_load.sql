@@ -1,4 +1,5 @@
 SET search_path = rye, public, pg_catalog;
+SELECT set_config('app.current_role', 'admin', false);
 
 SELECT rye.ensure_knowledge_domain('account-health', 'Account Health', 'Customer health, owner updates, and account commitments.');
 SELECT rye.ensure_knowledge_domain('support-operations', 'Support Operations', 'Support incidents, escalations, and resolutions.');

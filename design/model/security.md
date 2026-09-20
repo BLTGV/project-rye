@@ -13,12 +13,18 @@ Rye uses **session variables** as the single authorization mechanism. No mixing 
 At the start of each transaction, the application sets:
 
 ```sql
+BEGIN;
+
 SET LOCAL "app.current_user_id" = 'user-456';
 SET LOCAL "app.current_teams" = 'engineering,sales';
 SET LOCAL "app.current_role" = 'team_lead';
+
+-- ... the application's queries ...
+
+COMMIT;
 ```
 
-`SET LOCAL` scopes variables to the current transaction, which is safe for connection pooling (PgBouncer in transaction mode).
+`SET LOCAL` scopes variables to the current transaction, which is safe for connection pooling (PgBouncer in transaction mode). It requires an open transaction: run outside one it warns and sets nothing, leaving every query unauthorized. In a session walk with no transaction, use plain `SET`; with a pooled or per-call SQL tool, use `set_config()` in the same call as the query.
 
 All RLS policies, write checks, and field redaction reference these session variables — never `pg_has_role()` or `current_user`.
 
@@ -181,6 +187,104 @@ Default seed data:
 
 Agent roles (`agent:*`) can INSERT nodes, edges, events, event participants, assertions, and artifacts. They cannot DELETE any of these. Direct UPDATE is blocked — agents modify data only through approved function paths that set session flags.
 
+**Who may write at all.** Migration `0026` adds `rye_role_may_write()`: true
+when `app.current_role` is agent-shaped or names a `role_classification_access`
+row whose `may_write` column is true, false for `viewer`, for an unknown role
+name, and for an unset role. The rule is a row in a table that is already the
+instance's role list, so a new read-only role is an `INSERT` and widening a
+role later is an `UPDATE`.
+
+**It is enforced by a trigger, with the policy conjunct as the second line.** A
+policy alone holds on only one of Rye's two supported deployments. A
+`SECURITY DEFINER` function owned by a superuser runs with RLS switched off for
+itself, and on the superuser-owned Docker install a `viewer` still accepted a
+candidate through `accept_assertion()`, closed one through `reject_candidate()`,
+and rewrote `attrs` through `mark_assertion_outcome()`. So `rye_gate_may_write()`
+runs `BEFORE INSERT OR UPDATE OR DELETE ... FOR EACH ROW` on each of the seven
+core tables and raises `42501` when `rye_role_may_write()` is false — triggers
+fire for a superuser, inside a definer function, and on a raw write alike. The
+triggers are `trg_nodes_gate_may_write`, `trg_edges_gate_may_write`,
+`trg_events_gate_may_write`, `trg_event_participants_gate_may_write`,
+`trg_assertions_gate_may_write`, `trg_assertion_evidence_gate_may_write`,
+`trg_artifacts_gate_may_write`, and `trg_node_source_map_gate_may_write`. On
+`assertions` the name is chosen so the settle gate still sorts first and the
+shape guards still sort after.
+
+**`node_source_map` follows the same rule.** A mapping decides which node a
+tracked table's change events attach to, so it is not bookkeeping. Before
+`0026` its insert policy was `WITH CHECK (true)` and its update policy asked
+only that the node be visible: a `viewer` could map a source id onto a node of
+its choosing and have CDC record its own text against that node, or re-point an
+operator's mapping. It now carries the conjunct and the trigger; its delete
+policy keeps its narrower `admin`/`manager` test on top. `system:cdc` reads it
+and never writes it, so it is refused here like every other role that is not
+inserting an event.
+
+The other supporting tables were surveyed under both owner types with a
+`viewer` and an unset session, and each refuses every insert, update, and
+delete: `access_grants`, `field_classifications`, `assertion_type_access`,
+`role_classification_access`, and all nine governance tables. Two had no RLS at
+all, and `0029` closes them, because leaving them open did change what Rye
+records: a `viewer` could rewind or delete a row of `crm_code_counters` and the
+next `create_task()` collided on `idx_nodes_external_unique`, and a read-only
+session could forge a row of `node_merges` and delete real ones. Both are now
+enabled and forced. `crm_code_counters` is readable by every role and movable
+only by a role that may write, only forward, and only by the one step
+`generate_crm_code()` takes; no counter is ever deleted. `node_merges` is
+readable by an admin or by a caller who can see both nodes, insertable by a
+role that may write, and never updated or deleted. Each rule is an RLS policy
+and a `BEFORE ROW` trigger, so it binds a superuser owner too. Drawing a code
+is a write from `0029` on: a session with no role is refused, which costs
+nothing, because such a session cannot create the node the code would name
+either.
+
+The same test stays as a conjunct on all twenty-one write policies: it is the
+cheaper refusal where the owner is bound by RLS, and it keeps `USING` and
+`WITH CHECK` doing the governance row test below. The snippets in this section
+predate `0026` and omit it; the installed policies carry it, and
+`scripts/verify.sh` fails if any of the twenty-one does not, or if any of the
+seven triggers is missing.
+
+**A refusal has two shapes, by owner.** A `BEFORE ROW` trigger only sees rows
+RLS admitted. Where the owner is bound by RLS a refused `UPDATE` or `DELETE`
+affects zero rows and raises nothing; where the owner is a superuser the rows
+are visited and the trigger raises `42501`. An `INSERT` raises on both. Assert
+the row, not one error text.
+
+**The CDC path records under `system:cdc`.** `capture_domain_change()` runs in
+the application's own transaction, and an application that does not know Rye
+exists sets no role. It resolves the source node under the caller's own
+visibility, then sets `app.current_role` to `system:cdc` around its
+`record_event()` call only and restores the caller's value on every exit path.
+`system:cdc` is an ordinary `role_classification_access` row with `may_write`
+true and `classifications` `ARRAY['public']`;  `rye_gate_may_write()` admits it
+for `INSERT` on `events` and `event_participants` and refuses it everywhere
+else, and `merge_nodes()` names it. A caller who sets it by hand can therefore
+do strictly less than one who sets `team_member`, which any caller with a raw
+connection can already do — the stated session-variable boundary, not a new
+hole, and the reason this is a role in the role list rather than a forgeable
+`app.write_path` gate. The event keeps `actor_system = 'system:cdc'` and gains
+`properties.session_role`, the caller's role before the swap or null.
+
+**The governance structure is admin-only.** The same policies carry a row-local
+test on the row's own type column: a `nodes` row whose `node_type` is
+`onboarding_scope`, and an `edges` row whose `edge_type` is
+`scope_governs_subject`, `scope_governs_source`, or `scope_enables_plugin`, may
+be inserted, updated, or deleted only by a caller whose `app.current_role` is
+`admin`. Because RLS applies `USING` to the old row and `WITH CHECK` to the new
+one, one rule covers archiving, ending, deleting, and re-pointing in both
+directions. `scope_status` is settle-gated to `admin` beside `registry_entry`
+and `review_policy`. `has_step` is not gated, so an inherited scope can still be
+dropped by archiving one; a subject that must stay governed gets its own
+`scope_governs_subject` edge.
+
+Every rule in this subsection reads the role in order to permit, which is what a
+role model is. It protects deployments where a trusted backend sets the session
+variables, and agents that state their role honestly. It is not a defence
+against a hostile caller with a raw connection. Recorded in
+`docs/decisions/0009-who-may-write.md`; contract in `contracts/sql-surface.md`,
+"Who may write".
+
 ```sql
 -- Nodes, edges, artifacts: any role can INSERT (including agents)
 CREATE POLICY node_insert_policy ON nodes
@@ -247,6 +351,92 @@ Several UPDATE policies use a **write-path gate**: the policy allows updates onl
 This pattern lets agents (and other restricted roles) perform controlled updates through audited functions while blocking direct `UPDATE` statements. RLS still applies to the SELECT portion — agents can only update rows they can read.
 
 > **Important:** `SELECT ... FOR UPDATE` requires both the SELECT and UPDATE policies to pass. When using a write-path gate, set the flag **before** the `FOR UPDATE` lock, not after. Otherwise the locking SELECT will fail for gated roles.
+
+> **The write-path gate grants nothing.** Any caller can run the same
+> `set_config()` the helper runs, so on `assertions` the gate is a pre-filter
+> that stops a stray `UPDATE` and no more. Everything that matters is enforced
+> by triggers that re-derive their answer from the row. See
+> "The assertion lifecycle is enforced by the row" below.
+
+### 2.7 The Assertion Lifecycle Is Enforced by the Row
+
+Migration `0025` replaces `assertions_immutable_guard()` in place and adds two
+triggers. Together they decide what an assertion may become, per column, from
+`OLD`, `NEW`, rows that already exist, and `app.current_role`. No rule reads
+`app.write_path`, because any caller can set it, and no rule permits on the
+basis of a role, because any caller can claim one. There is no admin exemption.
+
+| Trigger | Timing | What it decides |
+|---|---|---|
+| `trg_assertion_settle_gate` (0023) | BEFORE INSERT OR UPDATE | Configuration types need an admin. Sorts first, and `tests/conformance/30_configuration_gate.sql` depends on that. |
+| `trg_assertions_insert_review` (0025) | BEFORE INSERT | A direct `INSERT` of an accepted row is demoted where `record_assertion()` demotes. |
+| `trg_assertions_immutable` (0025 function, 0002 trigger) | BEFORE UPDATE | The per-column rules for `status`, `superseded_at`, `superseded_by`, `effective_to`, `attrs` and `classification`. |
+| `trg_assertions_transition_complete` (0025) | AFTER INSERT OR UPDATE, deferred | The acceptance event, the replacement's type and key, and the successor of a narrowed window. Refuses at `COMMIT`. |
+
+**What this protects and what it does not.** Rye's authorization is session
+variables. A caller holding a raw connection can set `app.current_role` to
+`admin`, and nothing here changes that. Two things are protected: deployments
+where a trusted backend sets the session variables and callers cannot, and
+well-behaved agents that state their role honestly and must not be able to skip
+review by accident or by following bad instructions. It is not a defence against
+a hostile caller with a raw connection.
+
+Inside that boundary, three claims hold for any caller at all, forged role
+included, because they read no role: an accepted assertion cannot be ended
+without a replacement of the same type and key; a window cannot be narrowed
+without a successor; and `claim`, `basis`, `confidence` and the subject cannot be
+rewritten. Nothing anywhere may claim more.
+
+The full per-column table and the stated limits are in
+`contracts/sql-surface.md`, section "The row is the gate, not the route".
+
+### 2.8 The Review Policy Holds on Every Route
+
+Migration `0027` closes the two routes that went around a scope's review policy.
+
+`supersede_assertion()` now applies the same predicate `record_assertion()`
+applies, resolved from the incumbent's own subject, type and primary witness.
+Under `strict`, or `candidates_only` with a basis other than `observed`, it
+writes the replacement as a **candidate** and leaves the accepted incumbent
+standing and unsuperseded; the candidate carries `attrs.review_gate` and a
+`NOTICE` names both. Accepting it with `accept_assertion()` supersedes the
+incumbent then. `resolve_knowledge_gap()` follows, and its
+`knowledge_gap_resolved` event carries `pending_review` and `review_policy`.
+The signatures and return types do not change.
+
+Every helper that inserts an assertion — `record_assertion()`,
+`supersede_assertion()`, `record_distillation()` — resolves the governing scope
+**twice**, with its primary witness and with none, and applies the stricter of
+the two policies through `effective_review_policy()`. The scope id it reports is
+still the witness-resolved one. `assertions_insert_review_guard()` can only
+resolve without a witness, because evidence is written after the assertion, and
+a witness-free resolution falls through to `DEFAULT_SCOPE`, which can be
+stricter than the witness scope; taking the maximum is what stops helper and
+guard from disagreeing in the accepting direction. `accept_assertion()` is
+unchanged: it inserts nothing.
+
+With that in place, `0025`'s insert exemption is removed. A raw
+supersede-and-replace under a demoting policy is refused at `COMMIT` by
+`trg_assertions_transition_complete` instead of landing accepted; the incumbent
+still stands after the rollback. Under a non-demoting policy that shape commits
+accepted exactly as before.
+
+The behaviour change to know: a `scope_governs_source` edge from an `open` scope
+no longer opens a source on an instance whose `DEFAULT_SCOPE` is `strict` or
+`candidates_only`. Give those subjects their own `scope_governs_subject` edge to
+the open scope and both resolutions agree again.
+
+`governing_scope()` no longer breaks a tie with the lowest uuid. Within the
+branch that matched, the most restrictive review policy wins — `strict` over
+`candidates_only` over `open` — ranked by `scope_review_policy_rank()`, which
+never raises, with `scope.id` only as a tie-break. After a cross-scope
+`merge_nodes()` both scopes govern the surviving node and it reads the stricter
+of the two in either id order, so a node in a strict area cannot silently become
+open. The narrowing that follows: an `agent:*` caller now needs
+`rye.authoritative.promote` for the strictest governing scope.
+
+Details in `contracts/sql-surface.md`, section "Review policy holds on every
+route", and `docs/decisions/0010-review-policy-holds-on-every-route.md`.
 
 ---
 
@@ -433,9 +623,12 @@ RLS is enabled and forced on all supporting and configuration tables.
 | Operation | Who |
 |---|---|
 | SELECT | Anyone who can see the linked node (cascading visibility) |
-| INSERT | All roles |
-| UPDATE | Anyone who can see the linked node (cascading visibility) |
+| INSERT | Any role that may write (`rye_role_may_write()`) |
+| UPDATE | Any role that may write, and who can see the linked node |
 | DELETE | `admin`, `manager` |
+
+Also carries `trg_node_source_map_gate_may_write`, so the rule holds under a
+superuser owner and inside a `SECURITY DEFINER` helper. See section 2.5.
 
 ### `field_classifications`
 
@@ -457,3 +650,77 @@ RLS is enabled and forced on all supporting and configuration tables.
 |---|---|
 | SELECT | All roles (needed by `redact_properties()`) |
 | INSERT/UPDATE/DELETE | `admin` only |
+
+It is also the instance's list of role names. The governance policies in section 7 read it to decide whether a session is a named role, and the write gate and write policies in section 2.5 read its `may_write` column to decide whether a session may write at all. Only `INSERT` was policed before `0026`; that migration adds the admin-only `UPDATE` policy the "widening a role is an UPDATE" rule needs, and seeds the reserved `system:cdc` row.
+
+---
+
+## 7. Governance Table RLS
+
+Nine tables say which areas exist, who holds authority in them, which channels feed them, which agents exist, what each agent may do, and what each agent did. RLS is enabled and forced on all nine. `app.current_role` decides — never `current_user`, never `pg_has_role()`.
+
+### 7.1 Session shapes
+
+| Shape | Matched when `app.current_role` is |
+|---|---|
+| admin | `admin` |
+| named role | any `role_classification_access.role_name` |
+| agent-shaped | `agent:<key>`, whether or not an identity by that key exists |
+| bound agent | `agent:<agent_key>` of an `active` `agent_identities` row |
+| unknown | anything else, including unset |
+
+Two read-only helpers are the definition. `rye_current_agent_key()` returns the part after `agent:`, or null; it reads no table, so it is safe inside `agent_identities`' own policy. `rye_current_agent_id()` resolves that key to an identity id, or null; it reads the roster, so it may be used only in policies on tables below `agent_identities`. Neither is `SECURITY DEFINER`. **Own rows** always means `agent_id = rye_current_agent_id()`.
+
+**`app.current_user_id` is a label, not a binding.** It is the actor string helpers write into events, `created_by`, and audit payloads. It is free text, it is frequently a human or a test marker, and no rule here reads it. A session whose label names a different agent than its role is not an error: the label is ignored, and the session is the agent its role names, or no agent at all. `agent_can_promote_in_scope()` resolved the acting agent from the label before this and now resolves through `rye_current_agent_id()` only. A test or client that sets `app.current_role` to `agent:<key>` must use the stored key of the identity whose grants it expects.
+
+### 7.2 Who reads, who writes
+
+| Table | admin | named role | bound agent | agent-shaped only | unknown |
+|---|---|---|---|---|---|
+| `knowledge_domains` | read all; insert, update, delete | read all | read areas it holds | nothing | nothing |
+| `domain_authorities` | read all; insert, update, delete | read all | read rows of areas it holds | nothing | nothing |
+| `channel_domain_subscriptions` | read all; insert, update, delete | read all | read rows of areas it holds | nothing | nothing |
+| `domain_claim_policies` | read all; insert, update, delete | read all | read rows of areas it holds | nothing | nothing |
+| `agent_identities` | read all; insert, update, delete | read all | read all | read all | nothing |
+| `agent_capability_grants` | read all; insert, update, delete | nothing | read own rows | nothing | nothing |
+| `agent_action_log` | read all; insert only | nothing | read own rows | nothing | nothing |
+| `api_idempotency_keys` | read all; insert, delete | nothing | read own rows | nothing | nothing |
+| `agent_api_tokens` | read all; insert, update, delete | nothing | nothing | nothing | nothing |
+
+An agent **holds** an area when it has an active, unexpired `agent_capability_grants` row whose `domain_id` is that area or null. The capability name is not part of the rule.
+
+The whole roster is readable by every session that can see anything else. `agent_identities` carries no secret, and it is the deny-list for "an agent is never a settler". A deny-list some callers cannot read is a deny-list that fails open.
+
+`agent_action_log` is append-only for everyone, admin included, exactly as `events` and `assertion_evidence` are. There is no UPDATE or DELETE policy on it.
+
+### 7.3 No policy reads its own table
+
+A policy whose expression subqueries its own table raises `infinite recursion detected in policy for relation`. One that calls a function reading its own table recurses to `stack depth limit exceeded` — `SECURITY DEFINER` included. So the tables are ordered, and a policy reads only levels strictly below its own:
+
+| Level | Tables |
+|---|---|
+| 0 | `role_classification_access`, `assertion_type_access`, `field_classifications` |
+| 1 | `agent_identities` |
+| 2 | `agent_capability_grants`, `agent_action_log`, `api_idempotency_keys`, `agent_api_tokens` |
+| 3 | `knowledge_domains`, `domain_authorities`, `channel_domain_subscriptions`, `domain_claim_policies` |
+
+The chain area → grants → identities → roles terminates. That is why the roster's read rule is key-only rather than "names an active identity": at level 1 there is nothing left to ask.
+
+### 7.4 Writes go through the helpers, and the policies enforce it
+
+`ensure_knowledge_domain`, `subscribe_channel_to_domain`, `grant_domain_authority`, `create_agent_identity`, and `grant_agent_capability` stay `SECURITY INVOKER` with no role check in the body. What refuses a non-admin is the admin-only write policy on the table each one writes — the same rule that governs a direct `INSERT`, so there is one rule in one place.
+
+Two writes are made on behalf of a caller who is not an admin, and both use the write-path gate of section 2.6:
+
+| Gate value | Policy | Function |
+|---|---|---|
+| `record_agent_action` | `agent_action_log_insert_policy` | `record_agent_action()` |
+| `agent_create_candidate` | `api_idempotency_keys_insert_policy` | `agent_create_candidate()` |
+
+The log insert is admitted from any session so that a denial is recorded even when the caller was impersonating another agent. `record_agent_action()` therefore generates the row id itself rather than using `INSERT ... RETURNING`: `RETURNING` reads the new row back, which puts it through a SELECT policy that admits only the caller's own rows, and a log write that has to be readable by its writer is not an audit trail.
+
+### 7.5 `SECURITY DEFINER` does not bypass these policies
+
+Under `FORCE ROW LEVEL SECURITY` with an owner that is not a superuser — the Supabase case — a `SECURITY DEFINER` function is still subject to every policy, evaluated with the caller's session variables, because `app.current_role` is session state and the function does not change it. Marking a function `DEFINER` buys no visibility here. The agent functions keep working because the rows they read are readable to the session that calls them and the rows they write are admitted by a named gate.
+
+Refusals are not uniform. A refused `INSERT` raises `42501`. A refused `UPDATE` or `DELETE` raises nothing and affects zero rows. A refused `SELECT` returns zero rows.

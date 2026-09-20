@@ -13,6 +13,8 @@ This contract is connector-neutral. Records may come from Composio, a direct API
 - Include a provider-native `external_url` whenever the connector can provide a
   durable link to the original item.
 - Confirmed context changes are new assertions that supersede old assertions; do not silently rewrite history.
+- A supersession lands only where the area's review policy lets this caller's write land accepted. Otherwise the new assertion is a suggestion, the earlier one is still the current answer, and the commit reports it under `waiting_for_review`. Report those subjects as waiting, never as updated.
+- A rerun of the same input does not file the same suggestion twice. The commit checks for a live candidate carrying the same claim on the same subject, type, and key, and reports it with `filed_this_run` false instead of writing.
 - Broad sources such as email should normally classify per item, thread, folder, sender pattern, or rule instead of using a global default.
 
 ## Record Kinds

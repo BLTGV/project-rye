@@ -1,7 +1,9 @@
-.claude/
+.claude/*
+!.claude/agents/
 .mcp.json
 .env
 .rye.env
 .rye/
 *.log
 tmp/
+

@@ -74,6 +74,7 @@ node skills/rye-tabular-intake/scripts/tabular_stage_rye.mts \
   > /tmp/parent-stage.ndjson
 
 node skills/rye-tabular-intake/scripts/tabular_commit_rye.mts \
+  --role team_member \
   --db-url "$DATABASE_URL" \
   --input /tmp/parent-records.ndjson \
   --run-id example-domain:parents:2026-04-29
@@ -83,6 +84,7 @@ If the consuming environment only exposes SQL execution, emit a SQL script and r
 
 ```bash
 node skills/rye-tabular-intake/scripts/tabular_commit_rye.mts \
+  --role team_member \
   --emit-sql \
   --input /tmp/parent-records.ndjson \
   --run-id example-domain:parents:2026-04-29 \

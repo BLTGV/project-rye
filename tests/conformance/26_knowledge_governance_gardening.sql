@@ -196,7 +196,10 @@ BEGIN
         p_evidence := ARRAY[jsonb_build_object('kind','source','event_id',v_event)]
     );
     v_agent := create_agent_identity('governance_agent', 'Governance agent', 'test');
-    PERFORM set_config('app.current_role', 'agent:test', true);
+    -- app.current_role names which agent this session is; app.current_user_id
+    -- is only an actor label. The role must name the stored agent_key, or the
+    -- session is a different agent and sees none of this agent's grants.
+    PERFORM set_config('app.current_role', 'agent:governance_agent', true);
     PERFORM set_config('app.current_user_id', 'governance_agent', true);
     v_failed := false;
     BEGIN
@@ -214,7 +217,7 @@ BEGIN
         'governance_agent', 'rye.authoritative.promote',
         p_scope_ref := v_direct_scope::text
     );
-    PERFORM set_config('app.current_role', 'agent:test', true);
+    PERFORM set_config('app.current_role', 'agent:governance_agent', true);
     PERFORM set_config('app.current_user_id', 'governance_agent', true);
     PERFORM accept_assertion(v_assertion);
     IF (SELECT status FROM assertions WHERE id = v_assertion) <> 'accepted' THEN

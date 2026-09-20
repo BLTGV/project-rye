@@ -33,6 +33,7 @@ Site sections:
 - /docs/cookbooks/saas-customer-operations/
 - /docs/cookbooks/recruiting-pipeline/
 - /docs/cookbooks/product-development/
+- /docs/cookbooks/small-product-team/
 - /docs/cookbooks/mineral-rights/
 - /docs/evaluations/report/
 

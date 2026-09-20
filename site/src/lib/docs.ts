@@ -42,6 +42,7 @@ const DOCUMENT_ORDER: Record<string, string[]> = {
     "saas-customer-operations",
     "recruiting-pipeline",
     "product-development",
+    "small-product-team",
     "mineral-rights",
   ],
   evaluations: ["report"],

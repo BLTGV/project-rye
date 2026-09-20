@@ -8,6 +8,14 @@ Rye provides a single queryable structure for tracking entities, relationships, 
 
 There is no runtime, no ORM, no package manager, and no build step. The deliverable is SQL.
 
+## How Work Is Organized
+
+Work on this repository runs through six roles: Lead, Product, Architect,
+Builder (one per area), Verifier, and Operator. The interactive session is
+the Lead. Read `agents/README.md` for the loop and `agents/lead.md` for the
+Lead's instructions. Areas are listed in `docs/areas.md`; each has a record
+in `docs/areas/`. Tasks are work items under `work/`.
+
 ## Quick Start for Agents
 
 1. Set the search path: `SET search_path = rye, public, pg_catalog;`
@@ -68,12 +76,17 @@ design/
   layers/
     crm.md                  — CRM conventions (contacts, opportunities, pipelines)
     pm.md                   — PM conventions (tasks, projects, sprints)
-  cookbooks/
+  getting-started/
+    installation.md
     quickstart.md           — Connect your data in 5 minutes (overlay-first walkthrough)
+  cookbooks/
     saas-customer-operations.md
     recruiting-pipeline.md
     product-development.md
+    small-product-team.md   — Two developers, GitHub issues and PRs, feedback from calls, chat, and email
     mineral-rights.md
+  proposals/
+    human-agent-scaling.md  — How people and agents interact as Rye scales (v0.4 reasoning)
 skills/
   rye-installer/            — Install and migrate Rye
   rye-agent-ops/            — Safe agent read/write patterns

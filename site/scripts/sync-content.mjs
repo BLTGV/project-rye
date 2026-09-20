@@ -67,6 +67,8 @@ const outcomeDescriptionsBySourcePath = {
     "Unify parcel, owner, and title context so acquisition teams act on complete deal intelligence.",
   "design/cookbooks/product-development.md":
     "Trace incidents, releases, and decisions end-to-end to reduce regression response time.",
+  "design/cookbooks/small-product-team.md":
+    "Connect GitHub issues and customer feedback so a two-person team can say why it built something and who asked.",
   "design/getting-started/installation.md":
     "Go from zero to a running Rye instance with PostgreSQL, session variables, and optional profiles.",
   "design/getting-started/quickstart.md":

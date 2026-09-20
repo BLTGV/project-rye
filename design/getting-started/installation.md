@@ -145,10 +145,16 @@ SET search_path = rye, public, pg_catalog;
 Rye enforces row-level security through session variables:
 
 ```sql
-SET LOCAL "app.current_user_id" = 'your-user-id';
-SET LOCAL "app.current_teams" = 'team-a,team-b';
-SET LOCAL "app.current_role" = 'operator';
+SET "app.current_user_id" = 'your-user-id';
+SET "app.current_teams" = 'team-a,team-b';
+SET "app.current_role" = 'operator';
 ```
+
+Plain `SET`, not `SET LOCAL`. `SET LOCAL` lasts only for the current
+transaction, so pasted outside a `BEGIN` it warns and sets nothing, and every
+statement after it runs with no role. Use `SET LOCAL` inside an explicit
+`BEGIN` block. With a pooled or per-call SQL tool, neither form carries over:
+set the context with `set_config()` in the same call as the query.
 
 The CLI sets the admin context inside the statements it runs. Applications and
 custom SQL sessions must set their own context before reading or writing

@@ -1,0 +1,196 @@
+#!/usr/bin/env python3
+"""Render agents/*.md and docs/areas.md into Claude Code, OpenCode, and Codex
+agent definitions. Stdlib only. Run from anywhere; paths resolve to repo root.
+"""
+import os, re, sys, json, pathlib
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+AGENTS = ROOT / "agents"
+AREAS = ROOT / "docs" / "areas.md"
+RECORDS = ROOT / "docs" / "areas"
+
+# Model per tier per tool. Edit here, nowhere else.
+MODELS = {
+    "claude":   {"think": "opus",   "build": "sonnet"},
+    "opencode": {"think": "anthropic/claude-opus-4-8", "build": "anthropic/claude-sonnet-5"},
+    "codex":    {"think": ("gpt-5.6-sol", "high"), "build": ("gpt-5.6-sol", "medium")},
+}
+# Tool lists for Claude Code by permission class.
+CLAUDE_TOOLS = {
+    ("allow", "allow"): "Read, Edit, Write, Bash, Grep, Glob",
+    ("allow", "tests"): "Read, Edit, Write, Bash, Grep, Glob",
+    ("allow", "deny"):  "Read, Edit, Write, Grep, Glob",
+    ("deny",  "tests"): "Read, Bash, Grep, Glob",
+    ("deny",  "allow"): "Read, Bash, Grep, Glob",
+    ("deny",  "deny"):  "Read, Grep, Glob",
+}
+
+def parse_front(text):
+    m = re.match(r"^---\n(.*?)\n---\n(.*)$", text, re.S)
+    if not m:
+        return {}, text
+    meta = {}
+    for line in m.group(1).splitlines():
+        if ":" in line:
+            k, v = line.split(":", 1)
+            meta[k.strip()] = v.strip()
+    return meta, m.group(2)
+
+def parse_areas(path):
+    if not path.exists():
+        return []
+    areas, cur, key = [], None, None
+    for raw in path.read_text().splitlines():
+        line = raw.rstrip()
+        h = re.match(r"^##\s+([a-z0-9][a-z0-9-]*)\s*$", line)
+        if h:
+            cur = {"slug": h.group(1)}; areas.append(cur); key = None; continue
+        if cur is None:
+            continue
+        kv = re.match(r"^- ([a-z]+):\s*(.*)$", line)
+        if kv:
+            key, val = kv.group(1), kv.group(2)
+            cur[key] = [val] if val else []
+            continue
+        item = re.match(r"^\s+- (.*)$", line)
+        if item and key:
+            cur[key].append(item.group(1))
+    return areas
+
+def area_block(a):
+    def lst(k):
+        items = a.get(k) or []
+        if k in ("publishes", "consumes", "paths"):
+            items = [x for item in items for x in item.split()]
+        items = [x for x in items if x and x != "none"]
+        return "\n".join(f"- {x}" for x in items) if items else "- none"
+    return f"""
+---
+
+# Area: {a['slug']}
+
+- purpose: {' '.join(a.get('purpose', []))}
+- paths: {' '.join(a.get('paths', []))}
+- test: {' '.join(a.get('test', []))}
+- record: docs/areas/{a['slug']}.md
+
+## Invariants
+{lst('invariants')}
+
+## Contracts published
+{lst('publishes')}
+
+## Contracts consumed
+{lst('consumes')}
+"""
+
+def ensure_record(a):
+    RECORDS.mkdir(parents=True, exist_ok=True)
+    p = RECORDS / f"{a['slug']}.md"
+    if p.exists():
+        return
+    p.write_text(f"""# {a['slug']}
+
+Purpose: {' '.join(a.get('purpose', []))}
+Paths: {' '.join(a.get('paths', []))}
+Test: {' '.join(a.get('test', []))}
+
+## Learned
+Dated entries. What a stranger would need to know and could not read from the code.
+
+""")
+
+def load_roles():
+    pre = (AGENTS / "_preamble.md").read_text().strip()
+    roles = []
+    for p in sorted(AGENTS.glob("*.md")):
+        if p.name.startswith("_") or p.name == "README.md":
+            continue
+        meta, body = parse_front(p.read_text())
+        roles.append({"name": p.stem, "meta": meta, "body": body.strip(), "pre": pre})
+    return roles
+
+def expand(roles, areas):
+    out = []
+    for r in roles:
+        if r["name"] == "builder":
+            for a in areas:
+                ensure_record(a)
+                out.append({**r, "name": f"builder-{a['slug']}",
+                            "meta": {**r["meta"], "description": f"Implements work items whose area is {a['slug']}: {' '.join(a.get('purpose', [])).split('. ')[0]}."},
+                            "body": r["body"] + area_block(a)})
+        else:
+            out.append(r)
+    return out
+
+def prompt_for(r):
+    return r["pre"].replace("{ROLE}", r["name"].split("-")[0].capitalize()) + "\n\n" + r["body"] + "\n"
+
+def write(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    return path.relative_to(ROOT)
+
+def render_claude(r):
+    if r["name"] == "lead":
+        return None  # the main session is the Lead; CLAUDE.md imports agents/lead.md
+    m = r["meta"]
+    tools = CLAUDE_TOOLS[(m.get("edit", "allow"), m.get("shell", "allow"))]
+    fm = f"---\nname: {r['name']}\ndescription: {json.dumps(m['description'])}\ntools: {tools}\nmodel: {MODELS['claude'][m.get('tier','build')]}\n---\n\n"
+    return write(ROOT / ".claude" / "agents" / f"{r['name']}.md", fm + prompt_for(r))
+
+def render_opencode(r):
+    m = r["meta"]
+    mode = "primary" if r["name"] == "lead" else "subagent"
+    perm = ["permission:"]
+    perm.append(f"  edit: {'allow' if m.get('edit','allow') == 'allow' else 'deny'}")
+    sh = m.get("shell", "allow")
+    if sh == "deny":
+        perm.append("  bash: deny")
+    elif sh == "tests":
+        perm += ["  bash:", '    "*": ask', '    "git diff*": allow', '    "git log*": allow', '    "./scripts/*": allow', '    "npm test*": allow', '    "pytest*": allow']
+    else:
+        perm.append("  bash: allow")
+    fm = f"---\ndescription: {json.dumps(m['description'])}\nmode: {mode}\nmodel: {MODELS['opencode'][m.get('tier','build')]}\n" + "\n".join(perm) + "\n---\n\n"
+    return write(ROOT / ".opencode" / "agents" / f"{r['name']}.md", fm + prompt_for(r))
+
+def render_codex(roles):
+    """Standalone role files under .codex/agents/ are discovered by Codex; each needs
+    name, description, developer_instructions. config.toml only enables multi-agent."""
+    written = []
+    for r in roles:
+        if r["name"] == "lead":
+            continue  # the interactive session is the Lead; AGENTS.md carries its loop
+        m = r["meta"]
+        model, effort = MODELS["codex"][m.get("tier", "build")]
+        body = prompt_for(r).replace('"' * 3, "'" * 3)
+        toml = (f'name = {json.dumps(r["name"])}\n'
+                f'description = {json.dumps(m["description"])}\n'
+                f'model = "{model}"\nmodel_reasoning_effort = "{effort}"\n'
+                f'developer_instructions = {"\"" * 3}\n{body}{"\"" * 3}\n')
+        if m.get("shell", "allow") == "deny":
+            toml += "\n[features]\nshell_tool = false\n"
+        written.append(write(ROOT / ".codex" / "agents" / f"{r['name']}.toml", toml))
+    written.append(write(ROOT / ".codex" / "config.toml",
+        "# Generated by scripts/gen-agents. Roles are the files in .codex/agents/.\n[agents]\nenabled = true\nmax_concurrent_threads_per_session = 4\n"))
+    return written
+
+def main():
+    roles = expand(load_roles(), parse_areas(AREAS))
+    written = []
+    for r in roles:
+        for fn in (render_claude, render_opencode):
+            p = fn(r)
+            if p: written.append(p)
+    written += render_codex(roles)
+    # Remove stale builders whose area no longer exists.
+    live = {r["name"] for r in roles}
+    for d in (ROOT / ".claude" / "agents", ROOT / ".opencode" / "agents", ROOT / ".codex" / "agents"):
+        for p in d.glob("builder-*.*"):
+            if p.stem not in live:
+                p.unlink(); print(f"removed stale {p.relative_to(ROOT)}")
+    print(f"{len(roles)} roles, {sum(1 for r in roles if r['name'].startswith('builder-'))} builders")
+    for p in written: print(f"  {p}")
+
+if __name__ == "__main__":
+    main()

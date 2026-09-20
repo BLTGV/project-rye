@@ -118,13 +118,36 @@ Records which nodes were merged into which canonical nodes, and by whom.
 
 **Key columns:** `duplicate_id` (absorbed node), `canonical_id` (surviving node), `merged_by`, `confidence`.
 
+**RLS (0029):** enabled and forced. Readable by an `admin`, or by a caller who can see both nodes — node visibility is the anchor here as it is for edges. Insertable by a role that may write this table (`rye_may_write_table()`), which is the role test `merge_nodes()` itself applies, less `system:cdc`, and it is `SECURITY INVOKER` so its insert runs as the caller. Never updated and never deleted, by anyone: it is history. `trg_node_merges_gate` repeats the rule as a trigger so it also binds a superuser owner and any `SECURITY DEFINER` helper.
+
 #### `assertion_type_access` — Assertion Type Gating
 
-Controls which roles can read or write specific assertion types. Assertion types not in this table are unrestricted.
+Controls which roles can read, write, or settle specific assertion types. An assertion type with no row for an operation is unrestricted for that operation.
 
 **Why it exists:** The original RLS policies hardcoded assertion type restrictions in CASE statements. Adding a new sensitive type required modifying SQL policies. This table makes the security model data-driven — add a row, not a migration.
 
-**Key columns:** `assertion_type`, `operation` (`read`/`write`), `allowed_roles` (text array). Unique on `(assertion_type, operation)`.
+**Key columns:** `assertion_type`, `operation` (`read`/`write`/`settle`), `allowed_roles` (text array). Unique on `(assertion_type, operation)`.
+
+**Operations:**
+
+| `operation` | Meaning | Enforced by |
+|---|---|---|
+| `read` | Who may see assertions of this type | `assertion_read_policy` |
+| `write` | Who may insert them at all | `assertion_insert_policy` |
+| `settle` | Who may make one **accepted** | `record_assertion()` demotes; `trg_assertion_settle_gate` refuses every other route |
+
+**The `settle` operation.** Some assertion types are not knowledge about the world — they are Rye's own configuration, and Rye reads them to decide how it treats every other write. Two rows are seeded, both `ARRAY['admin']`:
+
+- `registry_entry` — type aliases, `self_settled_type:*`, `governed_type:*`, `DEFAULT_SCOPE`, basis priors, half lives, digest facets.
+- `review_policy` — decides whether other writes land accepted at all.
+
+A non-admin's accepted write of a gated type is **demoted, not refused**, by `record_assertion()`: it lands as a candidate carrying `attrs.settle_gate = {"pending": true, "requested_status": "accepted", "allowed_roles": [...]}` and appears in `review_queue` for an admin to accept or reject, so nothing the person said is lost. Every other route to an accepted gated row raises: a direct `INSERT`, any `UPDATE` that moves a row to `accepted` (including `accept_assertion()` and a raw `UPDATE` by a caller who sets `app.write_path` itself), `supersede_assertion()`, and `record_distillation()`. An agent capability grant (`rye.authoritative.promote`) does not open the gate. Gating a further type is an `INSERT`, not a migration.
+
+**No alias points out of a gated type.** A `registry_entry` whose `assertion_key` is `type_alias:assertion_type:<T>`, where `T` has a `settle` row, is refused for every caller at every status — candidate included, admin included (migration `0028`). `record_assertion()` canonicalizes before it inserts and the gate compares the stored spelling, so such an alias would route every later write under the gated name to a type the gate does not read. An alias *into* a gated type is unaffected: it narrows, because the write then canonicalizes to the gated spelling and is demoted like any other configuration write. The rule is data like the rest of the gate — add a `settle` row for a type and aliases out of it are refused with no further migration.
+
+**Ending an accepted entry is also settling it.** A caller who may not settle a gated type may not change an accepted row of it at all — not `superseded_at`, not `effective_to`, not `status`, not `claim`, not `attrs` — by raw `UPDATE` or through any helper. Leaving supersession open was an escalation, not just a loss: ending a scope's accepted `strict` `review_policy` dropped the scope to `open`, and the next ordinary write landed accepted instead of waiting for review. Candidates of a gated type stay ordinary suggestions, so outcome labels and classification propagation on them are unaffected, and an admin keeps every lifecycle operation. No role deletes an assertion of any type: `assertion_delete_policy` is `USING (false)`.
+
+**Write convention:** A migration or script that seeds configuration must `SET app.current_role = 'admin'` first. An unset role is not an admin.
 
 #### `role_classification_access` — Role Hierarchy
 
@@ -132,7 +155,167 @@ Maps roles to the classification levels they can access. Used by `redact_propert
 
 **Why it exists:** The original `redact_properties()` hardcoded a CASE statement mapping roles to classification arrays. Adding a new role or changing access levels required modifying the function. This table makes the role hierarchy data-driven.
 
-**Key columns:** `role_name` (PK), `classifications` (text array of accessible levels). Roles not in this table default to `['public']` only.
+**Key columns:** `role_name` (PK), `classifications` (text array of accessible levels), `may_write` (boolean, default true). Roles not in this table default to `['public']` only and may not write. One seeded row is reserved: `system:cdc`, described below.
+
+It is also the instance's list of role names. The governance policies below read it to decide whether a session is a named role, so adding a role stays an insert rather than a migration.
+
+#### Who may write — `may_write` and `rye_role_may_write()`
+
+`may_write` says whether a session holding that role may write the seven core
+tables. It is seeded `true` for every role except `viewer`. A new read-only role
+is an `INSERT`; widening a role later is an `UPDATE`. Neither is a migration.
+The table is readable by every session and writable only by an admin.
+
+```
+rye_role_may_write() → boolean
+```
+
+True when `app.current_role` is agent-shaped (`agent:<key>`), or names a
+`role_classification_access` row whose `may_write` is true. False for `viewer`,
+for an unknown role name, and for an unset role. `STABLE`, `SECURITY INVOKER`,
+reads only `app.current_role` and `role_classification_access`, so it is safe in
+a policy on any table.
+
+**The gate is a trigger; the policy conjunct is the second line.** A policy
+alone is not enough: a `SECURITY DEFINER` function owned by a superuser runs
+with RLS switched off for itself, and on the default Docker install a `viewer`
+still accepted a candidate through `accept_assertion()`, closed one through
+`reject_candidate()`, and rewrote `attrs` through `mark_assertion_outcome()`.
+So `rye_gate_may_write()` runs `BEFORE INSERT OR UPDATE OR DELETE ... FOR EACH
+ROW` on each of the seven core tables and raises `42501` when
+`rye_role_may_write()` is false. A trigger fires for a superuser, inside a
+definer function, and on a raw write alike, and it needs no list of helpers to
+keep current.
+
+| table | trigger |
+|---|---|
+| `nodes` | `trg_nodes_gate_may_write` |
+| `edges` | `trg_edges_gate_may_write` |
+| `events` | `trg_events_gate_may_write` |
+| `event_participants` | `trg_event_participants_gate_may_write` |
+| `assertions` | `trg_assertions_gate_may_write` |
+| `assertion_evidence` | `trg_assertion_evidence_gate_may_write` |
+| `artifacts` | `trg_artifacts_gate_may_write` |
+| `node_source_map` | `trg_node_source_map_gate_may_write` |
+
+On `assertions` the name is chosen so the triggers sort
+`trg_assertion_settle_gate`, `trg_assertions_gate_may_write`,
+`trg_assertions_immutable`, `trg_assertions_insert_review` — the settle gate's
+message still wins, and the shape guards still run after the role is settled.
+
+`node_source_map` is in the list because a mapping decides which node a tracked
+table's change events attach to. Before `0026` its insert policy was
+`WITH CHECK (true)` and its update policy asked only that the node be visible,
+so a `viewer` could map a source id onto a node of its choosing and have CDC
+record its own text there, or re-point an operator's mapping. Only a role that
+may write can now insert, update, or delete a mapping, by raw SQL or through
+`link_record()`. Its delete policy still narrows further to `admin` and
+`manager`, as it always did. `system:cdc` gets nothing here: it reads
+`node_source_map` and never writes it.
+
+Every `INSERT`, `UPDATE`, and `DELETE` policy on those eight tables
+carries the same conjunct as the cheaper refusal where the owner is bound by
+RLS. A `viewer` and a session with no role set may read everything they could
+read before and may write nothing, by raw SQL or through any helper, including
+a `SECURITY DEFINER` one. Nothing a `team_member` or an `agent:*` could write to
+an ordinary row is taken away.
+
+**A refusal has two shapes, by owner.** A `BEFORE ROW` trigger only sees rows
+RLS admitted. Where the table owner is bound by RLS a refused `UPDATE` or
+`DELETE` affects zero rows and raises nothing; where the owner is a superuser
+the rows are visited and the trigger raises `42501`. An `INSERT` raises on both.
+A client, and a test, asserts the row rather than one error text.
+
+**`system:cdc`.** `capture_domain_change()` runs inside the application's own
+transaction on a tracked domain table, and an application that does not know
+Rye exists sets no `app.current_role`. Refusing its `record_event()` would fail
+the application's own write; skipping the event would turn off the feature
+`track_table()` exists for. So the CDC trigger resolves the source node under
+the caller's own visibility, then sets `app.current_role` to `system:cdc`
+around its `record_event()` call only and restores the caller's value on every
+exit path, including the exception one. `rye_gate_may_write()` admits
+`system:cdc` for `INSERT` on `events` and `event_participants` and refuses it
+everywhere else, and `merge_nodes()` names it, so a caller who sets it by hand
+can do strictly less than one who sets `team_member`. The event's
+`actor_system` stays `system:cdc` and its `properties.session_role` carries the
+caller's role, or null when none was set.
+
+**The governance structure is admin-only.** A `nodes` row whose `node_type` is
+`onboarding_scope`, and an `edges` row whose `edge_type` is
+`scope_governs_subject`, `scope_governs_source`, or `scope_enables_plugin`, may
+be inserted, updated, or deleted only by a caller whose `app.current_role` is
+`admin`. The test is row-local, so it reads no table and cannot recurse, and
+because RLS applies `USING` to the old row and `WITH CHECK` to the new one, one
+rule covers archiving, ending, deleting, and re-pointing in both directions.
+`scope_status` joins `registry_entry` and `review_policy` on the settle gate, so
+activating a scope is an admin act too. `has_step` is deliberately not gated:
+archiving one still drops a step's *inherited* scope, and a subject that must
+stay governed gets its own `scope_governs_subject` edge.
+
+`create_onboarding_scope()`, `activate_onboarding_scope()`,
+`enable_plugin_for_scope()`, and `record_scope_policy()` keep their signatures
+and bodies and are admin-only because the rows they write are.
+
+**What this protects and what it does not.** Session variables are Rye's only
+authorization, and every rule here reads the role in order to permit. It
+protects deployments where a trusted backend sets the session variables and
+agents that state their role honestly. It is not a defence against a hostile
+caller with a raw connection. Recorded in
+`docs/decisions/0009-who-may-write.md`; migration `0026`.
+
+#### Governance tables — who reads, who writes
+
+Nine tables say which areas exist, who holds authority in them, which channels
+feed them, which agents exist, what each agent may do, and what each agent did:
+`knowledge_domains`, `domain_authorities`, `channel_domain_subscriptions`,
+`domain_claim_policies`, `agent_identities`, `agent_capability_grants`,
+`agent_action_log`, `api_idempotency_keys`, `agent_api_tokens`. RLS is enabled
+and forced on all nine. `app.current_role` decides, and nothing else does.
+
+| table | admin | named role | bound agent | agent-shaped only | unknown |
+|---|---|---|---|---|---|
+| `knowledge_domains` | read all; insert, update, delete | read all | read areas it holds | nothing | nothing |
+| `domain_authorities` | read all; insert, update, delete | read all | read rows of areas it holds | nothing | nothing |
+| `channel_domain_subscriptions` | read all; insert, update, delete | read all | read rows of areas it holds | nothing | nothing |
+| `domain_claim_policies` | read all; insert, update, delete | read all | read rows of areas it holds | nothing | nothing |
+| `agent_identities` | read all; insert, update, delete | read all | read all | read all | nothing |
+| `agent_capability_grants` | read all; insert, update, delete | nothing | read own rows | nothing | nothing |
+| `agent_action_log` | read all; insert only | nothing | read own rows | nothing | nothing |
+| `api_idempotency_keys` | read all; insert, delete | nothing | read own rows | nothing | nothing |
+| `agent_api_tokens` | read all; insert, update, delete | nothing | nothing | nothing | nothing |
+
+**Session shapes.** *Agent-shaped* is `app.current_role` of the form
+`agent:<key>`, decided from the session variable alone. *Bound agent* is an
+agent-shaped session whose key names an `active` `agent_identities` row. Two
+read-only helpers are the definition: `rye_current_agent_key()` returns the key
+or null, and `rye_current_agent_id()` returns the identity id or null. Own rows
+everywhere means `agent_id = rye_current_agent_id()`.
+
+`app.current_user_id` is a label, not a binding. It is the actor string helpers
+write into events, `created_by`, and audit payloads, and no rule reads it. A
+session whose label names a different agent than its role is not an error: the
+label is ignored. Set `app.current_role` to the stored key of the identity whose
+grants you expect.
+
+**Holding an area.** An agent holds an area when it has an active, unexpired row
+in `agent_capability_grants` whose `domain_id` is that area or null. The
+capability name is not part of the rule.
+
+**Writes go through the helpers, and the policies enforce it.**
+`ensure_knowledge_domain`, `subscribe_channel_to_domain`,
+`grant_domain_authority`, `create_agent_identity`, and `grant_agent_capability`
+are `SECURITY INVOKER` with no role check in the body. What stops a non-admin is
+the admin-only write policy on the table each one writes. Two writes are made on
+behalf of a non-admin caller and use the `app.write_path` gate:
+`record_agent_action()` inserting into `agent_action_log`, and
+`agent_create_candidate()` inserting into `api_idempotency_keys`.
+
+`agent_action_log` is append-only for everyone, admin included. There is no
+UPDATE or DELETE policy on it.
+
+Full rules, including the order in which one table's policy may read another,
+are in `contracts/sql-surface.md` and
+`docs/decisions/0007-agent-governance-visibility.md`.
 
 #### `crm_code_counters` — Human-Readable Code Generation
 
@@ -141,6 +324,8 @@ Counters for generating sequential codes in the format `{PREFIX}-{YYMM}-{SEQ}`.
 **Why it exists:** UUIDs are unambiguous but unfriendly. People say "OPP-2403-0042", not a UUID. This table provides concurrency-safe, human-readable codes that reset per month per prefix.
 
 **Key columns:** `prefix`, `year_month`, `next_val`. Used by `generate_crm_code()`.
+
+**RLS (0029):** enabled and forced. Readable by every role. Written only by a role that may write this table (`rye_may_write_table()`, which is `rye_role_may_write()` plus the rule that `system:cdc` only ever writes `events` and `event_participants`), and `trg_crm_code_counters_gate` holds the row to the shape `generate_crm_code()` writes: a new counter starts at `next_val = 2` for the current month and nowhere else, `prefix` and `year_month` never change, `next_val` may only become `next_val + 1`, and no counter is ever deleted — not by an `admin` either, because a restarted series re-issues codes that already name a node. Before this a `viewer` could rewind or delete a counter and jam every code-issuing helper. Drawing a code is therefore a write: a session with no `app.current_role` is refused, and it could not create the task or opportunity the code names anyway.
 
 ---
 
@@ -297,6 +482,8 @@ Trigger function called by `track_table()`. Not called directly. Fires on INSERT
 
 Supports tables with any primary key column — tries `id` first, then falls back to the table's actual PK column via `pg_index` catalog lookup.
 
+**It records under `system:cdc`.** The application's session may set no `app.current_role` at all, which is the normal overlay case, and since `0026` such a session may not write the graph. So the node lookup runs first, under the caller's own role and `app.current_teams` — node visibility is unchanged, and a mapped node the session cannot see still skips silently — and then `app.current_role` is set to `system:cdc` around the `record_event()` call only and restored on every exit path, including a re-raising exception block. A tracked table's writes never fail because of Rye's role rules, and a tracked table always produces its event. `actor_system` stays `system:cdc`; `properties.session_role` carries the caller's role before the swap, or null when none was set.
+
 **Why it exists:** The CDC trigger needs to be generic — it works on any table without knowing its schema. It also needs to be selective — only rows that have been explicitly linked to the graph should produce events.
 
 #### `rye_catalog()`
@@ -383,18 +570,282 @@ scope status, and compiled scope policy when a scope is selected.
 scope is active, Rye selects it automatically. If multiple scopes are active,
 the caller should pass a scope ID.
 
+#### `rye_categories()`
+
+```
+rye_categories(p_scope_id uuid DEFAULT NULL) → jsonb
+```
+
+Returns every category — a node type — in the selected scope, and for each: its
+name, what it means in this organization's words with the assertion that says
+so, the properties observed on its rows with counts and frequencies, the
+relationships it takes part in as source and as target, whether it is on or off
+in the scope, its usage count, and the plugins that declare it. Categories that
+are off are listed as `off`, never omitted. Top level carries `contract_version`,
+`categories`, `category_count`, `empty`, and a `scope` block whose `mode`
+resolves exactly as `rye_agent_context()` resolves it.
+
+Membership with a scope is types in use, types the scope's enabled plugins
+declare, and the names in its `allowed_node_types`; unscoped it is types in use
+plus every catalogued plugin's. A declared type with no rows counts 0. An unknown
+or archived `p_scope_id` answers empty rather than raising, as does a database
+with nothing in it. Everything is computed on read, so an accepted description is
+visible to the next call.
+
+**Why it exists:** An agent that knows only the skills must be able to ask the
+database what kinds of things it holds before trying to add one. Procedure lives
+in git; vocabulary lives in the graph. The jsonb shape is governed by
+`contracts/category-vocabulary.md`.
+
+#### `describe_category()`
+
+```
+describe_category(p_node_type, p_description, p_scope_id DEFAULT NULL, p_actor DEFAULT NULL,
+                  p_basis DEFAULT 'reported', p_evidence DEFAULT NULL, p_confidence DEFAULT 1.0) → uuid
+```
+
+Records what a node type means here. Creates the category node on first use,
+records a `category_described` event, and records a `category_description`
+assertion on that node keyed by the scope's uuid as text, or `default` for the
+organization-wide fallback. Returns the assertion id.
+
+**Why it exists:** A person must be able to change a category's meaning and have
+the next `rye_categories()` call show the new words. Going through
+`record_assertion()` means the scope's review policy applies: under a reviewing
+policy the words land as a candidate and stay invisible until `accept_assertion()`
+promotes them. Corrections are new assertions; nothing is updated in place.
+
+#### Category node convention
+
+A category is represented by a node with `node_type = 'category'`,
+`external_source = 'rye_category'`, and `external_id` equal to the node type it
+stands for — one node per type. `properties` carries
+`{"category_kind": "node_type", "node_type": <name>}`. The node exists only to
+give descriptions a subject; it is never a member of the category list it
+describes except as an ordinary node type in its own right. `describe_category()`
+creates it; `rye_categories()` only reads it.
+
+#### `rye_settlers()`
+
+```
+rye_settlers(p_subject_id uuid, p_claim_type text, p_speaker_id uuid DEFAULT NULL,
+             p_speaker_ref text DEFAULT NULL, p_domain_key text DEFAULT NULL,
+             p_speech_act text DEFAULT NULL, p_as_of timestamptz DEFAULT now(),
+             p_scope_ref text DEFAULT NULL) → jsonb
+```
+
+Who may settle this claim, and which of three steps said so. The steps run in
+order and the first one to produce a settler wins:
+
+1. **Grant.** Rows in `domain_authorities` for the resolved area that are
+   `active`, in effect at `p_as_of`, and whose `claim_types` is empty or
+   contains `p_claim_type`. A grant may narrow to named subjects through
+   `properties.subjects` and `properties.subject_node_types`. If any grant
+   matches, the relationship step does not run — that is how a grant narrows a
+   default as well as adds to one.
+2. **Relationship.** Two selectors, the claim type first and the speech act
+   second, in five ordered rules. The first that applies wins:
+
+   | # | Condition | Default |
+   |---|---|---|
+   | 0 | `p_claim_type` is `reports_to` or `owns` | none, fall through |
+   | 1 | `p_claim_type` is other-set, or `p_speech_act` is `expectation` | manager only; self never |
+   | 2 | `p_speech_act` is recognized | `self_commitment`/`self_report` → self **when the canonical type is self-set**, else none; `statement_about_other` → the subject's manager always, and the subject as well when the canonical type is self-set; `statement_about_thing` → owner; `agreement`/`decision`/`outside_report`/`agent_inference` → none |
+   | 3 | the canonical claim type is self-set | self only |
+   | 4 | otherwise | none, fall through |
+
+   **The subject is returned only when the claim type is positively known to be
+   one a person settles about themselves.** Membership in the self set is the
+   only thing that makes the subject its own settler. No speech act does it on
+   its own: `self_commitment` on a type nobody has declared self-settled
+   returns nobody, not the subject. Unknown is restrictive.
+
+   *Other-set* claim types are claims one person sets on another. The core set
+   is `expectation`, literal in the function and in the contract.
+
+   *Self-set* claim types are ones a person settles about themselves. The core
+   members are `commitment`, `self_commitment`, `self_report` and need no
+   configuration. Beyond them the set is data: an organization declares one
+   with a registry entry keyed `self_settled_type:<canonical assertion type>`
+   whose jsonb value is exactly `true`, written with `record_assertion()` on
+   the core registry node and read with `registry_value()`, the same way
+   `type_alias` entries are written and read:
+
+   ```sql
+   SELECT rye.record_assertion(
+       'registry_entry', '{"value": true}',
+       (SELECT id FROM rye.nodes
+        WHERE external_source = 'rye_registry' AND external_id = 'core'),
+       p_assertion_key := 'self_settled_type:preference',
+       p_basis := 'assumed'
+   );
+   ```
+
+   Any other value, including `false` and null, is not a member. The type in
+   the key is the canonical one — an alias is registered as an alias, not as a
+   second entry. `rye_settler_self_settled()` answers membership.
+
+   **Blindness is always restrictive.** `registry_value()` and
+   `canonical_type()` both read `current_valid_assertions` under the caller's
+   RLS, so a caller who cannot see an alias or a `self_settled_type` entry —
+   because it is classified above their role, or is still a candidate — gets
+   the answer for a claim type it cannot classify, and that answer is never the
+   subject. Two roles can classify the same claim type differently; the
+   difference can only cost a caller settlers, never grant them. There is
+   deliberately no `SECURITY DEFINER` resolver.
+
+   Rule 1 is the point of the ordering: an expectation is set on a person by
+   someone else, so the person it is set on is never its settler, whatever the
+   speech act says. Rule 4 is the other point: there is no union. A null or
+   unrecognized speech act selects nothing and the answer falls through, so a
+   caller gets a smaller answer for saying less, never a larger one.
+
+   Manager is the target of a `reports_to` edge from the subject; owner is the
+   source of an `owns` edge to the subject; both in effect at `p_as_of`.
+3. **Area owner.** `knowledge_domains.owner_node_id` for the resolved area.
+
+`p_claim_type` is the assertion type — one vocabulary, no mapping table. It is
+resolved through `canonical_type('assertion_type', ...)` before anything is
+matched against it, so the organization's type aliases classify a claim the way
+the rest of the schema stores it: alias `requirement` to `expectation` and
+`p_claim_type := 'requirement'` takes rule 1. Grants match on the canonical
+type on both sides, so a grant naming either name covers a call naming either.
+The answer reports the requested type as `claim.claim_type` (with
+`claim.assertion_type` beside it, unchanged) and the resolved one as
+`claim.canonical_claim_type`. Matching is case-sensitive after resolution, a
+null or empty claim type is not resolved at all, and an alias cycle raises
+rather than falling back to the raw string. `Expectation` with no alias of its
+own is a different type in neither set, so it takes the restrictive branch; the
+fix is to register `type_alias:assertion_type:Expectation`.
+`canonical_type()` and not `canonical_type_in_scope()`: the lookup has no
+onboarding-scope argument — `p_scope_ref` matches a grant's `scope_ref` and is
+not a scope node — so it resolves through the `DEFAULT_SCOPE` registry entry,
+exactly as the salience views and 0019 do.
+
+The area resolves from `p_domain_key`, or from the single active
+knowledge domain when it is omitted. `p_as_of` filters effective windows only.
+
+`speech_act_recognized` false is an instruction, not a detail: classify the
+statement, pass the speech act, and look again rather than recording it as
+accepted. The same applies when rule 4 sends the answer to the area owner.
+
+The answer carries `contract_version`, `step` (`grant`, `relationship`,
+`area_owner`, `none`), `settlers`, `settler_count`, `speaker`, `subject`,
+`claim`, `domain`, `as_of`, `advisory`, `excluded_agents`, `setup_gap`, and
+`reason`. `speaker.is_settler` is the field an agent acts on: true means record
+the statement as accepted, false means record a suggestion and ask the settlers
+listed. Each settler carries `kind`, `node_id`, `ref`, `label`, `via`,
+`relationship`, `bound`, and the evidence of where it came from (`grant_id` and
+the grant's windows, or `edge_id` and `edge_type`, or `domain_id`).
+
+An agent identity is never a settler. Candidates are dropped before a step is
+chosen and counted in `excluded_agents`, by two rules in this order:
+
+1. **Fail closed on the prefix.** A ref whose first non-whitespace characters
+   are `agent` followed by a colon is an agent whether or not an
+   `agent_identities` row backs it. A ref that says it is an agent never
+   settles, so a typo or a removed identity cannot become authority. Case does
+   not matter, and neither does whitespace at the front or around the colon —
+   including tab, CR, LF, form feed, vertical tab, and the non-breaking space
+   U+00A0, none of which PostgreSQL's `trim()` strips. So `agent:bot`,
+   `Agent : Bot`, and a tab-prefixed `agent:bot` are one rule.
+2. **Match on the slug, not the spelling.** `create_agent_identity()` stores
+   `rye_slugify_key(agent_key)`, so the stored key for `my-agent` is
+   `my_agent`. Refs are slugified before comparison, which makes `my-agent`,
+   `My Agent`, and `my_agent` one key. An inactive agent identity is still an
+   agent; the `active` flag is not consulted.
+
+A person never loses authority for sharing a slug with an agent: rule 1 reads
+`agent` as a whole word before a colon and rule 2 slugifies the whole ref, so
+`person:my-agent` becomes `person_my_agent` and stays a person. Unicode
+lookalike letters are out of scope — a ref whose `a` is a Cyrillic а is not an
+agent prefix, and like any other unrecognised ref it matches no identity and no
+node and comes back as an unbound settler.
+
+A node is an agent wherever it stands — grant holder, `reports_to` or `owns`
+endpoint, or area owner — when its `node_type` is `agent` or its
+`attrs->>'actor_kind'` is `agent`. A grant whose only holder is an agent is
+therefore not a match and the lookup continues to the next step; an area whose
+`owner_node_id` is an agent answers `step` `none` with `reason`
+`area_owner_is_agent` and `setup_gap` true.
+
+Nothing raises for a missing answer. An area with no owner returns `step` `none`,
+`reason` `area_has_no_owner`, and `setup_gap` true — a setup gap, not an error.
+An unknown area key returns `domain_found` false and `reason` `domain_not_found`.
+Because RLS silence applies, an empty `settlers` never means nobody is
+authorized; it means nobody is authorized and visible to this caller.
+
+**What it does not answer.** It reads no assertion, so it cannot see that a
+claim on this subject is already accepted and cannot tell a new statement from a
+contradiction of an old one. `is_settler` true is not permission to replace an
+accepted claim the caller did not check for. Objections are a later work item;
+this lookup answers who may settle a claim, not who may unsettle one.
+
+**Why it exists:** Every agent must get the same answer to "who may settle
+this", from one lookup rather than from its own judgment. `SECURITY INVOKER` and
+read-only: it writes nothing, not even an audit row, and it refuses nothing. The
+jsonb shape is governed by the "Settlement lookup" section of
+`contracts/sql-surface.md`.
+
+#### `rye_settler_self_settled()`
+
+```
+rye_settler_self_settled(p_canonical_type text) → boolean
+```
+
+True when a canonical assertion type is one a person settles about themselves:
+the core members `commitment`, `self_commitment`, `self_report`, or a type with
+a `self_settled_type:<type>` registry entry whose value is `true`. Read with
+`registry_value()` under the `DEFAULT_SCOPE`, so it obeys scope exactly as
+`type_alias` does, and under the caller's RLS, so an entry a caller cannot see
+is not a member for that caller.
+
+**Why it exists:** it is the single gate on returning the subject as its own
+settler. `SECURITY INVOKER` on purpose — a definer-rights resolver would let a
+configuration row a caller cannot read widen that caller's authority answer.
+
+#### `rye_settler_resolve_ref()` and `rye_settler_is_agent()`
+
+```
+rye_settler_resolve_ref(p_ref text) → uuid
+rye_settler_is_agent(p_ref text, p_node_id uuid) → boolean
+```
+
+Helpers `rye_settlers()` uses. `rye_settler_resolve_ref()` turns a settler ref
+into a visible node id or NULL: a uuid matches by id, an
+`<external_source>:<external_id>` pair matches both columns, anything else
+matches `external_id` alone. `domain_authorities.authority_ref` is free text, so
+most refs resolve to no node; that is not an error, the settler comes back with
+`bound` false. `rye_settler_is_agent()` is the single place the "agents settle
+nothing" rule is implemented: it fails closed on the `agent:` prefix, ignoring
+case and any whitespace at the front or around the colon, and otherwise
+compares `rye_slugify_key()` of the ref against the stored `agent_key`, so no
+spelling of an agent key gets past it.
+
 #### `supersede_assertion()`
 
 ```
 supersede_assertion(p_old_assertion_id, p_new_assertion_type, p_new_subject_node_id, p_new_subject_edge_id, p_new_claim, ...) → uuid
 ```
 
-Replaces an accepted assertion with a new accepted version on exactly the same
-subject, type, and key. Cross-tuple replacement raises an error.
+Replaces an accepted assertion with a new version on exactly the same subject,
+type, and key. Cross-tuple replacement raises an error.
+
+Under a scope where `record_assertion()` would demote the same caller's write —
+`strict`, or `candidates_only` with a basis other than `observed` — the
+replacement lands as a **candidate**, the accepted incumbent is left standing and
+unsuperseded, and the new row carries
+`attrs.review_gate = {"pending": true, "requested_status": "accepted",
+"review_policy": ..., "scope_node_id": ..., "incumbent_assertion_id": ...}`,
+the same shape as `attrs.settle_gate`. A `NOTICE` names the incumbent and the
+policy. The return type does not change: the new row's id comes back either way,
+so read `status` or `attrs->'review_gate'`, or find the row in `review_queue`.
+Accepting the candidate with `accept_assertion()` supersedes the incumbent then.
 
 **Why it exists:** Supersession must close the prior accepted row before
 inserting its replacement. The helper controls that ordering and the narrow
-immutability bypass.
+immutability bypass, and it is where the review policy is applied so that a
+supersession cannot land accepted where an ordinary write would not.
 
 #### `record_assertion()`
 
@@ -411,6 +862,17 @@ Accepted writes apply temporal replacement rules. Helper writes require
 evidence unless `basis = 'assumed'`. New assertion types are normalized with
 `canonical_type()`. When a governing scope exists, its review policy may force
 the row to candidate status.
+
+**A demoted write says so (0030).** Where the review policy demotes the write,
+the candidate carries `attrs.review_gate = {"pending": true,
+"requested_status": "accepted", "review_policy": ..., "scope_node_id": ...,
+"incumbent_assertion_id": null}` — the shape `supersede_assertion()` writes,
+with a null incumbent because this write replaces nothing — and a `NOTICE`
+names the policy and the scope. The return type does not change, so read
+`status` or `attrs->'review_gate'`, or find the row in `review_queue`. Where
+the **settle gate** demotes the write first, the row carries `attrs.settle_gate`
+alone and no `NOTICE` is raised: a configuration write is waiting for an admin,
+not for a settler.
 
 #### `accept_assertion()` / `reject_candidate()`
 
@@ -432,13 +894,25 @@ closes the predecessor's effective window. Profile schedulers are thin wrappers.
 Creates an inferred `digest`, its derivation/source evidence, a validated
 watermark, and a `distillation` event. It propagates maximum source
 classification, rejects empty or mixed-access sources, and validates a digest
-facet against `digest_facets:<node_type>` when configured.
+facet against `digest_facets:<node_type>` when configured. Where the review
+policy demotes the digest to a candidate it carries the same
+`attrs.review_gate` marker `record_assertion()` writes, beside its own
+`watermark` and `distillation_event_id` keys, and raises the same `NOTICE`
+(0030).
 
 #### `resolve_knowledge_gap()`
 
 Supersedes a `knowledge_gap` with a resolved version on the same tuple. The
 claim links the answer assertion; the answer is never used for cross-type
-supersession.
+supersession. It goes through `supersede_assertion()`, so under a demoting
+review policy the resolution is filed as a candidate, the gap stays open and
+stays in `open_gaps` until a settler accepts, and the `knowledge_gap_resolved`
+event carries `pending_review` and `review_policy` in its properties. One limit:
+the resolution is written with basis `inferred`, and `accept_assertion()` refuses
+an inferred candidate displacing a non-inferred accepted incumbent, so a gap
+recorded with another basis produces a candidate a settler cannot accept. Record
+gaps with basis `inferred`, or reject the resolution and record the resolved gap
+with `record_assertion()`.
 
 #### `assertions_as_of()`
 
@@ -458,7 +932,18 @@ governing_scope(p_subject_node_id, p_subject_edge_id,
 ```
 
 Resolves the active scope by direct/inherited subject coverage, type coverage,
-source coverage, then `DEFAULT_SCOPE`. Ambiguous type coverage raises.
+source coverage, then `DEFAULT_SCOPE`. Ambiguous type coverage raises. When more
+than one scope is a candidate inside the branch that matched — which is what a
+cross-scope `merge_nodes()` leaves behind — the **most restrictive review policy
+wins**, `strict` over `candidates_only` over `open`, with `scope.id` only as a
+tie-break. For an edge subject the source endpoint still beats the target
+endpoint before restrictiveness is consulted.
+
+`scope_review_policy_rank(p_scope_id) → int` does the ranking: `0` strict, `1`
+candidates_only, `2` everything else. Unlike `scope_review_policy()` it never
+raises, so one scope carrying an unsupported stored value cannot refuse writes on
+a neighbouring subject; if that scope is the one selected,
+`scope_review_policy()` still raises on it.
 
 #### `canonical_type()`
 
@@ -469,12 +954,34 @@ canonical_type(p_kind, p_value) → text
 Follows `type_alias:<kind>:<deprecated_value>` registry chains. Cycles and
 empty targets raise. Existing stored rows are not rewritten.
 
+#### `settle_gate()`
+
+```
+settle_gate(p_assertion_type) → jsonb
+```
+
+Answers `{assertion_type, gated, allowed_roles, current_role, may_settle}` for
+an assertion type. `STABLE`, `SECURITY INVOKER`, writes nothing. Call it before
+offering to record configuration, so a client can tell the person what will
+happen — the schema returns facts, the sentence a person hears is the client's.
+Matches the stored spelling with no alias resolution, the same way
+`registry_value()` and `governing_scope()` do.
+
+`assertion_settle_roles(p_assertion_type)` returns the allowed roles or `NULL`
+when the type is ungated. `may_settle_assertion_type(p_assertion_type)` is the
+boolean the demotion and the trigger both use. Both read
+`app.current_role` only: no `current_user`, no `pg_has_role()`. An unset role is
+never allowed.
+
 #### `record_prediction()` / `score_due_predictions()`
 
 `record_prediction()` writes a validated inferred prediction with a witness
 and provenance event. `score_due_predictions()` scores unscored predictions
 past their horizon against the outcome tuple returned by `assertions_as_of()`
-and records `prediction_scored` events.
+and records `prediction_scored` events. It returns how many it scored, and it
+scores only predictions the calling session may read; it locks each one inside
+the `assertion_outcome` write-path gate, so the lock is not filtered away by
+`assertion_update_policy` on an install whose owner is not a superuser.
 
 #### `record_pattern()`
 
@@ -498,6 +1005,8 @@ merge_nodes(p_duplicate_id, p_canonical_id, p_merged_by) → void
 Merges a duplicate node into a canonical node. Records a `node_merge` event (before redirecting participations so both nodes are valid participants), then redirects all edges, assertions (with conflict resolution for matching type/key), event participations, artifacts, and source mappings. Archives the duplicate.
 
 **Why it exists:** Cross-source deduplication is a common operational problem. When two nodes represent the same real-world entity, all their graph relationships need to follow the merge. This function handles the full redirect atomically.
+
+**Who may call it.** A merge is irreversible, it moves one subject's history onto another, and it crosses review policies, so it is for people. Four refusals, all `42501` and all raised **before the first `FOR UPDATE`**: a role `rye_role_may_write()` is false for (`merge_nodes requires a role that may write`), an agent-shaped role (`merge_nodes is not available to an agent`; record the duplicate and ask a person), `system:cdc` (`merge_nodes is not available to system:cdc, which only records domain changes`), and a non-admin merging a duplicate that is an `onboarding_scope` node or an endpoint of a live governance edge (`Merging a node a scope governs requires a Rye admin`). The ordering matters: `SELECT ... FOR UPDATE` applies the UPDATE policy as a silent filter, so a gate placed after the lock reported `Duplicate node % not found` about a node the caller could see. After `0026` that message means the node is absent or invisible and nothing else.
 
 #### `agent_node_summary()`
 
@@ -541,6 +1050,8 @@ Merges new properties into an existing node, optionally updates the label, and r
 
 Uses a write-path gate (`app.write_path = 'update_node_properties'`) to temporarily open the `node_update_policy` for agent roles. The gate is set before the `FOR UPDATE` lock (required because `SELECT ... FOR UPDATE` checks both SELECT and UPDATE policies) and cleared immediately after the update.
 
+Two refusals come before the gate and the lock, both `42501`, because RLS would otherwise report a visible node as missing: a role `rye_role_may_write()` is false for, and a non-admin editing an `onboarding_scope` node.
+
 **Why it exists:** Agents can INSERT nodes but the `node_update_policy` blocks direct UPDATE. When a node IS the system of record (no backing domain table), agents need a controlled, audited way to update properties — e.g., recording a new email discovered during conversation. This function provides that path while keeping direct `UPDATE nodes` blocked.
 
 #### `link_records_batch()`
@@ -569,7 +1080,7 @@ Refreshes all profile materialized views (`opportunities_active`, `contacts_dire
 generate_crm_code(p_prefix) → text
 ```
 
-Generates a human-readable code like `OPP-2403-0042`. Uses `INSERT ... ON CONFLICT DO UPDATE` on `crm_code_counters` for concurrency safety.
+Generates a human-readable code like `OPP-2403-0042`. Uses `INSERT ... ON CONFLICT DO UPDATE` on `crm_code_counters` for concurrency safety. `SECURITY INVOKER`: the counter moves as the caller, so the caller must be a role that may write (0029). The sequence is zero-padded to four digits and **widens** past 9999 (`TSK-2609-10000`) rather than truncating, which used to re-issue the 1000th code of the month.
 
 **Why it exists:** UUIDs are identifiers for machines. Codes like `TSK-2403-0187` are identifiers for humans. This function provides sequential, collision-free codes without a global sequence lock.
 
@@ -605,11 +1116,111 @@ BEFORE UPDATE trigger on `nodes`. Sets `updated_at = now()`.
 
 #### `assertions_immutable_guard()`
 
-BEFORE UPDATE trigger on `assertions`. Allows only narrowly gated supersession,
-candidate acceptance, and effective-window narrowing. Basis and content remain
-immutable.
+BEFORE UPDATE trigger on `assertions` (`trg_assertions_immutable`). Decides per
+column from `OLD`, `NEW`, rows that already exist, and `app.current_role`.
+`claim`, `assertion_type`, `assertion_key`, the subject columns, `asserted_at`,
+`effective_at`, `basis`, `confidence` and `created_at` never change. `status`
+moves `candidate` to `accepted` and never back, only on a live candidate that no
+other accepted unsuperseded assertion on the same tuple already covers at
+`greatest(coalesce(effective_at, now()), now())`, and an `agent:*` caller under
+`candidates_only` or `strict`, or on a `pattern_claim`, additionally needs
+`rye.authoritative.promote` for the governing scope. Only `agent:*` callers are
+policy-gated on promotion, because that is the rule `accept_assertion()` applies.
+`superseded_at` is set once
+and, on a row that was accepted, only together with a `superseded_by` naming a
+row of the same type and key. `effective_to` narrows only, to a future instant
+inside the old window. `attrs` changes only as an outcome label: no key dropped,
+no existing key's value changed outside `assertion_outcome_label_keys()`, and
+the result must name an `outcome` in `assertion_outcome_values()`.
+`classification` may only become `assertion_derived_classification()` for the
+row's own derivation evidence.
 
-**Why it exists:** Enforces the append-only contract. Without this, application code could accidentally overwrite assertion content, destroying history.
+It does not read `app.write_path`, because any caller can set it. It reads
+`app.current_role` only in order to refuse, and there is no admin exemption.
+
+**Why it exists:** Enforces the append-only contract, and the acceptance and
+supersession rules with it. The session settings the helpers use are forgeable,
+so the rules are about the row rather than the route.
+
+#### `assertions_insert_review_guard()`
+
+BEFORE INSERT trigger on `assertions` (`trg_assertions_insert_review`). A direct
+`INSERT` of an `accepted` row is judged by the same review policy
+`record_assertion()` applies, and lands as a `candidate` where that policy
+demotes. It first refuses, at any status, a row that does not carry exactly one
+subject: `assertion_has_subject` is `OR`, not `XOR`, so a row with both
+`subject_node_id` and `subject_edge_id` is insertable, `governing_scope()`
+cannot read it, and it would escape the review rules while still appearing as
+the node's row in `current_valid_assertions`. `record_assertion()` already
+refuses that shape, so nothing legitimate writes it. Nothing said is lost.
+
+**There is no exemption.** Migration `0025` left a row accepted when an already
+superseded, formerly accepted assertion on the same tuple named it as its
+replacement, so that the helpers' supersede-then-insert order would not strand
+the key. Migration `0027` removed it, and replaced it with the rule below: every
+helper that inserts an assertion takes the stricter of its two scope
+resolutions, so no helper ends an incumbent the guard is about to demote. A raw
+supersede-and-replace under a demoting policy is therefore refused at commit by
+`trg_assertions_transition_complete` rather than landing accepted — the
+incumbent still stands after the rollback. A `merge_nodes()` copy is judged by
+the canonical node's review policy, as before.
+
+**A helper's policy is the stricter of two resolutions.** This guard resolves
+the governing scope with no witness, because evidence is written after the
+assertion. A witness-free resolution does not merely lose the witness scope: the
+witness branch of `governing_scope()` runs *before* `DEFAULT_SCOPE`, so it falls
+through to `DEFAULT_SCOPE`, which can be stricter. So
+`record_assertion()`, `supersede_assertion()` and `record_distillation()` each
+resolve twice — with their primary witness and with none — and apply the
+stricter policy, through `effective_review_policy()`. The scope *id* they report
+is still the witness-resolved one. Without this, a subject whose only coverage is
+a `scope_governs_source` edge from an `open` scope, on an instance with a
+`strict` `DEFAULT_SCOPE`, had the helper insert accepted and this guard demote
+the same row. A raw `INSERT` is still judged by the witness-free policy alone,
+which is a stated limit in the contract.
+
+**Why it exists:** Rye cannot tell `record_assertion()`'s insert from a raw one,
+so it judges the row. Refusing instead would break `merge_nodes()` and throw
+away what a caller said.
+
+#### `assertions_transition_complete()`
+
+`AFTER INSERT OR UPDATE` constraint trigger on `assertions`
+(`trg_assertions_transition_complete`), `DEFERRABLE INITIALLY DEFERRED`. At
+commit: a promotion has an `assertion_accepted` event naming the row, a
+`superseded_by` names a row with the same `assertion_type` and `assertion_key`,
+and a narrowed `effective_to` has a successor accepted assertion starting where
+the window now ends.
+
+All three **fail closed** under the caller's RLS: a row the writer cannot read
+back is refused, not waved through. Otherwise an accepted assertion could be
+ended by naming a replacement classified above the writer's own read level,
+which is erasure.
+
+**Why it exists:** Those three facts are written after the statement that needs
+them. `supersede_assertion()` must mark the incumbent before inserting the
+replacement, or the partial unique index on accepted unsuperseded rows rejects
+the pair. A client may therefore see one of these refusals at `COMMIT`. The one
+legitimate call this refuses is `record_assertion()` with a `p_classification`
+above the caller's own read level over an accepted incumbent.
+
+#### `assertion_settle_gate_guard()`
+
+BEFORE INSERT OR UPDATE trigger on `assertions` (`trg_assertion_settle_gate`).
+Raises when `app.current_role` is not one of the allowed roles and the write
+would either make an assertion of a `settle`-gated type accepted, or change a
+row of a gated type that is already accepted. Candidates are untouched, so
+outcome labels and classification propagation on them still work for every
+role. `DELETE` needs no branch: `assertion_delete_policy` is `USING (false)`.
+It also refuses, for every caller and at every status, a `registry_entry` whose
+`assertion_key` is `type_alias:assertion_type:<gated type>` (migration `0028`),
+because an alias out of a gated name would route later writes past the gate.
+
+**Why it exists:** `record_assertion()` demotes a non-admin's configuration
+write to a candidate, so every remaining route to an accepted gated row is a
+route that bypasses it. The check lives in one trigger rather than in each
+helper because a trigger fires inside a `SECURITY DEFINER` helper and on a raw
+`INSERT` or `UPDATE` alike, and because the list of helpers grows.
 
 #### `enforce_classification_with_teams()`
 

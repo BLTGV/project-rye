@@ -115,6 +115,15 @@ Before running discovery, ask the user to confirm:
      contributed node, edge, assertion, event, and artifact types.
    - This skill can be installed with:
      `npx skills add BLTGV/project-rye --skill rye-onboarding`
+Steps 1 to 6 below are a Rye admin's, and the session running them sets
+`app.current_role` to `admin`. An `onboarding_scope` node and the
+`scope_governs_subject`, `scope_governs_source`, and `scope_enables_plugin`
+edges may be created, changed, ended, deleted, or re-pointed by nobody else, and
+`create_onboarding_scope()`, `record_scope_policy()`,
+`enable_plugin_for_scope()`, and `activate_onboarding_scope()` are admin-only
+because the rows they write are. An agent runs the interview and drafts the
+answers; the admin records them.
+
 1. Define the `onboarding_scope` in human terms:
    - label and key based on the organizational purpose, project, function, or
      workflow, not the source or retrieval channel
@@ -213,6 +222,15 @@ worse than either wording alone, because downstream consumers cannot tell
 which is authoritative. After a revision, re-run `compile_scope_policy` and
 verify the boundary reads consistently from both the node and the current
 assertions.
+
+A revision is a Rye admin's, in one admin session: the scope node itself and its
+governance edges accept no other role, `review_policy` and `scope_status` are
+settled by an admin alone, and a caller who is not an admin is refused by
+`supersede_assertion()` on those two types rather than quietly demoted. Check
+each supersession landed before calling the
+revision done — on an ungated scope assertion, a review policy that would demote
+the write files a suggestion and leaves the old wording standing, which is the
+split brain this section is about.
 
 ## Fresh Setup Path
 

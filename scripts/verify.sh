@@ -132,8 +132,190 @@ BEGIN
     RAISE EXCEPTION 'record_pattern function missing';
   END IF;
 
+  IF to_regprocedure('rye.rye_categories(uuid)') IS NULL THEN
+    RAISE EXCEPTION 'rye_categories function missing';
+  END IF;
+  IF to_regprocedure('rye.describe_category(text,text,uuid,text,text,jsonb[],numeric)') IS NULL THEN
+    RAISE EXCEPTION 'describe_category function missing';
+  END IF;
+
+  IF to_regprocedure('rye.rye_settlers(uuid,text,uuid,text,text,text,timestamp with time zone,text)') IS NULL THEN
+    RAISE EXCEPTION 'rye_settlers function missing';
+  END IF;
+  IF to_regprocedure('rye.rye_settler_resolve_ref(text)') IS NULL THEN
+    RAISE EXCEPTION 'rye_settler_resolve_ref function missing';
+  END IF;
+  IF to_regprocedure('rye.rye_settler_is_agent(text,uuid)') IS NULL THEN
+    RAISE EXCEPTION 'rye_settler_is_agent function missing';
+  END IF;
+
   IF to_regprocedure('rye.mark_assertion_superseded(uuid,uuid)') IS NULL THEN
     RAISE EXCEPTION 'mark_assertion_superseded function missing';
+  END IF;
+
+  -- Configuration writes need an admin: the gate is data, one read function,
+  -- and one trigger that no SECURITY DEFINER helper escapes.
+  IF to_regprocedure('rye.settle_gate(text)') IS NULL THEN
+    RAISE EXCEPTION 'settle_gate function missing';
+  END IF;
+  IF to_regprocedure('rye.assertion_settle_roles(text)') IS NULL THEN
+    RAISE EXCEPTION 'assertion_settle_roles function missing';
+  END IF;
+  IF to_regprocedure('rye.may_settle_assertion_type(text)') IS NULL THEN
+    RAISE EXCEPTION 'may_settle_assertion_type function missing';
+  END IF;
+
+  IF NOT EXISTS (
+      SELECT 1
+      FROM pg_trigger t
+      JOIN pg_class c ON c.oid = t.tgrelid
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = v_schema
+        AND c.relname = 'assertions'
+        AND t.tgname = 'trg_assertion_settle_gate'
+        AND NOT t.tgisinternal
+  ) THEN
+    RAISE EXCEPTION 'trg_assertion_settle_gate is missing from assertions';
+  END IF;
+
+  IF EXISTS (
+      SELECT required.assertion_type
+      FROM (VALUES ('registry_entry'), ('review_policy')) required(assertion_type)
+      WHERE NOT EXISTS (
+          SELECT 1
+          FROM rye.assertion_type_access ata
+          WHERE ata.assertion_type = required.assertion_type
+            AND ata.operation = 'settle'
+            AND 'admin' = ANY(ata.allowed_roles)
+      )
+  ) THEN
+    RAISE EXCEPTION 'configuration assertion types are not settle-gated to admin';
+  END IF;
+
+  -- The row is the gate, not the route: the shape rules are triggers, so a
+  -- missing trigger is a missing rule. The deferred one must stay deferred:
+  -- the helpers point an incumbent at a replacement they insert afterwards.
+  IF NOT EXISTS (
+      SELECT 1
+      FROM pg_trigger t
+      JOIN pg_class c ON c.oid = t.tgrelid
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = v_schema
+        AND c.relname = 'assertions'
+        AND t.tgname = 'trg_assertions_insert_review'
+        AND NOT t.tgisinternal
+  ) THEN
+    RAISE EXCEPTION 'trg_assertions_insert_review is missing from assertions';
+  END IF;
+
+  IF NOT EXISTS (
+      SELECT 1
+      FROM pg_trigger t
+      JOIN pg_class c ON c.oid = t.tgrelid
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = v_schema
+        AND c.relname = 'assertions'
+        AND t.tgname = 'trg_assertions_transition_complete'
+        AND NOT t.tgisinternal
+        AND t.tgdeferrable
+        AND t.tginitdeferred
+  ) THEN
+    RAISE EXCEPTION 'trg_assertions_transition_complete is missing or not initially deferred';
+  END IF;
+
+  IF NOT EXISTS (
+      SELECT 1
+      FROM pg_trigger t
+      JOIN pg_class c ON c.oid = t.tgrelid
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = v_schema
+        AND c.relname = 'assertions'
+        AND t.tgname = 'trg_assertions_immutable'
+        AND NOT t.tgisinternal
+  ) THEN
+    RAISE EXCEPTION 'trg_assertions_immutable is missing from assertions';
+  END IF;
+
+  IF to_regprocedure('rye.assertion_outcome_values()') IS NULL
+     OR to_regprocedure('rye.assertion_outcome_label_keys()') IS NULL
+     OR to_regprocedure('rye.assertion_derived_classification(uuid)') IS NULL
+  THEN
+    RAISE EXCEPTION 'assertion lifecycle gate helper functions are missing';
+  END IF;
+
+  -- Review policy holds on every route (0027). Three facts, each checked
+  -- where it lives: the ranking helper exists, governing_scope() orders by
+  -- it rather than by uuid alone, supersede_assertion() can write the
+  -- review_gate marker, and the 0025 insert exemption is gone.
+  IF to_regprocedure('rye.scope_review_policy_rank(uuid)') IS NULL THEN
+    RAISE EXCEPTION 'scope_review_policy_rank function missing';
+  END IF;
+
+  IF to_regprocedure('rye.effective_review_policy(uuid,uuid,text,uuid)') IS NULL THEN
+    RAISE EXCEPTION 'effective_review_policy function missing';
+  END IF;
+
+  -- Every helper that inserts an assertion takes the stricter of its two
+  -- scope resolutions, or the insert guard can demote a row the helper meant
+  -- to keep accepted and the commit-time check then refuses the transaction.
+  IF EXISTS (
+      SELECT required.name
+      FROM (VALUES ('record_assertion'), ('supersede_assertion'), ('record_distillation'))
+           required(name)
+      WHERE NOT EXISTS (
+          SELECT 1 FROM pg_proc p
+          JOIN pg_namespace n ON n.oid = p.pronamespace
+          WHERE n.nspname = v_schema
+            AND p.proname = required.name
+            AND p.prosrc LIKE '%effective_review_policy%'
+      )
+  ) THEN
+    RAISE EXCEPTION 'an assertion-inserting helper does not take the stricter of its two scope resolutions';
+  END IF;
+
+  IF NOT EXISTS (
+      SELECT 1 FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = v_schema
+        AND p.proname = 'governing_scope'
+        AND p.prosrc LIKE '%scope_review_policy_rank%'
+  ) THEN
+    RAISE EXCEPTION 'governing_scope does not order by review policy restrictiveness';
+  END IF;
+
+  IF NOT EXISTS (
+      SELECT 1 FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = v_schema
+        AND p.proname = 'supersede_assertion'
+        AND p.prosrc LIKE '%review_gate%'
+  ) THEN
+    RAISE EXCEPTION 'supersede_assertion does not apply the review policy';
+  END IF;
+
+  -- 0030: the other two helpers that demote say so, in the same marker.
+  IF EXISTS (
+      SELECT required.name
+      FROM (VALUES ('record_assertion'), ('record_distillation')) required(name)
+      WHERE NOT EXISTS (
+          SELECT 1 FROM pg_proc p
+          JOIN pg_namespace n ON n.oid = p.pronamespace
+          WHERE n.nspname = v_schema
+            AND p.proname = required.name
+            AND p.prosrc LIKE '%review_gate%'
+      )
+  ) THEN
+    RAISE EXCEPTION 'record_assertion or record_distillation does not mark a review-policy demotion';
+  END IF;
+
+  IF EXISTS (
+      SELECT 1 FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = v_schema
+        AND p.proname = 'assertions_insert_review_guard'
+        AND p.prosrc LIKE '%superseded_by = NEW.id%'
+  ) THEN
+    RAISE EXCEPTION 'the 0025 insert exemption is still present in assertions_insert_review_guard';
   END IF;
 
   IF NOT EXISTS (
@@ -158,6 +340,371 @@ BEGIN
         AND c.relforcerowsecurity = true
   ) THEN
     RAISE EXCEPTION 'assertion_evidence RLS is not enabled+forced';
+  END IF;
+
+  -- The last two supporting tables to get RLS (0029). AGENTS.md promises it
+  -- on all of them, and these two were the exceptions.
+  IF EXISTS (
+      SELECT 1
+      FROM (VALUES ('crm_code_counters'), ('node_merges')) AS t(relname)
+      WHERE NOT EXISTS (
+          SELECT 1
+          FROM pg_class c
+          JOIN pg_namespace n ON n.oid = c.relnamespace
+          WHERE n.nspname = v_schema
+            AND c.relname = t.relname
+            AND c.relrowsecurity = true
+            AND c.relforcerowsecurity = true
+      )
+  ) THEN
+    RAISE EXCEPTION 'crm_code_counters and node_merges must both have RLS enabled+forced';
+  END IF;
+
+  IF to_regprocedure('rye.rye_may_write_table(text)') IS NULL THEN
+    RAISE EXCEPTION 'rye_may_write_table function missing';
+  END IF;
+  IF to_regprocedure('rye.rye_crm_code_counter_gate()') IS NULL THEN
+    RAISE EXCEPTION 'rye_crm_code_counter_gate function missing';
+  END IF;
+  IF to_regprocedure('rye.rye_node_merge_gate()') IS NULL THEN
+    RAISE EXCEPTION 'rye_node_merge_gate function missing';
+  END IF;
+  IF EXISTS (
+      SELECT 1
+      FROM (VALUES
+          ('trg_crm_code_counters_gate', 'crm_code_counters'),
+          ('trg_node_merges_gate', 'node_merges')
+      ) AS t(tgname, relname)
+      WHERE NOT EXISTS (
+          SELECT 1
+          FROM pg_trigger tg
+          JOIN pg_class c ON c.oid = tg.tgrelid
+          JOIN pg_namespace n ON n.oid = c.relnamespace
+          WHERE n.nspname = v_schema
+            AND c.relname = t.relname
+            AND tg.tgname = t.tgname
+            AND NOT tg.tgisinternal
+      )
+  ) THEN
+    RAISE EXCEPTION 'trg_crm_code_counters_gate or trg_node_merges_gate is missing';
+  END IF;
+
+  -- Who may write: the role list is the write list, and the governance
+  -- structure is admin-only. One column, one function, and one conjunct on
+  -- every write policy of the seven core tables.
+  IF to_regprocedure('rye.rye_role_may_write()') IS NULL THEN
+    RAISE EXCEPTION 'rye_role_may_write function missing';
+  END IF;
+  IF to_regprocedure('rye.rye_gate_may_write()') IS NULL THEN
+    RAISE EXCEPTION 'rye_gate_may_write function missing';
+  END IF;
+
+  -- The gate is a trigger, because an RLS conjunct does not run inside a
+  -- SECURITY DEFINER function owned by a superuser. One on each core table.
+  IF EXISTS (
+      SELECT required.tablename
+      FROM (VALUES
+          ('nodes', 'trg_nodes_gate_may_write'),
+          ('edges', 'trg_edges_gate_may_write'),
+          ('events', 'trg_events_gate_may_write'),
+          ('event_participants', 'trg_event_participants_gate_may_write'),
+          ('assertions', 'trg_assertions_gate_may_write'),
+          ('assertion_evidence', 'trg_assertion_evidence_gate_may_write'),
+          ('artifacts', 'trg_artifacts_gate_may_write'),
+          ('node_source_map', 'trg_node_source_map_gate_may_write')
+      ) required(tablename, tgname)
+      WHERE NOT EXISTS (
+          SELECT 1
+          FROM pg_trigger t
+          JOIN pg_class c ON c.oid = t.tgrelid
+          JOIN pg_namespace ns ON ns.oid = c.relnamespace
+          WHERE ns.nspname = v_schema
+            AND c.relname = required.tablename
+            AND t.tgname = required.tgname
+            AND NOT t.tgisinternal
+            AND t.tgtype & 1 = 1   -- FOR EACH ROW
+            AND t.tgtype & 2 = 2   -- BEFORE
+            AND t.tgtype & 28 = 28 -- INSERT, DELETE, UPDATE
+      )
+  ) THEN
+    RAISE EXCEPTION 'one or more who-may-write gate triggers are missing or are not BEFORE INSERT OR UPDATE OR DELETE FOR EACH ROW';
+  END IF;
+
+  -- On assertions the order is load-bearing: the settle gate's message is
+  -- asserted by tests/conformance/30_configuration_gate.sql, and the shape
+  -- guards must run after the role is settled.
+  IF NOT (
+      (SELECT string_agg(t.tgname, ',' ORDER BY t.tgname)
+       FROM pg_trigger t
+       JOIN pg_class c ON c.oid = t.tgrelid
+       JOIN pg_namespace ns ON ns.oid = c.relnamespace
+       WHERE ns.nspname = v_schema
+         AND c.relname = 'assertions'
+         AND NOT t.tgisinternal
+         AND t.tgname IN ('trg_assertion_settle_gate', 'trg_assertions_gate_may_write',
+                          'trg_assertions_immutable', 'trg_assertions_insert_review'))
+      = 'trg_assertion_settle_gate,trg_assertions_gate_may_write,trg_assertions_immutable,trg_assertions_insert_review'
+  ) THEN
+    RAISE EXCEPTION 'the assertions triggers do not sort settle gate, may-write gate, immutable, insert review';
+  END IF;
+
+  -- The reserved CDC role, so a tracked domain table still records its event
+  -- when the application's session sets no Rye role.
+  IF NOT EXISTS (
+      SELECT 1 FROM rye.role_classification_access
+      WHERE role_name = 'system:cdc'
+        AND may_write = true
+        AND classifications = ARRAY['public']
+  ) THEN
+    RAISE EXCEPTION 'the system:cdc role row is missing or is not may_write true with public classification only';
+  END IF;
+
+  IF NOT EXISTS (
+      SELECT 1
+      FROM information_schema.columns c
+      WHERE c.table_schema = v_schema
+        AND c.table_name = 'role_classification_access'
+        AND c.column_name = 'may_write'
+  ) THEN
+    RAISE EXCEPTION 'role_classification_access.may_write column missing';
+  END IF;
+
+  IF NOT EXISTS (
+      SELECT 1 FROM rye.role_classification_access
+      WHERE role_name = 'viewer' AND may_write = false
+  ) THEN
+    RAISE EXCEPTION 'the viewer role is not seeded read-only (may_write false)';
+  END IF;
+
+  IF EXISTS (
+      SELECT required.tablename, required.cmd
+      FROM (VALUES
+          ('nodes', 'INSERT'), ('nodes', 'UPDATE'), ('nodes', 'DELETE'),
+          ('edges', 'INSERT'), ('edges', 'UPDATE'), ('edges', 'DELETE'),
+          ('events', 'INSERT'), ('events', 'UPDATE'), ('events', 'DELETE'),
+          ('event_participants', 'INSERT'),
+          ('event_participants', 'UPDATE'),
+          ('event_participants', 'DELETE'),
+          ('assertions', 'INSERT'), ('assertions', 'UPDATE'), ('assertions', 'DELETE'),
+          ('assertion_evidence', 'INSERT'),
+          ('assertion_evidence', 'UPDATE'),
+          ('assertion_evidence', 'DELETE'),
+          ('artifacts', 'INSERT'), ('artifacts', 'UPDATE'), ('artifacts', 'DELETE'),
+          ('node_source_map', 'INSERT'), ('node_source_map', 'UPDATE'), ('node_source_map', 'DELETE')
+      ) required(tablename, cmd)
+      WHERE NOT EXISTS (
+          SELECT 1
+          FROM pg_policies p
+          WHERE p.schemaname = v_schema
+            AND p.tablename = required.tablename
+            AND p.cmd = required.cmd
+            AND (coalesce(p.qual, '') || coalesce(p.with_check, '')) LIKE '%rye_role_may_write%'
+      )
+  ) THEN
+    RAISE EXCEPTION
+      'one or more core write policies do not carry the rye_role_may_write conjunct: %',
+      (SELECT string_agg(required.tablename || ' ' || required.cmd, ', ')
+       FROM (VALUES
+           ('nodes', 'INSERT'), ('nodes', 'UPDATE'), ('nodes', 'DELETE'),
+           ('edges', 'INSERT'), ('edges', 'UPDATE'), ('edges', 'DELETE'),
+           ('events', 'INSERT'), ('events', 'UPDATE'), ('events', 'DELETE'),
+           ('event_participants', 'INSERT'),
+           ('event_participants', 'UPDATE'),
+           ('event_participants', 'DELETE'),
+           ('assertions', 'INSERT'), ('assertions', 'UPDATE'), ('assertions', 'DELETE'),
+           ('assertion_evidence', 'INSERT'),
+           ('assertion_evidence', 'UPDATE'),
+           ('assertion_evidence', 'DELETE'),
+           ('artifacts', 'INSERT'), ('artifacts', 'UPDATE'), ('artifacts', 'DELETE'),
+           ('node_source_map', 'INSERT'), ('node_source_map', 'UPDATE'), ('node_source_map', 'DELETE')
+       ) required(tablename, cmd)
+       WHERE NOT EXISTS (
+           SELECT 1
+           FROM pg_policies p
+           WHERE p.schemaname = v_schema
+             AND p.tablename = required.tablename
+             AND p.cmd = required.cmd
+             AND (coalesce(p.qual, '') || coalesce(p.with_check, '')) LIKE '%rye_role_may_write%'
+       ));
+  END IF;
+
+  -- The governance structure is admin-only, and the test is row-local.
+  IF EXISTS (
+      SELECT 1
+      FROM (VALUES ('INSERT'), ('UPDATE'), ('DELETE')) required(cmd)
+      WHERE NOT EXISTS (
+          SELECT 1
+          FROM pg_policies p
+          WHERE p.schemaname = v_schema
+            AND p.tablename = 'nodes'
+            AND p.cmd = required.cmd
+            AND (coalesce(p.qual, '') || coalesce(p.with_check, '')) LIKE '%onboarding_scope%'
+      )
+  ) THEN
+    RAISE EXCEPTION 'the nodes write policies do not gate onboarding_scope rows to an admin';
+  END IF;
+
+  IF EXISTS (
+      SELECT 1
+      FROM (VALUES ('INSERT'), ('UPDATE'), ('DELETE')) required(cmd)
+      WHERE NOT EXISTS (
+          SELECT 1
+          FROM pg_policies p
+          WHERE p.schemaname = v_schema
+            AND p.tablename = 'edges'
+            AND p.cmd = required.cmd
+            AND (coalesce(p.qual, '') || coalesce(p.with_check, '')) LIKE '%scope_governs_subject%'
+            AND (coalesce(p.qual, '') || coalesce(p.with_check, '')) LIKE '%scope_governs_source%'
+            AND (coalesce(p.qual, '') || coalesce(p.with_check, '')) LIKE '%scope_enables_plugin%'
+      )
+  ) THEN
+    RAISE EXCEPTION 'the edges write policies do not gate the three governance edge types to an admin';
+  END IF;
+
+  IF NOT EXISTS (
+      SELECT 1
+      FROM rye.assertion_type_access ata
+      WHERE ata.assertion_type = 'scope_status'
+        AND ata.operation = 'settle'
+        AND 'admin' = ANY(ata.allowed_roles)
+  ) THEN
+    RAISE EXCEPTION 'scope_status is not settle-gated to admin';
+  END IF;
+
+  IF to_regprocedure('rye.rye_current_agent_key()') IS NULL THEN
+    RAISE EXCEPTION 'rye_current_agent_key function missing';
+  END IF;
+  IF to_regprocedure('rye.rye_current_agent_id()') IS NULL THEN
+    RAISE EXCEPTION 'rye_current_agent_id function missing';
+  END IF;
+
+  -- The nine governance tables: RLS enabled AND forced on every one.
+  IF EXISTS (
+      SELECT required.table_name
+      FROM (VALUES
+          ('knowledge_domains'),
+          ('domain_authorities'),
+          ('channel_domain_subscriptions'),
+          ('domain_claim_policies'),
+          ('agent_identities'),
+          ('agent_capability_grants'),
+          ('agent_action_log'),
+          ('api_idempotency_keys'),
+          ('agent_api_tokens')
+      ) required(table_name)
+      WHERE NOT EXISTS (
+          SELECT 1
+          FROM pg_class c
+          JOIN pg_namespace n ON n.oid = c.relnamespace
+          WHERE n.nspname = v_schema
+            AND c.relname = required.table_name
+            AND c.relrowsecurity = true
+            AND c.relforcerowsecurity = true
+      )
+  ) THEN
+    RAISE EXCEPTION 'one or more governance tables are not RLS enabled+forced: %',
+      (SELECT string_agg(required.table_name, ', ')
+       FROM (VALUES
+           ('knowledge_domains'),
+           ('domain_authorities'),
+           ('channel_domain_subscriptions'),
+           ('domain_claim_policies'),
+           ('agent_identities'),
+           ('agent_capability_grants'),
+           ('agent_action_log'),
+           ('api_idempotency_keys'),
+           ('agent_api_tokens')
+       ) required(table_name)
+       WHERE NOT EXISTS (
+           SELECT 1
+           FROM pg_class c
+           JOIN pg_namespace n ON n.oid = c.relnamespace
+           WHERE n.nspname = v_schema
+             AND c.relname = required.table_name
+             AND c.relrowsecurity = true
+             AND c.relforcerowsecurity = true
+       ));
+  END IF;
+
+  -- Every governance policy named by contracts/sql-surface.md is installed.
+  IF EXISTS (
+      SELECT required.policyname
+      FROM (VALUES
+          ('knowledge_domains', 'knowledge_domains_read_policy'),
+          ('knowledge_domains', 'knowledge_domains_insert_policy'),
+          ('knowledge_domains', 'knowledge_domains_update_policy'),
+          ('knowledge_domains', 'knowledge_domains_delete_policy'),
+          ('domain_authorities', 'domain_authorities_read_policy'),
+          ('domain_authorities', 'domain_authorities_insert_policy'),
+          ('domain_authorities', 'domain_authorities_update_policy'),
+          ('domain_authorities', 'domain_authorities_delete_policy'),
+          ('channel_domain_subscriptions', 'channel_domain_subscriptions_read_policy'),
+          ('channel_domain_subscriptions', 'channel_domain_subscriptions_insert_policy'),
+          ('channel_domain_subscriptions', 'channel_domain_subscriptions_update_policy'),
+          ('channel_domain_subscriptions', 'channel_domain_subscriptions_delete_policy'),
+          ('domain_claim_policies', 'domain_claim_policies_read_policy'),
+          ('domain_claim_policies', 'domain_claim_policies_insert_policy'),
+          ('domain_claim_policies', 'domain_claim_policies_update_policy'),
+          ('domain_claim_policies', 'domain_claim_policies_delete_policy'),
+          ('agent_identities', 'agent_identities_read_policy'),
+          ('agent_identities', 'agent_identities_insert_policy'),
+          ('agent_identities', 'agent_identities_update_policy'),
+          ('agent_identities', 'agent_identities_delete_policy'),
+          ('agent_capability_grants', 'agent_capability_grants_read_policy'),
+          ('agent_capability_grants', 'agent_capability_grants_insert_policy'),
+          ('agent_capability_grants', 'agent_capability_grants_update_policy'),
+          ('agent_capability_grants', 'agent_capability_grants_delete_policy'),
+          ('agent_action_log', 'agent_action_log_read_policy'),
+          ('agent_action_log', 'agent_action_log_insert_policy'),
+          ('api_idempotency_keys', 'api_idempotency_keys_read_policy'),
+          ('api_idempotency_keys', 'api_idempotency_keys_insert_policy'),
+          ('api_idempotency_keys', 'api_idempotency_keys_delete_policy'),
+          ('agent_api_tokens', 'agent_api_tokens_admin_read'),
+          ('agent_api_tokens', 'agent_api_tokens_admin_write')
+      ) required(tablename, policyname)
+      WHERE NOT EXISTS (
+          SELECT 1
+          FROM pg_policies p
+          WHERE p.schemaname = v_schema
+            AND p.tablename = required.tablename
+            AND p.policyname = required.policyname
+      )
+  ) THEN
+    RAISE EXCEPTION 'one or more governance RLS policies are missing';
+  END IF;
+
+  -- agent_action_log is append-only for everyone, admin included.
+  IF EXISTS (
+      SELECT 1
+      FROM pg_policies
+      WHERE schemaname = v_schema
+        AND tablename = 'agent_action_log'
+        AND cmd IN ('UPDATE', 'DELETE')
+  ) THEN
+    RAISE EXCEPTION 'agent_action_log has an UPDATE or DELETE policy; it must be append-only';
+  END IF;
+
+  -- The two writes made on a non-admin's behalf use the named write_path gate.
+  IF NOT EXISTS (
+      SELECT 1
+      FROM pg_policies
+      WHERE schemaname = v_schema
+        AND tablename = 'agent_action_log'
+        AND policyname = 'agent_action_log_insert_policy'
+        AND coalesce(with_check, '') LIKE '%record_agent_action%'
+  ) THEN
+    RAISE EXCEPTION 'agent_action_log_insert_policy does not admit the record_agent_action gate';
+  END IF;
+
+  IF NOT EXISTS (
+      SELECT 1
+      FROM pg_policies
+      WHERE schemaname = v_schema
+        AND tablename = 'api_idempotency_keys'
+        AND policyname = 'api_idempotency_keys_insert_policy'
+        AND coalesce(with_check, '') LIKE '%agent_create_candidate%'
+  ) THEN
+    RAISE EXCEPTION 'api_idempotency_keys_insert_policy does not admit the agent_create_candidate gate';
   END IF;
 
   IF NOT EXISTS (

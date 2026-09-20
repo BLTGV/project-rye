@@ -10,17 +10,566 @@ description: Operate Rye data safely for LLM agents. Use when implementing or ex
 Before any query, set the session context. On stateless connections (Supabase MCP, serverless, transaction-mode poolers), this must be done in **every call**:
 
 ```sql
-SELECT set_config('app.current_role', 'admin', false);
+SELECT set_config('app.current_role', 'agent:sales-intake', false);
 SELECT set_config('app.current_user_id', 'user-123', false);
 SELECT set_config('app.current_teams', 'engineering', false);
 ```
 
-Without this, RLS will block access. Use `set_config()` (not `SET` syntax) for portability.
+State your own role, `agent:<your key>`, and state it before every write. A
+session with no role set, and a session set to `viewer`, can read and can write
+nothing: every insert, update, and delete on nodes, edges, events, participants,
+assertions, evidence, artifacts, and source mappings is refused, through a
+helper exactly as by hand. `admin` is a person's role, not yours. Use
+`set_config()` (not `SET` syntax) for portability.
 
 ## Orient
 
 1. Run `SELECT rye_catalog()` to see what's in the instance — node types, edge types, assertion types, tracked tables, and totals.
 2. Use `agent_node_summary(node_id, max_items)` for compact context on a specific node.
+3. Run the category discovery below before proposing any node.
+
+## Discover Categories Before You Write
+
+Before proposing any node, ask the database what kinds of things it already
+holds. Procedure ships with the skill; vocabulary lives in the graph. The
+reply's shape is `contracts/category-vocabulary.md`.
+
+```bash
+./scripts/rye categories --scope <uuid-or-key> --json
+```
+
+Over SQL or the API this is `rye_categories(p_scope_id)`; omit the argument to
+read unscoped. For each entry in `categories`:
+
+- `name` — the node type. Reuse an existing name over a near-synonym.
+- `description` — what the type means in this organization's words, or `null`
+  when nobody has said. Do not substitute your own reading for `null`.
+- `properties.observed` — `[{key, count, frequency}]` present on non-archived
+  nodes of the type. Shape your proposal to these keys; low `frequency` means
+  optional in practice. `properties.required` is `[]` in v0.3
+  (`required_source` `"none"`); honor it if it is ever non-empty.
+- `relationships.as_source` / `.as_target` — `[{edge_type, other_types,
+  count}]`. Prefer an edge type already used between these types.
+- `enabled` — `on`, `off`, or `unscoped`. Treat `off` as not writable here:
+  `validate_candidate_against_scope()` refuses it and names the policy that
+  blocked it. Off categories are listed, not omitted, so absence never means
+  disabled.
+
+At the top level: `empty` `true` means no categories yet — do not invent a
+type; raise it as an open question for a person, or record a `knowledge_gap`.
+`scope.scope_found` `false` means the scope you named did not resolve, so the
+empty reply says nothing about the graph. `scope.type_policy` `missing` means
+the scope has no current `allowed_node_types` claim, so every category reads
+`off`.
+
+Never create a category. A new node type is a person's decision: propose it and
+say why the existing ones do not fit. "Category" is the business sense, what
+kind of thing this is; it is not `classification`, which is who may see it.
+Ignore reply keys you do not recognize — the shape is additive.
+
+## Ask Who May Settle It Before You Accept
+
+Before you record any statement as accepted, ask who may settle that claim.
+One lookup answers it, and every agent gets the same answer: a recorded grant
+for that kind of claim, then the relationship (the person themselves, their
+manager, the owner of the thing), then the owner of the area. The reply's
+shape is the settlement lookup section of `contracts/sql-surface.md`.
+
+```bash
+./scripts/rye settlers --subject <uuid> --claim <assertion-type> \
+  --speaker <uuid> --speech-act <act> --domain <key> --json
+```
+
+Over SQL or the API this is `rye_settlers(p_subject_id, p_claim_type,
+p_speaker_id, p_speaker_ref, p_domain_key, p_speech_act, p_as_of,
+p_scope_ref)`. Pass `--speaker-ref <source-identity>` instead of `--speaker`
+when the speaker is a channel account with no person node. Pass `--as-of` to
+reconstruct a past answer.
+
+Always pass both `--claim` and `--speech-act`. They are two different
+selectors and the answer depends on both.
+
+`p_claim_type` is the claim's `assertion_type` verbatim. Two sets of claim
+types carry meaning of their own, both tested on the **canonical** type, after
+alias resolution:
+
+- **Other-set**, a claim one person sets on another. The core set is
+  `expectation`.
+- **Self-set**, a claim a person settles about themselves. The core set is
+  `commitment`, `self_commitment`, `self_report`, plus any type declared as
+  self-settled in this instance.
+
+`p_speech_act` is your classification of what was said. The recognized values
+are `self_commitment`, `self_report`, `expectation`, `statement_about_other`,
+`statement_about_thing`, `agreement`, `decision`, `outside_report`, and
+`agent_inference`.
+
+**The kind of claim decides first, and the speech act second.** An expectation
+is set on a person by someone else, so it is always the manager's call and the
+person it is set on is never returned as its settler — whatever speech act you
+pass, and whether you pass one at all. Saying less never widens the answer: a
+missing or unrecognized speech act selects no relationship default and falls
+through to the owner of the area.
+
+**The subject is returned only when the claim type is positively in the self
+set.** No speech act makes a person their own settler on its own. Pass
+`self_commitment` on a type nobody has declared self-settled and the answer is
+nobody local, not the speaker. Unknown is restrictive, and so is blindness: if
+you cannot see the alias or the declaration, you get the stricter answer, never
+a wider one. Matching is case-sensitive and case is not folded — `Expectation`
+with no alias registered is a different type in neither set.
+
+### Prefer a declared type over one you invent
+
+Run the category discovery request before you choose a claim type and reuse a
+type it lists. A type you invent, or a known one spelled your way, is in
+neither set, so a claim about the speaker routes to the owner of the area
+instead of settling on their word. For a lone person that owner is themselves
+and it costs nothing. On a team it costs one question.
+
+If a person tells you the type they want is their own call to make, that is a
+change to how Rye is set up here, and only a Rye admin settles it. Record what
+they said, never assume it. See "How Rye is set up here is an admin's call"
+below.
+
+`speech_act_recognized` is false when you passed a value outside the
+recognized set. **Do not record anything as accepted while it is false.**
+Classify the statement again, pass a recognized speech act, and look again.
+That is your mistake to correct. Never mention it to the person.
+
+Read three fields and act on them:
+
+| Field | Act on it |
+|---|---|
+| `speaker.is_settler` | `true`: run the check below, then ask for accepted and read back what landed. `false`: record a suggestion. |
+| `settlers` | Who to check with. `step` says which of `grant`, `relationship`, `area_owner` produced them. |
+| `step` = `none` | Nobody settles it here. `reason` says why; `setup_gap` `true` is a gap for a Rye admin, and `reason` says which. |
+
+The lookup is advisory. It writes nothing, refuses nothing, and no write path
+calls it. It is your discipline, not a wall the database holds.
+
+### Asking for accepted is not landing accepted
+
+The area's review policy has the last word, and the lookup knows nothing about
+it. Where the area is set so that agents suggest and people accept, your
+`record_assertion(..., p_status := 'accepted')` lands a suggestion instead, and
+so does `supersede_assertion()` — which then leaves the standing statement
+exactly where it was, accepted and unreplaced. Neither raises. Both return the
+new id either way, so the id tells you nothing. Read the row back before you
+say anything:
+
+```sql
+SELECT status, attrs ? 'review_gate' AS waiting_for_review
+FROM assertions
+WHERE id = '<returned_id>'::uuid;
+```
+
+`status` `candidate`, or `waiting_for_review` `true`, means a person has to
+accept it before it answers anything. Say so in the waiting words under "What a
+person hears" and never say it is done. Nothing said is lost: it is in the
+review queue, and a settler accepting it there replaces the standing statement
+then.
+
+Ask for accepted anyway when the lookup says the speaker settles it. Asking is
+what records that they meant it to take effect. Do not lower the status
+yourself, and do not try a second route when it lands as a suggestion.
+
+### What the lookup does not tell you
+
+It reads no assertion. It answers who may settle a claim; it does not answer
+who may unsettle one. So it cannot tell a new statement from a contradiction
+of a standing one, and `is_settler` `true` is not permission to replace
+something you never looked for.
+
+The gap has one shape. A person restates or contradicts something already
+accepted about themselves, of a self-set type, that somebody else authorized —
+a quota their manager set, say. For that claim type they genuinely are a
+settler, so the lookup returns them as one, and nothing in the answer mentions
+the standing claim.
+
+So before you accept anything on `is_settler` `true`, read
+`current_valid_assertions` for an accepted row on the same subject, assertion
+type, and assertion key, and read its evidence `attrs.authorizer`:
+
+Compare canonical types on both sides, never raw strings. Rye resolves
+synonyms through type aliases, so a standing `expectation` and a new
+`requirement` can be the same claim:
+
+```sql
+SELECT a.id, e.attrs->>'authorizer' AS authorizer
+FROM current_valid_assertions a
+LEFT JOIN assertion_evidence e ON e.assertion_id = a.id
+WHERE a.subject_node_id = '<subject_uuid>'::uuid
+  AND canonical_type('assertion_type', a.assertion_type)
+    = canonical_type('assertion_type', '<claim_type>')
+  AND a.assertion_key = '<key>';
+```
+
+Raw equality misses it. `canonical_type('assertion_type', ...)` follows the
+alias chain on both the type you are about to write and the type of every
+standing row.
+
+Write the canonical type the lookup reports, not the synonym you were given.
+Rye reports the drift; it does not rewrite your insert, so a row written under
+an alias keeps that spelling forever and every later reader pays for it.
+
+Type names are case-sensitive. `Expectation` is not `expectation` unless an
+alias says so. Use the type exactly as the category discovery request lists
+it.
+
+The guard fails closed. One recorded authorizer lets a write through, and it
+is the speaker's own:
+
+| What stands | What you do |
+|---|---|
+| No accepted row | Accept, as below. Nothing is being replaced. |
+| A row whose `authorizer` **is the speaker** | Accept. The person is correcting their own earlier words. One line back and you are done. |
+| A row whose `authorizer` is **somebody else** | Record a suggestion. Tell the person whose call it is. |
+| A row with **no `authorizer` recorded** | Record a suggestion. Do not guess whose call it is. |
+
+The last row is the one to get right. Rows written before the
+authorizer/executor convention carry nothing, and an unrecorded authorizer is
+not an absent one. Do not read a missing field as permission, and do not
+decide for yourself who put the claim there. Run the lookup for that claim and
+check with a settler it returns other than the speaker; if it returns no other
+settler, check with the owner of the area. Tell the person plainly that you
+want to confirm with that person before changing something already on record.
+
+Never accept and never supersede a standing claim on a missing field. Accepted
+stays accepted until a settler changes it.
+
+**A cleared guard is not a completed replacement.** The two rows above that say
+"Accept" mean you may ask; they do not promise the standing statement was
+replaced. Under a review policy that turns your write into a suggestion, both
+`record_assertion()` and `supersede_assertion()` file one and leave the standing
+statement accepted. Read the returned row's `status` and `attrs.review_gate`, as
+in "Asking for accepted is not landing accepted" above, and tell the person it
+is waiting rather than that their correction is in.
+
+Routing that objection onward is a later work item. This is only the guard
+that keeps a standing claim from being overwritten.
+
+### The speaker is a settler
+
+Record the claim as accepted through `record_assertion(...)`. Keep the person
+and the agent distinct in the evidence: the person is the authorizer, you are
+the executor, and the utterance is the source event.
+
+```sql
+SELECT record_assertion(
+    p_assertion_type := 'expectation',
+    p_claim          := '{"value": "log sales calls in the CRM"}'::jsonb,
+    p_subject_node_id := '<subject_uuid>'::uuid,
+    p_assertion_key  := 'sales_call_logging',
+    p_status         := 'accepted',
+    p_basis          := 'reported',
+    p_evidence       := ARRAY[jsonb_build_object(
+        'kind', 'source',
+        'event_id', '<utterance_event_uuid>',
+        'witness_node_id', '<speaker_uuid>',
+        'attrs', jsonb_build_object(
+            'authorizer', '<speaker_uuid>',
+            'executor', '<agent_key>',
+            'settled_via', 'relationship',
+            'settled_relationship', 'manager'
+        )
+    )]
+);
+```
+
+Then say one line back, in the person's own words, so they can correct it on
+the spot. See the echo rules under "What a person hears" below.
+
+### The speaker is not a settler
+
+Record the same claim as a suggestion — `p_status := 'candidate'` — on the
+same subject, type, and key, with the speaker's words as its backing and the
+settlers from the lookup in `p_attrs`. Nothing is refused and nothing is
+dropped.
+
+When the suggestion contradicts a claim that is already accepted, keep the
+accepted one exactly as it is and record the id of the claim being objected
+to in the suggestion's `p_attrs`, with the speaker's reason. Do not supersede,
+end, or archive the accepted claim. Then ask the person one question: why.
+The reason is what a settler needs to answer.
+
+Then tell the person whose call it is and that you will check with them. Name
+the settler. Do not tell them they lack authority and do not name a status.
+
+### An undeclared claim type about the speaker
+
+A person says something about themselves under a claim type nobody has
+declared self-settled. The lookup does not return them; `via` is `area_owner`
+and the settler is the owner of the area. Handle it exactly as any other
+statement the speaker cannot settle: record the suggestion and say you will
+check with the owner.
+
+"I've got that down. It's Priya's call, so I'll check with her and let you
+know."
+
+Say nothing about types, registries, declarations, or why the answer came out
+that way. The person said something ordinary about themselves; the reason it
+routed is yours to carry. Do not apologize for it and do not reach for a
+different type to make it settle — that is relabelling, and it is forbidden
+below.
+
+### How Rye is set up here is an admin's call
+
+A few records are not knowledge about the world. They are **how Rye is set up
+here**, and Rye reads them to decide how it treats every other write:
+
+| What it is, in plain words | The record | What reads it |
+|---|---|---|
+| One word means another | `registry_entry`, key `type_alias:<kind>:<from>` | `canonical_type()` |
+| A kind of thing is each person's own call | `registry_entry`, key `self_settled_type:<type>` | `rye_settlers()` |
+| Anything else on the registry: default scope, governed types, basis priors, half lives, digest facets | `registry_entry` | `registry_value()` |
+| Whether a write lands accepted at all | `review_policy` | `record_assertion()` |
+
+Only a Rye admin settles these. Which types are gated is data, not code, so
+ask before you offer to record one:
+
+```sql
+SELECT settle_gate('registry_entry');
+```
+
+```bash
+./scripts/rye settle-gate registry_entry --json
+```
+
+The answer is `{assertion_type, gated, allowed_roles, current_role,
+may_settle}`. The CLI opens its own session and sets no role, so read `gated`
+and `allowed_roles` from it and read `may_settle` in the session you will
+write from. It writes nothing and refuses nothing. `gated` `false` means the
+type is ordinary knowledge and the settlement lookup alone decides it.
+`may_settle` `false` means what you are about to record will land as a
+suggestion waiting for a Rye admin — tell the person that before you write it,
+not after. The normative shape is "Configuration writes need an admin" in
+`contracts/sql-surface.md`.
+
+This gate sits on top of the settlement lookup rather than replacing it. A
+statement can clear the lookup and still be an admin's to settle: an area owner
+who is not a Rye admin may settle claims all day and still cannot declare a
+self-settled type.
+
+### Declaring a type a person's own call
+
+The self set grows as data. Someone says in plain words that a kind of thing is
+each person's own call — "people decide their own availability" — and that
+becomes one registry entry. Someone saying that two words mean the same thing —
+"a requirement is an expectation here" — becomes a `type_alias` entry the same
+way, and is gated the same way.
+
+Rye has no dedicated registry-writing helper. Write it with
+`record_assertion()` on the registry or scope node, the same shape `type_alias`
+entries use, and never by touching a base table:
+
+```sql
+SELECT record_assertion(
+    p_assertion_type  := 'registry_entry',
+    p_assertion_key   := 'self_settled_type:availability',
+    p_subject_node_id := '<registry_or_scope_node_uuid>'::uuid,
+    p_claim           := '{"value": true}'::jsonb,
+    p_status          := 'accepted',
+    p_basis           := 'reported',
+    p_evidence        := ARRAY[jsonb_build_object(
+        'kind', 'source',
+        'event_id', '<utterance_event_uuid>',
+        'witness_node_id', '<speaker_uuid>',
+        'attrs', jsonb_build_object('authorizer', '<speaker_uuid>',
+                                    'executor', '<agent_key>')
+    )]
+);
+```
+
+**One alias can never be recorded, by anyone.** An alias pointing *from* a type
+that is part of how Rye is set up here — a `registry_entry` keyed
+`type_alias:assertion_type:<T>` where `<T>` is a gated type (`registry_entry`,
+`review_policy`, `scope_status` today) — is refused for every caller at every
+status, a Rye admin included. Renaming one of those words would turn the gate
+off for everything written afterwards. An alias pointing *into* a gated type is
+ordinary and still allowed. If a person asks for that rename, do not file it as
+a suggestion: say it cannot be done, in their words — that word is how Rye
+decides what counts here, so it cannot be renamed — and offer the other
+direction if it helps.
+
+The key carries the **canonical** type. An alias is registered as an alias,
+never as a second self-settled entry. Any value but `true` is not a member.
+`registry_value()` reads it back, scope first, then plugin, then core. The
+core members need no entry, so a fresh instance settles a plain commitment with
+nothing configured.
+
+Write exactly that, with `p_status := 'accepted'`, in both cases below. Asking
+for accepted is what records that the speaker meant it to take effect. Do not
+lower the status yourself, and do not decide from the person's job title — read
+`may_settle` from `settle_gate('registry_entry')`.
+
+**The speaker is a Rye admin** — `may_settle` `true`. It lands accepted. Echo
+one line in their words and stop:
+
+> "Got it — people set their own availability."
+
+Never read the key back to them.
+
+**The speaker is anyone else** — `may_settle` `false`. The same call lands as a
+suggestion carrying `attrs.settle_gate`, a Rye admin sees it in the review
+queue with everything else, and nothing said is lost. Then say so plainly:
+
+> "I've noted that. A Rye admin needs to confirm it before it takes effect —
+> I'll pass it on."
+
+Never tell them they lack permission, never name a status, a key, a type, or
+the registry. They said something ordinary about how the team works; the
+routing is yours to carry.
+
+**One route, and only once.** `record_assertion()` is the only way you ever
+record how Rye is set up here, and a suggestion is the end of the attempt, not
+the start of a workaround. Every other route raises, and trying one is a worse
+answer than the suggestion you already have:
+
+- No `INSERT INTO assertions` and no `UPDATE` of one, whatever you set
+  `app.write_path` to.
+- No `accept_assertion()`, `supersede_assertion()`, `record_distillation()`,
+  or `schedule_assertion_change()` on a gated type. These refuse instead of
+  demoting, on purpose: each marks or displaces the standing entry first, so a
+  quiet demotion would leave the key with no accepted value and a proposal
+  would erase an alias.
+- No second identity, no more permissive agent asked to write it for you, and
+  no `rye.authoritative.promote` — that grant does not open this gate.
+- Do not set `app.current_role` to `admin`. The role you present is the
+  person's, not a setting you choose.
+
+That refusal is this gate and no other. On ordinary knowledge
+`supersede_assertion()` does not raise under a review policy that would demote
+your write: it files the replacement as a suggestion, leaves the standing
+statement accepted, and hands back the new id all the same. Read the row, as
+above.
+
+**Nothing changes while it waits.** A suggestion is read by nothing:
+`registry_value()`, `canonical_type()`, and `rye_settlers()` answer exactly as
+they did before it. So keep routing claims of that type the way you were. If
+availability settled to the owner of the area this morning, it still does, and
+the next statement about it is a suggestion you check with them:
+
+> "Still Priya's call for now. I've kept what you said."
+
+Do not treat a waiting suggestion as a declaration in force, and never tell the
+person it is in effect.
+
+### Nobody settles it
+
+When `step` is `none`, record the suggestion anyway. `setup_gap` `true` is a
+gap for a Rye admin to fill, not an error and not something to work around,
+and `reason` says which gap it is. Read `reason` before you say anything:
+
+| `reason` | What it is, and what you do |
+|---|---|
+| `area_has_no_owner` | Nobody owns the area. Setup gap. Record the suggestion and tell the person nobody is recorded as deciding this yet. |
+| `area_owner_is_agent` | The area is owned by an agent, which settles nothing. Setup gap. Same as above to the person; it needs a Rye admin to name a person. |
+| `area_owner_not_visible` | There is an owner and you cannot see them. Not a gap and not permission to accept. Record the suggestion and say you are finding out who settles it. |
+| `no_settler_found` | The steps ran and produced nobody. Record the suggestion and say the same. |
+| `domain_not_resolved` | You did not name an area and more than one is active, or none is. Your mistake: name the area and ask again. |
+| `domain_not_found` | The area key you passed does not exist. Your mistake: correct the key and ask again. Do not report it to the person. |
+
+The last two are yours to fix, not news for the person. Ask again with the
+right area before you say anything at all.
+
+An empty `settlers` list can also mean RLS hid the settler from you, so never
+read it as "nobody is authorized, so I may accept it".
+
+### What a person hears
+
+Use the words in `docs/glossary.md` and no others. Say "settle", "decide",
+"suggestion", "objection", "expectation". Never say candidate, assertion,
+scope, basis, supersede, review queue, or the name of a policy. Internal
+identifiers — node uuids, assertion types, agent keys, step names — stay
+canonical in anything durable and never appear in what you say.
+
+- Accepted: "Noted — John logs his sales calls from now on."
+- Not the speaker's to settle: "That's Bob's call. I'll check with him and
+  let you know."
+- Nobody recorded: "Nobody's recorded as deciding that yet. I've kept what you
+  said and I'll find out who settles it."
+- How Rye is set up here — one word meaning another, or a kind of thing being
+  each person's own call: "I've noted that. A Rye admin needs to confirm it
+  before it takes effect — I'll pass it on." Then, until it is confirmed:
+  "Still Priya's call for now. I've kept what you said."
+- Something already on record, and you cannot tell who put it there: "There's
+  already something on record for that. I've kept your version and I'll
+  confirm with Priya before I change it."
+- Waiting for review, because the area works that way: "I've got that down.
+  Someone has to confirm it before it counts, so what's on record hasn't
+  changed yet — I'll let you know." Never say it is done, and never name the
+  policy.
+- Correcting their own earlier words: accept it and echo one line. Do not
+  make them explain themselves.
+- Asked about an unsettled claim: say the claim exists, say it is unsettled,
+  and say who said it. Do not hide it and do not answer with it.
+
+### What you must never do
+
+- Never relabel a statement's basis or speech act to get it through.
+- Never switch to an identity with wider grants, and never ask a more
+  permissive agent to write it for you.
+- Never claim a role that is not yours. State your own, `agent:<your key>`,
+  and never set `app.current_role` to `admin`, to a person's role, or to
+  `system:cdc`, which is reserved for Rye's own record of a change to a tracked
+  domain table.
+- Never write with no role set and never write as `viewer`. Both are read-only
+  and every write is refused — nodes, edges, events, participants, assertions,
+  evidence, artifacts, and source mappings, through a helper exactly as by
+  hand. A refusal arrives as `42501` or as a write that changed no row, and
+  neither is a reason to try another route.
+- Never merge nodes. See "Duplicates are a person's call" below.
+- Never treat your own inference as a settled claim. You carry the authority
+  of the person you act for and none of your own; no lookup ever returns an
+  agent as a settler.
+- Never accept a claim on silence. A settler who has not answered has not
+  agreed, and there is no clock that turns silence into a yes.
+- Never overwrite an accepted claim with a later statement from someone who
+  cannot settle it. Accepted stays accepted until a settler changes it.
+
+`reports_to` and `owns` are the relationships the lookup reads, declared by
+the `rye-org` plugin and pinned in `contracts/plugin-manifest.md`:
+`reports_to` runs from the report to the manager, `owns` from the owner to
+the thing owned. Neither is settled by the people it connects — a claim about
+either falls through to the owner of the area. Propose them; never settle
+them. End one with `effective_to`, never by deleting the edge.
+
+## Duplicates Are a Person's Call
+
+You may not merge nodes. `merge_nodes()` refuses every agent-shaped session with
+`42501` and names who can: a Rye admin or a team member. A merge is
+irreversible, it moves one subject's history onto another, and it crosses review
+policies, so it is not yours to run. Do not retry it under another role.
+
+When two records look like the same thing, record what you saw and hand it to
+your person. Write it as a structural proposal with
+`create_knowledge_candidate(...)`. The kind is `decision` — `duplicate_node` is
+not a candidate kind and raises:
+
+```sql
+SELECT create_knowledge_candidate(
+    p_candidate_kind  := 'decision',
+    p_statement       := 'Possible duplicate: two records look like the same supplier',
+    p_target_payload  := jsonb_build_object(
+        'action', 'merge_nodes',
+        'duplicate_id', '<duplicate_uuid>'::uuid,
+        'canonical_id', '<canonical_uuid>'::uuid,
+        'supporting_evidence', 'Same legal name and the same two contacts.',
+        'conflicts', 'Different mailing addresses.'
+    ),
+    p_source_node_ids := ARRAY['<duplicate_uuid>', '<canonical_uuid>']::uuid[],
+    p_created_by      := '<agent_key>'
+);
+```
+
+Then say one line:
+
+> "I think that supplier is in here twice. Want me to flag it for someone to
+> merge?"
+
+Say nothing about functions, roles, or refusals. `skills/rye-gardener` is the
+procedure for preparing a merge proposal for review.
 
 ## Why Rye Uses SQL Helpers
 

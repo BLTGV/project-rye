@@ -22,6 +22,11 @@ Usage:
   ./scripts/rye status [--json]
   ./scripts/rye doctor [--json]
   ./scripts/rye catalog plugins|skills|capabilities [--json]
+  ./scripts/rye categories [--scope <uuid-or-key>] [--json]
+  ./scripts/rye settlers --claim <assertion-type> [--subject <uuid>] [--speaker <uuid>]
+                         [--speaker-ref <source-identity>] [--domain <key>]
+                         [--speech-act <act>] [--as-of <timestamp>] [--scope <ref>] [--json]
+  ./scripts/rye settle-gate <assertion-type> [--json]
   ./scripts/rye context [--scope <uuid-or-key>] [--json]
   ./scripts/rye sources inventory|pending-context [--json]
   ./scripts/rye agents create|grant|issue-token|revoke-token|list|audit [--json]
@@ -223,6 +228,14 @@ psql_run() {
 psql_exec() {
   psql_run "$1"
 }
+
+# Every `agents` subcommand touches the governance tables, which are admin-only
+# for writes and for most reads. The role has to be set by a statement of its
+# own, before the one that reads: a CTE or a lateral join gets pulled up and the
+# nested loop commuted, so the RLS qual is evaluated before set_config runs and
+# the scan sees no role at all. `\g /dev/null` keeps this statement's output out
+# of anything the caller captures.
+ADMIN_ROLE_SQL="SELECT set_config('app.current_role', 'admin', false) \\g /dev/null"
 
 psql_json() {
   psql_run "$1" -qAt
@@ -758,6 +771,262 @@ UNION ALL
 SELECT 'capabilities' AS check, (rye_capability_catalog()->'totals'->>'capabilities') AS status;"
 }
 
+cmd_categories() {
+  local scope=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --scope)
+        scope="${2:-}"
+        shift 2
+        ;;
+      -h|--help)
+        cat <<'EOF'
+Usage:
+  ./scripts/rye categories [--scope <uuid-or-key>] [--json]
+EOF
+        return
+        ;;
+      *)
+        die "Unknown categories option: $1"
+        ;;
+    esac
+  done
+
+  local scope_expr
+  scope_expr="$(scope_sql_expr "$scope")"
+
+  if [[ "$OUTPUT_JSON" -eq 1 ]]; then
+    psql_json "SELECT rye.rye_categories(${scope_expr});"
+    return
+  fi
+
+  psql_exec "SET search_path = rye, public, pg_catalog;
+WITH answer AS (
+  SELECT rye_categories(${scope_expr}) AS j
+),
+listed AS (
+  SELECT jsonb_array_elements(j->'categories') AS c FROM answer
+)
+SELECT
+  c->>'name' AS category,
+  c->>'enabled' AS enabled,
+  (c->>'usage_count')::bigint AS nodes,
+  left(coalesce(c->>'description', ''), 60) AS meaning_here
+FROM listed
+ORDER BY nodes DESC, category;
+
+WITH answer AS (
+  SELECT rye_categories(${scope_expr}) AS j
+)
+SELECT
+  j->'scope'->>'mode' AS selection_mode,
+  j->'scope'->>'scope_key' AS scope_key,
+  j->'scope'->>'scope_found' AS scope_found,
+  j->'scope'->>'type_policy' AS type_policy,
+  j->>'category_count' AS category_count,
+  j->>'empty' AS empty
+FROM answer;"
+}
+
+# Who may settle a claim. Advisory: it reports, it never refuses, and no
+# settler is an answer rather than a failure, so this exits zero either way.
+cmd_settlers() {
+  local subject=""
+  local claim=""
+  local speaker=""
+  local speaker_ref=""
+  local domain=""
+  local speech_act=""
+  local as_of=""
+  local scope_ref=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --subject)
+        subject="${2:-}"
+        shift 2
+        ;;
+      --claim)
+        claim="${2:-}"
+        shift 2
+        ;;
+      --speaker)
+        speaker="${2:-}"
+        shift 2
+        ;;
+      --speaker-ref)
+        speaker_ref="${2:-}"
+        shift 2
+        ;;
+      --domain)
+        domain="${2:-}"
+        shift 2
+        ;;
+      --speech-act)
+        speech_act="${2:-}"
+        shift 2
+        ;;
+      --as-of)
+        as_of="${2:-}"
+        shift 2
+        ;;
+      --scope)
+        scope_ref="${2:-}"
+        shift 2
+        ;;
+      -h|--help)
+        cat <<'EOF'
+Usage:
+  ./scripts/rye settlers --claim <assertion-type> [--subject <uuid>]
+                         [--speaker <uuid>] [--speaker-ref <source-identity>]
+                         [--domain <key>] [--speech-act <act>]
+                         [--as-of <timestamp>] [--scope <ref>] [--json]
+
+Who may settle this claim, and which step of the lookup said so: a recorded
+grant, then the relationship, then the owner of the area. Advisory only.
+Omit --subject for a topical claim with no subject node.
+
+The claim type selects the relationship default first, the speech act second.
+--claim is resolved through the organization's type aliases before anything is
+matched against it, so an aliased name classifies as the type it resolves to;
+the answer reports both as claim.claim_type and claim.canonical_claim_type.
+Resolution is case-sensitive: a differently-cased name is a different type.
+An expectation is settled by the manager and never by the person it is set on.
+The subject is returned only for a claim type known to be one a person settles
+about themselves: commitment, self_commitment, self_report, or any type with a
+self_settled_type registry entry. No --speech-act does it on its own, so
+self_commitment on an undeclared type returns the area owner, not the person.
+Anything else with no recognized --speech-act falls through to the area owner:
+omitting the flag narrows the answer, it never widens it. A claim type you
+cannot classify, including one whose alias your role cannot read, takes the
+restrictive branch.
+Do not record a statement as accepted while speech_act_recognized is false.
+EOF
+        return
+        ;;
+      *)
+        die "Unknown settlers option: $1"
+        ;;
+    esac
+  done
+
+  [[ -n "$claim" ]] || die "settlers requires --claim <assertion-type>"
+
+  local subject_expr="NULL::uuid"
+  local claim_expr
+  local speaker_expr="NULL::uuid"
+  local speaker_ref_expr="NULL::text"
+  local domain_expr="NULL::text"
+  local speech_expr="NULL::text"
+  local as_of_expr="now()"
+  local scope_expr="NULL::text"
+
+  [[ -z "$subject" ]] || subject_expr="$(sql_literal "$subject")::uuid"
+  claim_expr="$(sql_literal "$claim")"
+  [[ -z "$speaker" ]] || speaker_expr="$(sql_literal "$speaker")::uuid"
+  [[ -z "$speaker_ref" ]] || speaker_ref_expr="$(sql_literal "$speaker_ref")"
+  [[ -z "$domain" ]] || domain_expr="$(sql_literal "$domain")"
+  [[ -z "$speech_act" ]] || speech_expr="$(sql_literal "$speech_act")"
+  [[ -z "$as_of" ]] || as_of_expr="$(sql_literal "$as_of")::timestamptz"
+  [[ -z "$scope_ref" ]] || scope_expr="$(sql_literal "$scope_ref")"
+
+  local call
+  call="rye.rye_settlers(${subject_expr}, ${claim_expr}, ${speaker_expr}, ${speaker_ref_expr}, ${domain_expr}, ${speech_expr}, ${as_of_expr}, ${scope_expr})"
+
+  if [[ "$OUTPUT_JSON" -eq 1 ]]; then
+    psql_json "SELECT ${call};"
+    return
+  fi
+
+  psql_exec "SET search_path = rye, public, pg_catalog;
+WITH answer AS (
+  SELECT ${call} AS j
+),
+listed AS (
+  SELECT jsonb_array_elements(j->'settlers') AS s FROM answer
+)
+SELECT
+  s->>'kind' AS kind,
+  coalesce(s->>'label', s->>'ref', s->>'node_id') AS settler,
+  s->>'via' AS via,
+  coalesce(s->>'relationship', '') AS relationship,
+  s->>'bound' AS bound
+FROM listed;
+
+WITH answer AS (
+  SELECT ${call} AS j
+)
+SELECT
+  j->>'step' AS step,
+  j->>'settler_count' AS settlers,
+  j->'speaker'->>'is_settler' AS speaker_may_settle,
+  coalesce(j->'domain'->>'domain_key', '') AS area,
+  j->>'excluded_agents' AS excluded_agents,
+  j->>'setup_gap' AS setup_gap,
+  coalesce(j->>'reason', '') AS reason
+FROM answer;"
+}
+
+# Is this assertion type Rye's own configuration, and who may make it
+# accepted. Advisory: it reports, it never refuses, and it writes nothing.
+cmd_settle_gate() {
+  local assertion_type=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h|--help)
+        cat <<'EOF'
+Usage:
+  ./scripts/rye settle-gate <assertion-type> [--json]
+
+Whether this assertion type is Rye's own configuration, which roles may make
+an assertion of it accepted, and whether this session may. Ask before offering
+to record configuration: a gated type recorded by anyone else lands as a
+candidate waiting for one of the allowed roles, and nothing said is lost.
+
+The type is matched as stored, with no alias resolution, because that is how
+every reader of configuration matches it. The CLI sets no app.current_role, so
+may_settle answers for a session with no role, which is never an allowed one:
+read `gated` and `allowed_roles` to learn what the type is, and `may_settle`
+for the session the CLI itself opened.
+EOF
+        return
+        ;;
+      -*)
+        die "Unknown settle-gate option: $1"
+        ;;
+      *)
+        [[ -z "$assertion_type" ]] || die "settle-gate takes one assertion type"
+        assertion_type="$1"
+        shift
+        ;;
+    esac
+  done
+
+  [[ -n "$assertion_type" ]] || die "settle-gate requires <assertion-type>"
+
+  local call
+  call="rye.settle_gate($(sql_literal "$assertion_type"))"
+
+  if [[ "$OUTPUT_JSON" -eq 1 ]]; then
+    psql_json "SELECT ${call};"
+    return
+  fi
+
+  psql_exec "SET search_path = rye, public, pg_catalog;
+WITH answer AS (
+  SELECT ${call} AS j
+)
+SELECT
+  j->>'assertion_type' AS assertion_type,
+  j->>'gated' AS gated,
+  coalesce(j->'allowed_roles' #>> '{}', '') AS allowed_roles,
+  coalesce(j->>'current_role', '') AS \"current_role\",
+  j->>'may_settle' AS may_settle
+FROM answer;"
+}
+
 cmd_context() {
   local scope=""
 
@@ -914,7 +1183,8 @@ EOF
       [[ -n "$label" ]] || die "agents create requires --label."
 
       if [[ "$OUTPUT_JSON" -eq 1 ]]; then
-        psql_json "SELECT jsonb_build_object(
+        psql_json "${ADMIN_ROLE_SQL}
+SELECT jsonb_build_object(
   'agent_id', rye.create_agent_identity($(sql_literal "$key"), $(sql_literal "$label"), $(sql_literal "$runtime"), nullif($(sql_literal "$scope_ref"), '')),
   'agent_key', rye.rye_slugify_key($(sql_literal "$key")),
   'label', $(sql_literal "$label"),
@@ -923,7 +1193,8 @@ EOF
         return
       fi
 
-      psql_exec "SELECT rye.create_agent_identity($(sql_literal "$key"), $(sql_literal "$label"), $(sql_literal "$runtime"), nullif($(sql_literal "$scope_ref"), '')) AS agent_id;"
+      psql_exec "${ADMIN_ROLE_SQL}
+SELECT rye.create_agent_identity($(sql_literal "$key"), $(sql_literal "$label"), $(sql_literal "$runtime"), nullif($(sql_literal "$scope_ref"), '')) AS agent_id;"
       ;;
     grant)
       local key=""
@@ -971,7 +1242,8 @@ EOF
       [[ -n "$capability" ]] || die "agents grant requires --capability."
 
       if [[ "$OUTPUT_JSON" -eq 1 ]]; then
-        psql_json "SELECT jsonb_build_object(
+        psql_json "${ADMIN_ROLE_SQL}
+SELECT jsonb_build_object(
   'grant_id', rye.grant_agent_capability($(sql_literal "$key"), $(sql_literal "$capability"), nullif($(sql_literal "$domain_key"), ''), nullif($(sql_literal "$scope_ref"), ''), nullif($(sql_literal "$expires_at"), '')::timestamptz),
   'agent_key', rye.rye_slugify_key($(sql_literal "$key")),
   'capability', $(sql_literal "$capability"),
@@ -981,7 +1253,8 @@ EOF
         return
       fi
 
-      psql_exec "SELECT rye.grant_agent_capability($(sql_literal "$key"), $(sql_literal "$capability"), nullif($(sql_literal "$domain_key"), ''), nullif($(sql_literal "$scope_ref"), ''), nullif($(sql_literal "$expires_at"), '')::timestamptz) AS grant_id;"
+      psql_exec "${ADMIN_ROLE_SQL}
+SELECT rye.grant_agent_capability($(sql_literal "$key"), $(sql_literal "$capability"), nullif($(sql_literal "$domain_key"), ''), nullif($(sql_literal "$scope_ref"), ''), nullif($(sql_literal "$expires_at"), '')::timestamptz) AS grant_id;"
       ;;
     issue-token)
       local key=""
@@ -1018,11 +1291,13 @@ EOF
       [[ -n "$key" ]] || die "agents issue-token requires --key."
 
       if [[ "$OUTPUT_JSON" -eq 1 ]]; then
-        psql_json "SELECT rye.issue_agent_token_record($(sql_literal "$key"), nullif($(sql_literal "$label"), ''), nullif($(sql_literal "$expires_at"), '')::timestamptz);"
+        psql_json "${ADMIN_ROLE_SQL}
+SELECT rye.issue_agent_token_record($(sql_literal "$key"), nullif($(sql_literal "$label"), ''), nullif($(sql_literal "$expires_at"), '')::timestamptz);"
         return
       fi
 
-      psql_exec "SELECT
+      psql_exec "${ADMIN_ROLE_SQL}
+SELECT
   issued->>'token_id' AS token_id,
   issued->>'token' AS one_time_token
 FROM rye.issue_agent_token_record($(sql_literal "$key"), nullif($(sql_literal "$label"), ''), nullif($(sql_literal "$expires_at"), '')::timestamptz) AS issued;"
@@ -1053,15 +1328,17 @@ EOF
       [[ -n "$token_id" ]] || die "agents revoke-token requires --token-id."
 
       if [[ "$OUTPUT_JSON" -eq 1 ]]; then
-        psql_json "SELECT jsonb_build_object('token_id', $(sql_literal "$token_id"), 'revoked', rye.revoke_agent_token($(sql_literal "$token_id")::uuid, 'scripts/rye agents revoke-token'));"
+        psql_json "${ADMIN_ROLE_SQL}
+SELECT jsonb_build_object('token_id', $(sql_literal "$token_id"), 'revoked', rye.revoke_agent_token($(sql_literal "$token_id")::uuid, 'scripts/rye agents revoke-token'));"
         return
       fi
 
-      psql_exec "SELECT rye.revoke_agent_token($(sql_literal "$token_id")::uuid, 'scripts/rye agents revoke-token') AS revoked;"
+      psql_exec "${ADMIN_ROLE_SQL}
+SELECT rye.revoke_agent_token($(sql_literal "$token_id")::uuid, 'scripts/rye agents revoke-token') AS revoked;"
       ;;
     list)
       if [[ "$OUTPUT_JSON" -eq 1 ]]; then
-        psql_json "WITH cfg AS (SELECT set_config('app.current_role','admin',false))
+        psql_json "${ADMIN_ROLE_SQL}
 SELECT jsonb_build_object(
   'agents', COALESCE(jsonb_agg(jsonb_build_object(
     'agent_id', ai.id,
@@ -1092,11 +1369,11 @@ SELECT jsonb_build_object(
     )
   ) ORDER BY ai.agent_key), '[]'::jsonb)
 )
-FROM rye.agent_identities ai, cfg;"
+FROM rye.agent_identities ai;"
         return
       fi
 
-      psql_exec "WITH cfg AS (SELECT set_config('app.current_role','admin',false))
+      psql_exec "${ADMIN_ROLE_SQL}
 SELECT
   ai.agent_key,
   ai.label,
@@ -1110,7 +1387,7 @@ SELECT
       AND tok.revoked_at IS NULL
       AND (tok.expires_at IS NULL OR tok.expires_at > now())
   ) AS active_token_count
-FROM rye.agent_identities ai, cfg
+FROM rye.agent_identities ai
 ORDER BY ai.agent_key;
 
 SELECT
@@ -1148,7 +1425,8 @@ EOF
       [[ "$limit" =~ ^[0-9]+$ ]] || die "agents audit --limit must be an integer."
 
       if [[ "$OUTPUT_JSON" -eq 1 ]]; then
-        psql_json "SELECT jsonb_build_object(
+        psql_json "${ADMIN_ROLE_SQL}
+SELECT jsonb_build_object(
   'actions', COALESCE(jsonb_agg(jsonb_build_object(
     'id', l.id,
     'agent_key', ai.agent_key,
@@ -1173,7 +1451,8 @@ LEFT JOIN rye.knowledge_domains kd ON kd.id = l.domain_id;"
         return
       fi
 
-      psql_exec "SELECT
+      psql_exec "${ADMIN_ROLE_SQL}
+SELECT
   l.created_at,
   ai.agent_key,
   l.action,
@@ -1235,6 +1514,15 @@ main() {
       ;;
     catalog)
       cmd_catalog "$@"
+      ;;
+    categories)
+      cmd_categories "$@"
+      ;;
+    settlers)
+      cmd_settlers "$@"
+      ;;
+    settle-gate)
+      cmd_settle_gate "$@"
       ;;
     context)
       cmd_context "$@"
