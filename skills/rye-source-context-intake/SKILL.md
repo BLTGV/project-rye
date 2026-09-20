@@ -71,6 +71,140 @@ The default post-commit order is:
 4. Dedupe/supersession review.
 5. Optional pruning or visibility changes for stale or low-signal source items.
 
+## Intake Consistency: Four Rules
+
+Conversation material produces all four of the defects blind reconstruction
+caught, because a message says a person left, a summary reaches past what was
+said, a message backdates a handoff, and a count is quoted without its period.
+The rules and their examples are in `docs/agent-ops-guide.md` under "Intake
+consistency" and in `rye-agent-ops`. The reads that find breakage afterwards
+are in `skills/rye-pattern-library/references/intake-consistency-checks.md`.
+
+Every example below is executable against the fixture in
+`eval/intake_consistency/` and names the role it needs.
+
+**1. A departure closes the edges it contradicts.** When a message says someone
+left, record `employment_status` with the date, then name their open `employs`
+and role edges to a person. You cannot close an edge: an agent-shaped session's
+`UPDATE` on `edges` reports `UPDATE 0` and changes nothing. Say so plainly —
+the relationship still reads as current until someone ends it.
+
+```sql
+-- As team_member, not as an agent.
+SELECT set_config('app.current_role', 'team_member', false);
+
+UPDATE edges e
+SET effective_to = d.departed_at
+FROM (
+    SELECT a.subject_node_id AS person_id,
+           a.effective_at    AS departed_at
+    FROM current_valid_assertions a
+    WHERE a.assertion_type = 'employment_status'
+      AND a.claim->>'status' = 'departed'
+      AND a.effective_at IS NOT NULL
+) d
+WHERE (e.source_id = d.person_id OR e.target_id = d.person_id)
+  AND e.edge_type IN ('employs', 'reports_to', 'assigned_to',
+                      'member_of', 'project_member', 'affiliated_with')
+  AND e.archived_at IS NULL
+  AND e.effective_to IS NULL;
+```
+
+**2. A digest asserts nothing its sources establish.** Record the claims the
+messages support first, then distil over those claims. A detail that lives only
+in a thread does not belong in a digest claim.
+
+```sql
+-- As an agent. Both claim keys come from the two cited sources.
+SELECT set_config('app.current_role', 'agent:intake-fixture', false);
+
+SELECT record_distillation(
+    p_subject_node_id := (SELECT id FROM nodes WHERE label = 'Line 3 Retool'),
+    p_subject_edge_id := NULL,
+    p_assertion_key := 'status',
+    p_claim := '{"status":"blocked","blocked_on":"gearbox",
+                 "message_count":214,"peak_hour_utc":10}'::jsonb,
+    p_source_assertion_ids := ARRAY(
+        SELECT a.id FROM current_valid_assertions a
+        WHERE a.subject_node_id = (SELECT id FROM nodes WHERE label = 'Line 3 Retool')
+          AND a.assertion_type IN ('task_status', 'message_volume')
+    ),
+    p_source_event_ids := '{}'::uuid[],
+    p_status := 'accepted',
+    p_agent := 'agent:intake-fixture',
+    p_attrs := '{"source_window":{"from":"2026-09-01T00:00:00Z",
+                                  "to":"2026-09-30T00:00:00Z"}}'::jsonb
+);
+```
+
+**3. An effective date and an edge window tell one story.** A message dated
+September about a June handoff dates the claim June and the edge June. Put the
+claim on the edge (`subject_edge_id`) or name it in `attrs.edge_id`. Correcting
+a date already recorded takes `supersede_assertion()`; `record_assertion()`
+returns the incumbent unchanged when the claim, basis and confidence match.
+
+```sql
+-- As an agent. Replaces the misdated claim with one dated off the edge.
+SELECT set_config('app.current_role', 'agent:intake-fixture', false);
+
+SELECT supersede_assertion(
+    p_old_assertion_id := a.id,
+    p_new_assertion_type := a.assertion_type,
+    p_new_subject_node_id := NULL,
+    p_new_subject_edge_id := e.id,
+    p_new_claim := a.claim,
+    p_new_assertion_key := a.assertion_key,
+    p_new_effective_at := e.effective_from,
+    p_new_basis := a.basis,
+    p_new_evidence := ARRAY[jsonb_build_object(
+        'kind', 'source',
+        'event_id', (SELECT id FROM events
+                     WHERE summary LIKE 'Staffing channel:%' LIMIT 1)
+    )]
+)
+FROM assertions a
+JOIN edges e ON e.id = a.subject_edge_id
+WHERE a.assertion_type = 'assignment_status'
+  AND a.superseded_at IS NULL
+  AND a.effective_at < e.effective_from;
+```
+
+**4. A derived number cites its window.** A message count, a peak hour, an
+average response time: put the period in
+`attrs.source_window = {"from": ..., "to": ...}` and make sure it covers the
+items cited as evidence. A number whose window is the whole export while the
+count was over one week is wrong in a way nobody can see later.
+
+```sql
+-- As an agent. The replacement cites the window containing its source.
+SELECT set_config('app.current_role', 'agent:intake-fixture', false);
+
+SELECT supersede_assertion(
+    p_old_assertion_id := a.id,
+    p_new_assertion_type := a.assertion_type,
+    p_new_subject_node_id := a.subject_node_id,
+    p_new_subject_edge_id := NULL,
+    p_new_claim := a.claim,
+    p_new_assertion_key := a.assertion_key,
+    p_new_effective_at := a.effective_at,
+    p_new_basis := a.basis,
+    p_new_evidence := ARRAY[jsonb_build_object(
+        'kind', 'derivation',
+        'source_assertion_id', (SELECT s.id FROM current_valid_assertions s
+                                WHERE s.assertion_type = 'task_status'
+                                LIMIT 1)
+    )],
+    p_new_attrs := '{"source_window":{"from":"2026-09-01T00:00:00Z",
+                                      "to":"2026-09-30T00:00:00Z"}}'::jsonb
+)
+FROM assertions a
+WHERE a.assertion_type = 'throughput_estimate'
+  AND a.superseded_at IS NULL;
+```
+
+Post-commit, run the four checks over what the run wrote and report each
+finding in the confirmation packet.
+
 ## Source Item Granularity
 
 Do not create first-class Rye nodes for every provider record by default. Broad

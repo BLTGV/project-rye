@@ -604,6 +604,32 @@ The reference implementation for this convention lives in:
 
 - `skills/rye-tabular-intake/SKILL.md`
 
+## Intake Consistency Convention
+
+Four rules for an agent reading source material into the graph, with executable
+examples in `docs/agent-ops-guide.md` under "Intake consistency" and read-only
+checks in `skills/rye-pattern-library/references/intake-consistency-checks.md`.
+
+- Recording `employment_status` with `status = 'departed'` ends that person's
+  `employs` and role edges on the same date. Edges end with `effective_to`;
+  never delete one. An agent-shaped session cannot do this — its `UPDATE` on
+  `edges` reports `UPDATE 0` — so it names the open edges to a person.
+- Every key in a digest claim is carried by a source assertion the digest
+  cites.
+- A claim about a relationship takes its `effective_at` from the edge it is
+  about, and names that edge as `subject_edge_id` or in `attrs.edge_id`.
+- A derived numeric claim carries
+  `attrs.source_window = {"from": <iso8601>, "to": <iso8601>}`, the period it
+  was computed over, and that window contains the sources it cites as
+  evidence. Store a measurement as a JSON number, not as text.
+
+The reference implementations live in:
+
+- `skills/rye-agent-ops/SKILL.md`
+- `skills/rye-source-context-intake/SKILL.md`
+- `skills/rye-tabular-intake/SKILL.md`
+- `skills/rye-gardener/SKILL.md`
+
 ## Event Convention
 
 - Use `record_event()` for all event creation. Never insert into `events` and `event_participants` separately.

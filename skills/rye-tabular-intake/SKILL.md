@@ -165,6 +165,113 @@ Default policy:
 - the command is read-only; final writes belong to the consuming domain skill
 - before target writes, the consuming skill should record the source, mapped records, old values or target snapshot, change-plan outcome, approval, target tables, operation types, touched IDs, and verification result in Rye
 
+## Intake Consistency: Three Of Four Rules
+
+A spreadsheet carries the same defects a conversation does: a termination date
+column, a start/end date column, a computed column. Three of the four intake
+rules bind a tabular run. The fourth does not: this skill writes source claims
+and never calls `record_distillation()`, so "a digest asserts nothing its
+sources establish" has nothing here to apply to. If a consuming skill distils
+over what a run wrote, that rule binds the consuming skill.
+
+The reads that find breakage after a run are in
+`skills/rye-pattern-library/references/intake-consistency-checks.md`. Run them
+over what the run wrote, as part of post-write verification. Each example below
+is executable against the fixture in `eval/intake_consistency/` and runs under
+the role the commit step already takes.
+
+**A termination date closes the edges it contradicts.** A roster export with a
+termination date produces an `employment_status` claim. The `employs` and role
+edges have to end on the same date, or the graph contradicts the column that
+was just imported. The commit role can do this; an agent role cannot touch
+`edges` at all.
+
+```sql
+-- As the role the run was given. team_member is enough.
+SELECT set_config('app.current_role', 'team_member', false);
+
+UPDATE edges e
+SET effective_to = d.departed_at
+FROM (
+    SELECT a.subject_node_id AS person_id,
+           a.effective_at    AS departed_at
+    FROM current_valid_assertions a
+    WHERE a.assertion_type = 'employment_status'
+      AND a.claim->>'status' = 'departed'
+      AND a.effective_at IS NOT NULL
+) d
+WHERE (e.source_id = d.person_id OR e.target_id = d.person_id)
+  AND e.edge_type IN ('employs', 'reports_to', 'assigned_to',
+                      'member_of', 'project_member', 'affiliated_with')
+  AND e.archived_at IS NULL
+  AND e.effective_to IS NULL;
+```
+
+**A row's effective date and the edge window tell one story.** When a row dates
+a relationship, the claim's `effective_at` and the edge's `effective_from` come
+from the same column. Point the claim at the edge with `subject_edge_id` or
+`attrs.edge_id`. Rerunning a corrected file does not fix a date on its own:
+`record_assertion()` matches on claim, basis and confidence, returns the
+incumbent's id and writes nothing when only the date changed. Use
+`supersede_assertion()`.
+
+```sql
+SELECT set_config('app.current_role', 'team_member', false);
+
+SELECT supersede_assertion(
+    p_old_assertion_id := a.id,
+    p_new_assertion_type := a.assertion_type,
+    p_new_subject_node_id := NULL,
+    p_new_subject_edge_id := e.id,
+    p_new_claim := a.claim,
+    p_new_assertion_key := a.assertion_key,
+    p_new_effective_at := e.effective_from,
+    p_new_basis := a.basis,
+    p_new_evidence := ARRAY[jsonb_build_object(
+        'kind', 'source',
+        'event_id', (SELECT id FROM events
+                     WHERE summary LIKE 'Staffing channel:%' LIMIT 1)
+    )]
+)
+FROM assertions a
+JOIN edges e ON e.id = a.subject_edge_id
+WHERE a.assertion_type = 'assignment_status'
+  AND a.superseded_at IS NULL
+  AND a.effective_at < e.effective_from;
+```
+
+**A computed column cites the window it was computed from.** A total, a rate,
+an average over rows is a derived number. Put the period the rows cover in
+`attrs.source_window = {"from": ..., "to": ...}`, ISO 8601, covering the
+evidence the claim cites. A sum over a file whose rows span March to June and
+whose window says June cannot be recomputed by anyone.
+
+```sql
+SELECT set_config('app.current_role', 'team_member', false);
+
+SELECT supersede_assertion(
+    p_old_assertion_id := a.id,
+    p_new_assertion_type := a.assertion_type,
+    p_new_subject_node_id := a.subject_node_id,
+    p_new_subject_edge_id := NULL,
+    p_new_claim := a.claim,
+    p_new_assertion_key := a.assertion_key,
+    p_new_effective_at := a.effective_at,
+    p_new_basis := a.basis,
+    p_new_evidence := ARRAY[jsonb_build_object(
+        'kind', 'derivation',
+        'source_assertion_id', (SELECT s.id FROM current_valid_assertions s
+                                WHERE s.assertion_type = 'task_status'
+                                LIMIT 1)
+    )],
+    p_new_attrs := '{"source_window":{"from":"2026-09-01T00:00:00Z",
+                                      "to":"2026-09-30T00:00:00Z"}}'::jsonb
+)
+FROM assertions a
+WHERE a.assertion_type = 'throughput_estimate'
+  AND a.superseded_at IS NULL;
+```
+
 Read [references/cli-contract.md](references/cli-contract.md) when you need:
 
 - the NDJSON object contracts
