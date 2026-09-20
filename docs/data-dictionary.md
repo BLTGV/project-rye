@@ -382,7 +382,21 @@ nullable advisory `salience_score` for hot-first ordering.
 Per-node count, distinct-agent count, last query time, and 30-day exponentially
 decayed score from `agent_query` events. Only reads routed through
 `log_agent_query()` appear. Salience must not gate visibility, retention, or
-deletion.
+deletion. A traced query counts exactly as an untraced one.
+
+#### `agent_query_trace`
+
+One row per `agent_query` event carrying `properties.trace`: the steps of one
+agent retrieval loop. Columns are `trace_id`, `seq`, `event_id`, `occurred_at`,
+`agent_id`, `query`, `summary`, `tool`, `intent`, `args`, `results`,
+`selected`, and `node_ids` (the participants, ordered). Rows come back ordered
+`trace_id`, `seq`, `occurred_at`, `event_id`.
+
+Ordering is by `seq` and not by time: `record_event()` stamps `occurred_at`
+with `now()`, which is transaction start, so every step of one loop inside one
+transaction shares a timestamp. `security_invoker`, so an event whose
+participants the caller cannot see is absent — a short trace never means a
+short loop.
 
 #### `type_vocabulary_report`
 
@@ -1023,12 +1037,28 @@ first, uncovered raw assertions, and recent activity. Assertions come only from
 #### `log_agent_query()`
 
 ```
-log_agent_query(p_agent_id, p_query_text, p_result_summary, p_nodes_referenced) → uuid
+log_agent_query(p_agent_id, p_query_text, p_result_summary, p_nodes_referenced, p_trace DEFAULT NULL) → uuid
 ```
 
 Creates an `agent_query` event logging what the agent asked, what it got back, and which nodes were touched. Delegates to `record_event()` internally.
 
-**Why it exists:** Agent interactions must be auditable. When an agent reads data, the query and its scope are recorded so that access patterns can be reviewed.
+`p_trace` (migration 0034) is optional and makes the event one step of a
+retrieval loop. When given it must be a jsonb object with a non-empty
+`trace_id` and an integer `seq` of at least 1, or the call raises; it lands
+whole at `properties.trace` and `agent_query_trace` groups it. The optional
+fields are `tool`, `intent`, `args`, `results`, and `selected`, named as
+`eval/retrieval/trace_format.md` names them. `properties.query` still holds the
+phrasing. A four-argument call behaves exactly as it did before 0034 and writes
+no `trace` key; there is no four-argument overload, because two candidates
+would both match and PostgreSQL would refuse the call as ambiguous.
+
+Tracing is opt-in and caller-driven. No read surface calls this function, and
+the write gate governs it like any other write: a `viewer`, a role-less
+session, and any role whose `may_write` is false are refused `42501`, traced or
+not. Events are immutable and there is no pruning path, so trace the loops you
+will read and cap `results` — ten candidates per step is plenty.
+
+**Why it exists:** Agent interactions must be auditable. When an agent reads data, the query and its scope are recorded so that access patterns can be reviewed. Retrieval is a loop, so the grouped steps are what separate a phrasing that was never generated from a candidate that was returned and misjudged.
 
 #### `record_artifact()`
 
