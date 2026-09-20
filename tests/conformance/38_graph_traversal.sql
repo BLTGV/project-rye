@@ -144,6 +144,9 @@ DECLARE
     v_n4      uuid;
     v_n5      uuid;
     v_nb      jsonb;
+    v_nbs     uuid;
+    v_ndecoy  uuid;
+    v_npct    uuid;
     v_reason  text;
     v_role    text;
     v_rows    int;
@@ -164,13 +167,22 @@ BEGIN
         ('thing', 'Trav Supplier',   NULL, NULL, '{}'),
         ('thing', 'Trav Release',    NULL, NULL, '{}'),
         ('thing', 'Trav Conversion', NULL, NULL, '{}'),
-        ('thing', 'Trav Sidebar',    NULL, NULL, '{"trav_marker":"qqzzxx-traversal"}');
+        ('thing', 'Trav Sidebar',    NULL, NULL, '{"trav_marker":"qqzzxx-traversal"}'),
+        -- For the literal-substring tier: a label carrying both LIKE
+        -- metacharacters, a decoy that only an unescaped pattern would reach,
+        -- and one carrying the escape character itself.
+        ('thing', 'Trav 50% Complete_v2',  NULL, NULL, '{}'),
+        ('thing', 'Trav 50X CompleteXv2',  NULL, NULL, '{}'),
+        ('thing', 'Trav\Backslash Node',   NULL, NULL, '{}');
 
     SELECT id INTO v_n1 FROM nodes WHERE label = 'Trav Warehouse'  ORDER BY created_at DESC LIMIT 1;
     SELECT id INTO v_n2 FROM nodes WHERE label = 'Trav Supplier'   ORDER BY created_at DESC LIMIT 1;
     SELECT id INTO v_n3 FROM nodes WHERE label = 'Trav Release'    ORDER BY created_at DESC LIMIT 1;
     SELECT id INTO v_n4 FROM nodes WHERE label = 'Trav Conversion' ORDER BY created_at DESC LIMIT 1;
     SELECT id INTO v_n5 FROM nodes WHERE label = 'Trav Sidebar'    ORDER BY created_at DESC LIMIT 1;
+    SELECT id INTO v_npct   FROM nodes WHERE label = 'Trav 50% Complete_v2' ORDER BY created_at DESC LIMIT 1;
+    SELECT id INTO v_ndecoy FROM nodes WHERE label = 'Trav 50X CompleteXv2' ORDER BY created_at DESC LIMIT 1;
+    SELECT id INTO v_nbs    FROM nodes WHERE label = 'Trav\Backslash Node'  ORDER BY created_at DESC LIMIT 1;
 
     INSERT INTO edges (edge_type, source_id, target_id) VALUES
         ('blocks',    v_n1, v_n2),
@@ -388,6 +400,153 @@ BEGIN
         RAISE EXCEPTION 'blank query behaved as a wildcard';
     END IF;
     RAISE NOTICE 'PASS: blank query returns nothing';
+
+    -- ------------------------------------------------------------------
+    -- The substring tier is literal containment, not a pattern language.
+    -- Before rye_like_literal() a query of '%' or '_' returned every
+    -- visible labeled node.
+    --
+    -- p_threshold := 1.0 shuts the trigram tier off for these cases, so what
+    -- is measured is the containment tier and nothing else. Spelling drift
+    -- would otherwise reach the decoy label by a route that was never in
+    -- question.
+    -- ------------------------------------------------------------------
+    -- The limit is raised past the default so this measures the match, not
+    -- the first page of one: an unescaped '%' matched everything and the
+    -- 20-row default hid which nodes those were.
+    SELECT count(*) INTO v_rows
+    FROM find_nodes('%', NULL, 1000, 1.0) f
+    WHERE f.label NOT LIKE '%\%%' ESCAPE '\';
+    IF v_rows <> 0 THEN
+        RAISE EXCEPTION
+            'percent behaved as a wildcard: % labels with no percent in them were returned', v_rows;
+    END IF;
+    SELECT count(*) INTO v_rows
+    FROM find_nodes('%', NULL, 1000, 1.0) f WHERE f.node_id = v_npct;
+    IF v_rows <> 1 THEN
+        RAISE EXCEPTION 'a literal percent no longer finds the label that contains one';
+    END IF;
+
+    SELECT count(*) INTO v_rows
+    FROM find_nodes('_', NULL, 1000, 1.0) f
+    WHERE f.label NOT LIKE '%\_%' ESCAPE '\';
+    IF v_rows <> 0 THEN
+        RAISE EXCEPTION
+            'underscore behaved as a wildcard: % labels with no underscore in them were returned', v_rows;
+    END IF;
+    SELECT count(*) INTO v_rows
+    FROM find_nodes('_', NULL, 1000, 1.0) f WHERE f.node_id = v_npct;
+    IF v_rows <> 1 THEN
+        RAISE EXCEPTION 'a literal underscore no longer finds the label that contains one';
+    END IF;
+    RAISE NOTICE 'PASS: percent and underscore are literal, not wildcards';
+
+    -- The metacharacter label is found by its own text, and the decoy that
+    -- only an unescaped pattern could reach is not found at all.
+    SELECT count(*) INTO v_rows
+    FROM find_nodes('50% Complete_v2', NULL, 1000, 1.0) f
+    WHERE f.node_id = v_npct AND f.match_reason = 'label_contains';
+    IF v_rows <> 1 THEN
+        RAISE EXCEPTION 'literal substring lookup did not find its own label';
+    END IF;
+
+    SELECT count(*) INTO v_rows
+    FROM find_nodes('50% Complete_v2', NULL, 1000, 1.0) f;
+    IF v_rows <> 1 THEN
+        RAISE EXCEPTION
+            'a literal query matched % labels; the substring tier is still a pattern', v_rows;
+    END IF;
+
+    SELECT count(*) INTO v_rows
+    FROM find_nodes('50% Complete_v2', NULL, 1000, 1.0) f WHERE f.node_id = v_ndecoy;
+    IF v_rows <> 0 THEN
+        RAISE EXCEPTION 'the metacharacters still matched a different label';
+    END IF;
+    RAISE NOTICE 'PASS: a label with a percent and an underscore is found by its literal text, and only it';
+
+    -- The escape character itself is data, not syntax.
+    SELECT count(*) INTO v_rows
+    FROM find_nodes('Trav\Back', NULL, 1000, 1.0) f
+    WHERE f.node_id = v_nbs AND f.match_reason = 'label_contains';
+    IF v_rows <> 1 THEN
+        RAISE EXCEPTION 'a backslash in the query did not match the label that contains one';
+    END IF;
+    SELECT count(*) INTO v_rows
+    FROM find_nodes('\', NULL, 1000, 1.0) f WHERE f.node_id = v_nbs;
+    IF v_rows <> 1 THEN
+        RAISE EXCEPTION 'a bare backslash query did not find the label that contains one';
+    END IF;
+    RAISE NOTICE 'PASS: a backslash in the query is data, not an escape';
+
+    -- The exact and trigram tiers are unchanged by the escaping.
+    SELECT f.match_reason INTO v_reason FROM find_nodes('Trav Warehouse') f
+    WHERE f.node_id = v_n1;
+    IF v_reason IS DISTINCT FROM 'exact_label' THEN
+        RAISE EXCEPTION 'exact label tier changed: reason is %', v_reason;
+    END IF;
+    SELECT count(*) INTO v_rows
+    FROM find_nodes('Trav Warehosue', p_threshold := 0.35) f
+    WHERE f.node_id = v_n1 AND f.match_reason = 'label_similarity';
+    IF v_rows <> 1 THEN
+        RAISE EXCEPTION 'trigram tier changed: transposed label no longer matches by similarity';
+    END IF;
+    RAISE NOTICE 'PASS: escaping left the exact and trigram tiers alone';
+
+    -- ------------------------------------------------------------------
+    -- An enumerated argument this file does not recognize is refused, not
+    -- quietly widened. An unknown p_direction used to fall through a CASE
+    -- ELSE into the undirected walk, which the file itself says never to
+    -- use for causal reasoning.
+    -- ------------------------------------------------------------------
+    BEGIN
+        PERFORM count(*) FROM find_paths(v_n2, p_max_depth := 1, p_direction := 'sideways');
+        RAISE EXCEPTION 'find_paths accepted an unknown direction';
+    EXCEPTION WHEN invalid_parameter_value THEN
+        NULL;
+    END;
+
+    BEGIN
+        PERFORM neighborhood(v_n2, p_max_depth := 1, p_direction := 'sideways');
+        RAISE EXCEPTION 'neighborhood accepted an unknown direction';
+    EXCEPTION WHEN invalid_parameter_value THEN
+        NULL;
+    END;
+
+    -- It refuses even when the walk would have matched nothing, so the
+    -- refusal is not an accident of the plan.
+    BEGIN
+        PERFORM count(*) FROM find_paths(gen_random_uuid(), p_direction := 'sideways');
+        RAISE EXCEPTION 'find_paths accepted an unknown direction for an absent start node';
+    EXCEPTION WHEN invalid_parameter_value THEN
+        NULL;
+    END;
+    RAISE NOTICE 'PASS: an unknown traversal direction is refused, never widened to undirected';
+
+    BEGIN
+        PERFORM count(*) FROM find_paths(v_n1, p_max_depth := 1, p_semantics := ARRAY['causal', 'bogus']);
+        RAISE EXCEPTION 'find_paths accepted an unknown edge semantics value';
+    EXCEPTION WHEN invalid_parameter_value THEN
+        NULL;
+    END;
+
+    BEGIN
+        PERFORM neighborhood(v_n1, p_max_depth := 1, p_semantics := ARRAY['bogus']);
+        RAISE EXCEPTION 'neighborhood accepted an unknown edge semantics value';
+    EXCEPTION WHEN invalid_parameter_value THEN
+        NULL;
+    END;
+    RAISE NOTICE 'PASS: an unknown edge semantics value is refused';
+
+    -- The accepted values still work, in any case and with stray spacing.
+    SELECT count(*) INTO v_rows
+    FROM find_paths(v_n2, v_n1, p_max_depth := 1, p_direction := ' IN ');
+    IF v_rows < 1 THEN
+        RAISE EXCEPTION 'direction normalization broke: " IN " did not behave as in';
+    END IF;
+    IF (neighborhood(v_n1, p_max_depth := 1, p_direction := 'Any')->>'node_count')::int < 2 THEN
+        RAISE EXCEPTION 'direction normalization broke: "Any" did not behave as any';
+    END IF;
+    RAISE NOTICE 'PASS: accepted directions are still normalized for case and spacing';
 
     -- ------------------------------------------------------------------
     -- neighborhood: budget, truncation flag, and attached knowledge.

@@ -43,6 +43,92 @@
 SET search_path = rye, pg_catalog, public;
 
 -- --------------------------------------------------------------------------
+-- Argument handling
+-- --------------------------------------------------------------------------
+-- Two rules, both of them about a caller's text never meaning more than it
+-- says.
+--
+-- rye_like_literal() turns caller text into a LIKE pattern fragment that
+-- matches itself. Without it the substring tier of find_nodes_batch() is a
+-- pattern language: a query of '%' or '_' matched every visible labeled node,
+-- and 'Zed_Unde_' matched the label 'Zed_Under' through the underscore rather
+-- than through the text. Escape the escape character first, then the two
+-- wildcards, and give the LIKE an explicit ESCAPE clause so the pattern does
+-- not depend on the server's default.
+--
+-- rye_require_path_direction() and rye_require_edge_semantics() refuse an
+-- enumerated argument they do not recognize. A CASE with an ELSE branch
+-- turned an unrecognized p_direction into an undirected walk, which is the
+-- one reading this file tells callers never to use for causal reasoning: an
+-- unknown value widened the answer. Both are plpgsql because a RAISE needs a
+-- statement; both are STABLE, so the five traversal functions stay
+-- non-VOLATILE and still cannot write.
+
+CREATE OR REPLACE FUNCTION rye_like_literal(p_text text)
+RETURNS text
+LANGUAGE sql IMMUTABLE SECURITY INVOKER
+SET search_path = rye, pg_catalog
+AS $$
+    SELECT replace(replace(replace(p_text, '\', '\\'), '%', '\%'), '_', '\_');
+$$;
+
+COMMENT ON FUNCTION rye_like_literal(text) IS
+'Escapes backslash, percent, and underscore so caller text used in a LIKE or ILIKE pattern matches itself. Use with an explicit ESCAPE ''\''. IMMUTABLE, SECURITY INVOKER.';
+
+CREATE OR REPLACE FUNCTION rye_require_path_direction(p_direction text)
+RETURNS text
+LANGUAGE plpgsql STABLE SECURITY INVOKER
+SET search_path = rye, pg_catalog
+AS $$
+DECLARE
+    v_direction text := lower(coalesce(nullif(btrim(p_direction), ''), 'out'));
+BEGIN
+    IF v_direction NOT IN ('out', 'in', 'any') THEN
+        RAISE EXCEPTION
+            'Unknown traversal direction %. Use out (follow the edge), in (reverse it), or any (undirected; never for causal reasoning).',
+            quote_literal(p_direction)
+            USING ERRCODE = '22023';
+    END IF;
+    RETURN v_direction;
+END;
+$$;
+
+COMMENT ON FUNCTION rye_require_path_direction(text) IS
+'Normalizes a traversal direction to out, in, or any, and raises 22023 on anything else. Null and blank take the out default. An unrecognized value must never fall through to the undirected walk.';
+
+CREATE OR REPLACE FUNCTION rye_require_edge_semantics(p_semantics text[])
+RETURNS text[]
+LANGUAGE plpgsql STABLE SECURITY INVOKER
+SET search_path = rye, pg_catalog
+AS $$
+DECLARE
+    v_unknown text;
+BEGIN
+    IF p_semantics IS NULL THEN
+        RETURN NULL;
+    END IF;
+
+    SELECT string_agg(quote_literal(s), ', ' ORDER BY s)
+    INTO v_unknown
+    FROM (SELECT DISTINCT unnest(p_semantics) AS s) u
+    WHERE u.s IS NULL
+       OR u.s NOT IN ('causal', 'structural', 'associative', 'temporal');
+
+    IF v_unknown IS NOT NULL THEN
+        RAISE EXCEPTION
+            'Unknown edge semantics %. Use causal, structural, associative, or temporal.',
+            v_unknown
+            USING ERRCODE = '22023';
+    END IF;
+
+    RETURN p_semantics;
+END;
+$$;
+
+COMMENT ON FUNCTION rye_require_edge_semantics(text[]) IS
+'Returns the semantics filter unchanged, or raises 22023 naming every value that is not causal, structural, associative, or temporal. Null means no filter. A misspelled class must be a refusal, never a silently different answer.';
+
+-- --------------------------------------------------------------------------
 -- Edge semantics
 -- --------------------------------------------------------------------------
 -- Registry key `edge_semantics:<edge_type>` classifies what traversing an
@@ -179,7 +265,10 @@ AS $$
         FROM nodes n, q
         WHERE n.archived_at IS NULL
           AND (p_node_types IS NULL OR n.node_type = ANY(p_node_types))
-          AND n.label ILIKE '%' || q.text || '%'
+          -- Literal containment. The query is escaped so '%' and '_' mean
+          -- themselves; without this the tier is a pattern language and a
+          -- one-character query returns every visible labeled node.
+          AND n.label ILIKE '%' || rye_like_literal(q.text) || '%' ESCAPE '\'
     ),
     best AS (
         SELECT DISTINCT ON (m.query, m.id)
@@ -241,7 +330,9 @@ COMMENT ON FUNCTION find_nodes(text, text[], int, numeric, uuid) IS
 --
 -- p_direction defaults to 'out' because an edge asserts something in its
 -- direction; 'any' is available for undirected connectivity questions but
--- must not be used for causal reasoning.
+-- must not be used for causal reasoning. Anything else is refused: an
+-- unrecognized direction used to fall through to the undirected walk, which
+-- is the one reading a caller is told never to take by accident.
 
 CREATE OR REPLACE FUNCTION find_paths(
     p_from_node_id uuid,
@@ -271,15 +362,19 @@ AS $$
             ) AS max_depth,
             coalesce(p_as_of, now()) AS as_of,
             greatest(coalesce(p_max_paths, 50), 1) AS max_paths,
-            lower(coalesce(nullif(btrim(p_direction), ''), 'out')) AS direction
+            -- Both enumerated arguments are validated here, and `params` is
+            -- read by the LIMIT below, so an unrecognized value raises even
+            -- when the walk itself matches nothing.
+            rye_require_path_direction(p_direction) AS direction,
+            rye_require_edge_semantics(p_semantics) AS semantics
     ),
     sem AS (
         -- Only evaluated when semantic filtering is requested.
         SELECT DISTINCT e.edge_type
-        FROM edges e
-        WHERE p_semantics IS NOT NULL
+        FROM edges e, params p
+        WHERE p.semantics IS NOT NULL
           AND e.archived_at IS NULL
-          AND edge_semantics(e.edge_type, p_scope) = ANY(p_semantics)
+          AND edge_semantics(e.edge_type, p_scope) = ANY(p.semantics)
     ),
     walk AS (
         SELECT
@@ -318,7 +413,7 @@ AS $$
           AND (e.effective_from IS NULL OR e.effective_from <= p.as_of)
           AND (e.effective_to   IS NULL OR e.effective_to   >  p.as_of)
           AND (p_edge_types IS NULL OR e.edge_type = ANY(p_edge_types))
-          AND (p_semantics  IS NULL OR e.edge_type IN (SELECT s.edge_type FROM sem s))
+          AND (p.semantics  IS NULL OR e.edge_type IN (SELECT s.edge_type FROM sem s))
           AND NOT tgt.id = ANY(w.node_path)
     )
     SELECT w.node_path, w.edge_path, w.edge_type_path, w.depth, w.path_weight
@@ -373,14 +468,18 @@ AS $$
             coalesce(p_as_of, now()) AS as_of,
             greatest(coalesce(p_max_nodes, 100), 1) AS max_nodes,
             greatest(coalesce(p_max_assertions_per_node, 10), 1) AS max_assertions,
-            lower(coalesce(nullif(btrim(p_direction), ''), 'any')) AS direction
+            -- `params` is read by the result object, so both validations run
+            -- whatever the walk finds. The default here is 'any', not 'out'.
+            rye_require_path_direction(
+                coalesce(nullif(btrim(p_direction), ''), 'any')) AS direction,
+            rye_require_edge_semantics(p_semantics) AS semantics
     ),
     sem AS (
         SELECT DISTINCT e.edge_type
-        FROM edges e
-        WHERE p_semantics IS NOT NULL
+        FROM edges e, params p
+        WHERE p.semantics IS NOT NULL
           AND e.archived_at IS NULL
-          AND edge_semantics(e.edge_type, p_scope) = ANY(p_semantics)
+          AND edge_semantics(e.edge_type, p_scope) = ANY(p.semantics)
     ),
     walk AS (
         SELECT n.id AS node_id, 0 AS depth, ARRAY[n.id]::uuid[] AS seen
@@ -407,7 +506,7 @@ AS $$
           AND (e.effective_from IS NULL OR e.effective_from <= p.as_of)
           AND (e.effective_to   IS NULL OR e.effective_to   >  p.as_of)
           AND (p_edge_types IS NULL OR e.edge_type = ANY(p_edge_types))
-          AND (p_semantics  IS NULL OR e.edge_type IN (SELECT s.edge_type FROM sem s))
+          AND (p.semantics  IS NULL OR e.edge_type IN (SELECT s.edge_type FROM sem s))
           AND NOT tgt.id = ANY(w.seen)
     ),
     ranked AS (
@@ -475,7 +574,7 @@ AS $$
           AND (e.effective_from IS NULL OR e.effective_from <= p.as_of)
           AND (e.effective_to   IS NULL OR e.effective_to   >  p.as_of)
           AND (p_edge_types IS NULL OR e.edge_type = ANY(p_edge_types))
-          AND (p_semantics  IS NULL OR e.edge_type IN (SELECT s.edge_type FROM sem s))
+          AND (p.semantics  IS NULL OR e.edge_type IN (SELECT s.edge_type FROM sem s))
     )
     SELECT jsonb_build_object(
         'root',      p_node_id,

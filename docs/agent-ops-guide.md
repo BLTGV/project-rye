@@ -404,7 +404,10 @@ Pass `p_semantics := ARRAY['causal']` whenever the question is why something
 happened. Without it a path may run through `references` or `regarding` edges,
 which record that two things were mentioned together and assert nothing about
 cause. Leave `p_direction` at its default `out` for causal work; `any` answers
-"are these connected at all" and will happily return a chain backwards.
+"are these connected at all" and will happily return a chain backwards. Both
+arguments are closed sets — `out`, `in`, `any`, and `causal`, `structural`,
+`associative`, `temporal` — and a value outside them is refused rather than
+ignored, so a typo is an error you see, not a wider answer you do not.
 
 Depth is capped by `max_path_depth` (default 3). Asking for more silently
 clamps. Two or three hops answer most questions, and deeper traversal is where

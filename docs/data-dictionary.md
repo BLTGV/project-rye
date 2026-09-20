@@ -1047,9 +1047,14 @@ find_nodes_batch(p_queries[], p_node_types, p_limit_per_query, p_threshold, p_sc
 ```
 
 Ranked entry-point lookup. Matches exact external identity, exact label, then
-trigram similarity and substring containment, returning the best reason per
-node. Results carry `score` and `match_reason` so the caller can judge rather
-than trust an opaque rank.
+trigram similarity and literal substring containment, returning the best
+reason per node. Results carry `score` and `match_reason` so the caller can
+judge rather than trust an opaque rank.
+
+The containment tier is literal, not a pattern language: `%`, `_`, and `\` in
+the query match themselves (`rye_like_literal()` escapes them and the `ILIKE`
+carries an explicit `ESCAPE '\'`). A one-character query is a one-character
+query, not a wildcard.
 
 **Why it exists:** these are primitives for an agent's search loop, not a
 search engine. The agent owns semantic matching — it knows the domain
@@ -1082,6 +1087,13 @@ connectivity. Paths never revisit a node.
 `p_direction` defaults to `out` because an edge asserts something in its
 direction. Use `any` for undirected connectivity questions, never for causal
 reasoning. `p_semantics` filters by `edge_semantics()`.
+
+Both are closed sets, and an unrecognized value raises `22023` naming the
+accepted ones — `out`, `in`, `any` for the direction; `causal`, `structural`,
+`associative`, `temporal` for the semantics. An unknown value must never widen
+the answer, and a misspelled direction used to fall through to the undirected
+walk. `neighborhood()` refuses the same two arguments the same way, with `any`
+as its direction default.
 
 #### `neighborhood()`
 
