@@ -526,12 +526,28 @@ COMMENT ON FUNCTION assertions_immutable_guard() IS
 -- precedent for the shape.
 --
 -- These checks run at commit as the caller, under RLS, outside any SECURITY
--- DEFINER frame. The acceptance event is visible because accept_assertion()
--- records the subject, or the edge's endpoints, as participants. The
--- replacement and the successor are rows the caller just wrote; if the caller
--- classified one above its own read level it cannot see it, so those two checks
--- refuse only when the row is visible and wrong and pass when it is invisible.
--- That is the one place this design fails open, and the contract says so.
+-- DEFINER frame, and all three FAIL CLOSED. A row the caller cannot read back
+-- is not a fact the caller may rely on: it raises, exactly as a wrong one does.
+--
+-- This was the other way round once, and it was erasure. As a viewer: forge the
+-- supersede settings, end an accepted row naming a fresh id, then insert that
+-- id as a candidate of another type and key classified above your own read
+-- level. The check could not see the replacement, so it passed, and the tuple
+-- was left with no accepted value. "Not visible" has to mean no.
+--
+-- The cost is small and knowable. supersede_assertion(), record_distillation(),
+-- merge_nodes() and record_assertion() all give the replacement a
+-- classification the caller can already read -- copied from the incumbent, or
+-- derived from evidence the caller had to see to cite. The one call this
+-- refuses is a caller passing record_assertion() a p_classification above its
+-- own read level over an accepted incumbent: the write is now refused at COMMIT
+-- instead of blinding the writer to its own row.
+--
+-- Not every read in this migration fails closed, and the ones that do not are
+-- deliberate: an invisible accepted rival and an invisible witness are read the
+-- same way by accept_assertion(), so refusing here would be stricter than the
+-- helper, and idx_assertions_active_unique is not RLS-filtered and still
+-- refuses the identical-window pair.
 CREATE OR REPLACE FUNCTION assertions_transition_complete() RETURNS trigger
 SET search_path = rye, pg_catalog
 AS $$
@@ -555,17 +571,29 @@ BEGIN
        AND (TG_OP = 'INSERT' OR OLD.superseded_by IS NULL)
     THEN
         SELECT * INTO v_replacement FROM assertions WHERE id = NEW.superseded_by;
-        IF FOUND
-           AND (v_replacement.assertion_type IS DISTINCT FROM NEW.assertion_type
-                OR v_replacement.assertion_key IS DISTINCT FROM NEW.assertion_key)
+        -- Not visible is refused, but only for a row that was accepted: a
+        -- candidate closed with a replacement is not holding a value anyone
+        -- can lose, and reject_candidate() passes no replacement at all.
+        IF FOUND THEN
+            IF v_replacement.assertion_type IS DISTINCT FROM NEW.assertion_type
+               OR v_replacement.assertion_key IS DISTINCT FROM NEW.assertion_key
+            THEN
+                RAISE EXCEPTION
+                    'Replacement % is %/%, not %/%; a replacement carries the same assertion_type and assertion_key',
+                    NEW.superseded_by, v_replacement.assertion_type, v_replacement.assertion_key,
+                    NEW.assertion_type, NEW.assertion_key;
+            END IF;
+        ELSIF (TG_OP = 'UPDATE' AND OLD.status = 'accepted')
+              OR (TG_OP = 'INSERT' AND NEW.status = 'accepted')
         THEN
             RAISE EXCEPTION
-                'Replacement % is %/%, not %/%; a replacement carries the same assertion_type and assertion_key',
-                NEW.superseded_by, v_replacement.assertion_type, v_replacement.assertion_key,
-                NEW.assertion_type, NEW.assertion_key;
+                'Assertion % was ended naming replacement %, which is not readable by this caller. An assertion is not replaced by something the writer cannot see.',
+                NEW.id, NEW.superseded_by;
         END IF;
     END IF;
 
+    -- Already closed: NOT EXISTS is false for an invisible successor too, so a
+    -- narrowing whose successor the caller cannot read back raises here.
     IF TG_OP = 'UPDATE'
        AND NEW.effective_to IS DISTINCT FROM OLD.effective_to
        AND NOT EXISTS (
@@ -589,7 +617,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION assertions_transition_complete() IS
-    'At commit: a promotion has an assertion_accepted event naming the row, a superseded_by names a row of the same assertion_type and assertion_key, and a narrowed effective_to has a successor accepted assertion starting where the window now ends. Deferred because the helpers write those facts after the statement that needs them.';
+    'At commit: a promotion has an assertion_accepted event naming the row, a superseded_by names a row of the same assertion_type and assertion_key, and a narrowed effective_to has a successor accepted assertion starting where the window now ends. All three fail closed under the caller''s RLS: a row the writer cannot read back is refused, because otherwise an accepted assertion could be ended by naming an invisible replacement. Deferred because the helpers write those facts after the statement that needs them.';
 
 DROP TRIGGER IF EXISTS trg_assertions_transition_complete ON assertions;
 CREATE CONSTRAINT TRIGGER trg_assertions_transition_complete

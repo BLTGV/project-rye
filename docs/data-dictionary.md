@@ -952,10 +952,17 @@ commit: a promotion has an `assertion_accepted` event naming the row, a
 and a narrowed `effective_to` has a successor accepted assertion starting where
 the window now ends.
 
+All three **fail closed** under the caller's RLS: a row the writer cannot read
+back is refused, not waved through. Otherwise an accepted assertion could be
+ended by naming a replacement classified above the writer's own read level,
+which is erasure.
+
 **Why it exists:** Those three facts are written after the statement that needs
 them. `supersede_assertion()` must mark the incumbent before inserting the
 replacement, or the partial unique index on accepted unsuperseded rows rejects
-the pair. A client may therefore see one of these refusals at `COMMIT`.
+the pair. A client may therefore see one of these refusals at `COMMIT`. The one
+legitimate call this refuses is `record_assertion()` with a `p_classification`
+above the caller's own read level over an accepted incumbent.
 
 #### `assertion_settle_gate_guard()`
 

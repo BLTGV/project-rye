@@ -1018,8 +1018,239 @@ BEGIN
         END IF;
     END LOOP;
 
+    -- ==================================================================
+    -- Obligation 18. An accepted assertion cannot be ended, and a window
+    -- cannot be narrowed, by naming a row the caller cannot read back.
+    -- The commit-time checks run under the caller's RLS, so "not found"
+    -- has to mean no; when it meant yes, a viewer erased an accepted fact
+    -- by pointing it at a 'restricted' candidate of another type.
+    --
+    -- The result is read back as admin, because the attacker cannot see
+    -- what it wrote and its own view would say nothing either way.
+    -- ==================================================================
+    FOREACH v_role IN ARRAY v_roles LOOP
+        PERFORM set_config('app.current_role', 'admin', true);
+        INSERT INTO nodes (node_type, label) VALUES ('thing', 'Invisible replacement subject')
+        RETURNING id INTO v_other;
+        v_incumbent := record_assertion(
+            'invisible_probe', '{"value":"standing"}', v_other,
+            p_assertion_key := 'default', p_basis := 'assumed'
+        );
+
+        PERFORM set_config('app.current_role', v_role, true);
+        IF NOT EXISTS (SELECT 1 FROM assertions WHERE id = v_incumbent) THEN
+            RAISE EXCEPTION
+                'Refusing to pass vacuously: role "%" cannot see the incumbent it is about to erase',
+                v_role;
+        END IF;
+
+        v_failed := false;
+        v_smuggled := gen_random_uuid();
+        BEGIN
+            PERFORM set_config('app.write_path', 'supersede_assertion', true);
+            PERFORM set_config('app.supersede_assertion_id', v_incumbent::text, true);
+            UPDATE assertions SET superseded_at = now(), superseded_by = v_smuggled
+            WHERE id = v_incumbent;
+            PERFORM set_config('app.write_path', '', true);
+            INSERT INTO assertions (
+                id, assertion_type, assertion_key, status, basis,
+                subject_node_id, claim, classification
+            ) VALUES (
+                v_smuggled, 'invisible_other', 'unrelated', 'candidate', 'assumed',
+                v_other, '{"v":"cannot read me"}', 'restricted'
+            );
+            SET CONSTRAINTS trg_assertions_transition_complete IMMEDIATE;
+        EXCEPTION WHEN OTHERS THEN
+            v_failed := true;
+            v_msg := SQLERRM;
+        END;
+        SET CONSTRAINTS trg_assertions_transition_complete DEFERRED;
+        PERFORM set_config('app.write_path', '', true);
+        IF NOT v_failed THEN
+            RAISE EXCEPTION
+                'Role "%" ended an accepted assertion by naming a replacement it cannot read back',
+                v_role;
+        END IF;
+
+        -- Read the outcome as admin: the attacker is blind to its own write.
+        PERFORM set_config('app.current_role', 'admin', true);
+        SELECT * INTO v_row FROM assertions WHERE id = v_incumbent;
+        IF v_row.superseded_at IS NOT NULL OR v_row.superseded_by IS NOT NULL THEN
+            RAISE EXCEPTION
+                'Role "%" left the incumbent ended: superseded_at %, superseded_by %',
+                v_role, v_row.superseded_at, v_row.superseded_by;
+        END IF;
+        IF NOT EXISTS (
+            SELECT 1 FROM current_valid_assertions
+            WHERE subject_node_id = v_other AND assertion_type = 'invisible_probe'
+        ) THEN
+            RAISE EXCEPTION
+                'Role "%" emptied the tuple: current_valid_assertions has no row left', v_role;
+        END IF;
+
+        -- The same attack on a narrowed window: close the incumbent at a
+        -- future instant and name an unreadable successor there.
+        PERFORM set_config('app.current_role', v_role, true);
+        v_failed := false;
+        v_smuggled := gen_random_uuid();
+        BEGIN
+            PERFORM set_config('app.write_path', 'assertion_effective_window', true);
+            PERFORM set_config('app.effective_window_assertion_id', v_incumbent::text, true);
+            UPDATE assertions SET effective_to = v_future WHERE id = v_incumbent;
+            PERFORM set_config('app.write_path', '', true);
+            INSERT INTO assertions (
+                id, assertion_type, assertion_key, status, basis,
+                subject_node_id, claim, effective_at, classification
+            ) VALUES (
+                v_smuggled, 'invisible_probe', 'default', 'accepted', 'assumed',
+                v_other, '{"v":"cannot read me either"}', v_future, 'restricted'
+            );
+            SET CONSTRAINTS trg_assertions_transition_complete IMMEDIATE;
+        EXCEPTION WHEN OTHERS THEN
+            v_failed := true;
+            v_msg := SQLERRM;
+        END;
+        SET CONSTRAINTS trg_assertions_transition_complete DEFERRED;
+        PERFORM set_config('app.write_path', '', true);
+        IF NOT v_failed THEN
+            RAISE EXCEPTION
+                'Role "%" narrowed a window with a successor it cannot read back', v_role;
+        END IF;
+
+        PERFORM set_config('app.current_role', 'admin', true);
+        IF (SELECT effective_to FROM assertions WHERE id = v_incumbent) IS NOT NULL THEN
+            RAISE EXCEPTION 'Role "%" left the window narrowed', v_role;
+        END IF;
+
+        -- The other half: a readable replacement of the wrong type and key,
+        -- which the BEFORE check catches at the statement rather than at
+        -- commit. Both halves of the rule are covered.
+        PERFORM set_config('app.current_role', v_role, true);
+        v_smuggled := gen_random_uuid();
+        INSERT INTO assertions (
+            id, assertion_type, assertion_key, status, basis,
+            subject_node_id, claim, classification
+        ) VALUES (
+            v_smuggled, 'invisible_other', 'unrelated', 'candidate', 'assumed',
+            v_other, '{"v":"readable but wrong"}', 'public'
+        );
+        IF NOT EXISTS (SELECT 1 FROM assertions WHERE id = v_smuggled) THEN
+            RAISE EXCEPTION
+                'Refusing to pass vacuously: role "%" cannot read the public decoy it just wrote',
+                v_role;
+        END IF;
+        v_failed := false;
+        v_rows := -1;
+        BEGIN
+            PERFORM set_config('app.write_path', 'supersede_assertion', true);
+            PERFORM set_config('app.supersede_assertion_id', v_incumbent::text, true);
+            UPDATE assertions SET superseded_at = now(), superseded_by = v_smuggled
+            WHERE id = v_incumbent;
+            GET DIAGNOSTICS v_rows = ROW_COUNT;
+        EXCEPTION WHEN OTHERS THEN
+            v_failed := true;
+            v_msg := SQLERRM;
+        END;
+        PERFORM set_config('app.write_path', '', true);
+        IF NOT v_failed AND v_rows <> 0 THEN
+            RAISE EXCEPTION
+                'Role "%" ended an accepted assertion with a readable replacement of another type', v_role;
+        END IF;
+        PERFORM set_config('app.current_role', 'admin', true);
+        IF (SELECT superseded_at FROM assertions WHERE id = v_incumbent) IS NOT NULL THEN
+            RAISE EXCEPTION 'Role "%" left the incumbent ended by a readable decoy', v_role;
+        END IF;
+    END LOOP;
+
+    -- The fail-closed rule did not catch a helper: supersede_assertion() on an
+    -- `internal` assertion as a team_member still commits, and the replacement
+    -- is readable by that role because the helper copies the classification.
+    PERFORM set_config('app.current_role', 'admin', true);
+    INSERT INTO nodes (node_type, label) VALUES ('thing', 'Internal supersede subject')
+    RETURNING id INTO v_other;
+    PERFORM set_config('app.current_role', 'team_member', true);
+    v_incumbent := record_assertion(
+        'internal_probe', '{"value":"first"}', v_other,
+        p_assertion_key := 'default', p_basis := 'assumed',
+        p_classification := 'internal'
+    );
+    v_id := supersede_assertion(
+        v_incumbent, 'internal_probe', v_other, NULL, '{"value":"second"}',
+        p_new_assertion_key := 'default', p_new_basis := 'assumed'
+    );
+    SET CONSTRAINTS trg_assertions_transition_complete IMMEDIATE;
+    SET CONSTRAINTS trg_assertions_transition_complete DEFERRED;
+    IF NOT EXISTS (SELECT 1 FROM assertions WHERE id = v_id AND classification = 'internal') THEN
+        RAISE EXCEPTION
+            'supersede_assertion() as team_member did not leave a readable internal replacement';
+    END IF;
+    IF (SELECT superseded_by FROM assertions WHERE id = v_incumbent) IS DISTINCT FROM v_id THEN
+        RAISE EXCEPTION 'supersede_assertion() as team_member did not end the internal incumbent';
+    END IF;
+
+    -- The one legitimate call fail-closed refuses, pinned so the cost is a
+    -- fact rather than a guess: record_assertion() with a p_classification
+    -- the caller cannot read, over an accepted incumbent. The helpers that
+    -- copy or derive the classification are unaffected and are exercised in
+    -- obligation 8.
+    PERFORM set_config('app.current_role', 'admin', true);
+    INSERT INTO nodes (node_type, label) VALUES ('thing', 'Classified replacement subject')
+    RETURNING id INTO v_other;
+    PERFORM record_assertion(
+        'classified_probe', '{"value":"plain"}', v_other,
+        p_assertion_key := 'default', p_basis := 'assumed'
+    );
+
+    PERFORM set_config('app.current_role', 'team_member', true);
+    v_failed := false;
+    BEGIN
+        PERFORM record_assertion(
+            'classified_probe', '{"value":"secret"}', v_other,
+            p_assertion_key := 'default', p_basis := 'assumed',
+            p_classification := 'restricted'
+        );
+        SET CONSTRAINTS trg_assertions_transition_complete IMMEDIATE;
+    EXCEPTION WHEN OTHERS THEN
+        v_failed := true;
+        v_msg := SQLERRM;
+    END;
+    SET CONSTRAINTS trg_assertions_transition_complete DEFERRED;
+    IF NOT v_failed THEN
+        RAISE EXCEPTION
+            'record_assertion() with an unreadable classification over an accepted incumbent committed; the fail-closed cost recorded in 0025 is wrong';
+    END IF;
+    IF v_msg NOT LIKE '%not readable by this caller%' THEN
+        RAISE EXCEPTION
+            'The classified replacement failed for an unexpected reason: %', v_msg;
+    END IF;
+    -- And the incumbent survives, which is the point: the write is refused,
+    -- the standing fact is not erased.
+    PERFORM set_config('app.current_role', 'admin', true);
+    IF NOT EXISTS (
+        SELECT 1 FROM current_valid_assertions
+        WHERE subject_node_id = v_other AND assertion_type = 'classified_probe'
+          AND claim->>'value' = 'plain'
+    ) THEN
+        RAISE EXCEPTION 'The refused classified replacement still displaced the incumbent';
+    END IF;
+
+    -- The readable case still works: the same caller, a classification it can
+    -- read, over the same accepted incumbent.
+    PERFORM set_config('app.current_role', 'team_member', true);
+    v_id := record_assertion(
+        'classified_probe', '{"value":"internal"}', v_other,
+        p_assertion_key := 'default', p_basis := 'assumed',
+        p_classification := 'internal'
+    );
+    SET CONSTRAINTS trg_assertions_transition_complete IMMEDIATE;
+    SET CONSTRAINTS trg_assertions_transition_complete DEFERRED;
+    IF (SELECT status FROM assertions WHERE id = v_id) <> 'accepted' THEN
+        RAISE EXCEPTION 'A readable classified replacement was refused';
+    END IF;
+
     -- This suite rolls back, so the deferred checks would never fire and
     -- every write above would be proven only to statement level. Force them.
+    PERFORM set_config('app.current_role', 'admin', true);
     SET CONSTRAINTS ALL IMMEDIATE;
     SET CONSTRAINTS ALL DEFERRED;
 END
