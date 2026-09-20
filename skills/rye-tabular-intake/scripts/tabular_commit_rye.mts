@@ -244,8 +244,14 @@ await runCli(help, async (args) => {
 
   await ensureSourceArtifacts(target, runNodeId, startedEventId, runContext.sourceFiles, scenario);
 
-  for (const record of records) {
-    await commitRecord(target, runNodeId, runId, rowNodeType, scenario, agentId, record);
+  // One outcome row per record: what the tuple holds now, and whether this run
+  // put it there. The counts below are read off this list.
+  const outcomes: OutcomeRow[] = [];
+  for (const [index, record] of records.entries()) {
+    const outcome = await commitRecord(target, runNodeId, runId, rowNodeType, scenario, agentId, record, index);
+    if (outcome) {
+      outcomes.push(outcome);
+    }
   }
 
   await updateRunNodeSummary(target, runNodeId, runId, scenario, summary);
@@ -284,6 +290,8 @@ await runCli(help, async (args) => {
       source_files: runContext.sourceFiles,
       run_fingerprint_sha1: runContext.runFingerprintSha1,
       ...summary,
+      assertions: tallyOutcomes(outcomes),
+      waiting_for_review: waitingList(outcomes),
     })}\n`,
   );
 });
@@ -308,6 +316,96 @@ interface CommitSummary {
   source_rows: number;
   mapped_records: number;
   stage_records: number;
+}
+
+// What one record's tuple holds once the run has passed over it. `waiting`
+// means the area's review policy filed this run's write as a suggestion
+// instead of an answer; `filed_this_run` false means an earlier identical run
+// already filed it and this run wrote nothing.
+interface OutcomeRow {
+  assertion_id: string;
+  subject_id: string;
+  assertion_type: string;
+  assertion_key: string;
+  status: string;
+  review_policy: string | null;
+  still_current_assertion_id: string | null;
+  filed_this_run: boolean;
+  waiting: boolean;
+}
+
+interface WaitingRow {
+  assertion_id: string;
+  subject_id: string;
+  assertion_type: string;
+  assertion_key: string;
+  review_policy: string | null;
+  still_current_assertion_id: string | null;
+  filed_this_run: boolean;
+}
+
+function tallyOutcomes(outcomes: OutcomeRow[]): Record<string, number> {
+  const waiting = outcomes.filter((outcome) => outcome.waiting);
+  return {
+    considered: outcomes.length,
+    accepted: outcomes.length - waiting.length,
+    waiting_for_review: waiting.length,
+    waiting_filed_this_run: waiting.filter((outcome) => outcome.filed_this_run).length,
+    waiting_from_earlier_run: waiting.filter((outcome) => !outcome.filed_this_run).length,
+  };
+}
+
+function waitingList(outcomes: OutcomeRow[]): WaitingRow[] {
+  return outcomes
+    .filter((outcome) => outcome.waiting)
+    .map((outcome) => ({
+      assertion_id: outcome.assertion_id,
+      subject_id: outcome.subject_id,
+      assertion_type: outcome.assertion_type,
+      assertion_key: outcome.assertion_key,
+      review_policy: outcome.review_policy,
+      still_current_assertion_id: outcome.still_current_assertion_id,
+      filed_this_run: outcome.filed_this_run,
+    }))
+    .sort((left, right) =>
+      left.subject_id.localeCompare(right.subject_id)
+      || left.assertion_type.localeCompare(right.assertion_type)
+      || left.assertion_key.localeCompare(right.assertion_key));
+}
+
+function parseOutcomeRow(stdout: string): OutcomeRow | null {
+  const lines = stdout.split(/\r?\n/).map((line) => line.trim()).filter((line) => line.length > 0);
+  const last = lines[lines.length - 1];
+  if (!last || !last.startsWith("{")) {
+    return null;
+  }
+  return JSON.parse(last) as OutcomeRow;
+}
+
+// Both temp tables are per session. The context table carries generated UUIDs
+// between statements; the review table carries one outcome row per record.
+function tempTablesSql(): string {
+  return `CREATE TEMP TABLE IF NOT EXISTS _rye_tabular_intake_context (
+    key text PRIMARY KEY,
+    value text NOT NULL
+);
+TRUNCATE _rye_tabular_intake_context;
+
+-- One row per assertion write this run considered. A row the area's review
+-- policy demoted is a suggestion: the earlier claim, if there was one, is
+-- still the current answer until a person accepts this one.
+CREATE TEMP TABLE IF NOT EXISTS _rye_tabular_intake_review (
+    assertion_id uuid PRIMARY KEY,
+    subject_id text NOT NULL,
+    assertion_type text NOT NULL,
+    assertion_key text NOT NULL,
+    status text NOT NULL,
+    review_policy text,
+    still_current_assertion_id uuid,
+    filed_this_run boolean NOT NULL,
+    waiting boolean NOT NULL
+);
+TRUNCATE _rye_tabular_intake_review;`;
 }
 
 interface SqlOnlyCommitInput {
@@ -440,11 +538,7 @@ async function buildSqlOnlyCommit(input: SqlOnlyCommitInput): Promise<string> {
   lines.push("END");
   lines.push("$rye_tabular_intake_session$;");
   lines.push("");
-  lines.push("CREATE TEMP TABLE IF NOT EXISTS _rye_tabular_intake_context (");
-  lines.push("    key text PRIMARY KEY,");
-  lines.push("    value text NOT NULL");
-  lines.push(");");
-  lines.push("TRUNCATE _rye_tabular_intake_context;");
+  lines.push(tempTablesSql());
   lines.push("");
 
   if (!input.allowDuplicateSource) {
@@ -481,14 +575,19 @@ async function buildSqlOnlyCommit(input: SqlOnlyCommitInput): Promise<string> {
     lines.push("");
   }
 
-  for (const record of input.records) {
-    lines.push(await buildSqlOnlyRecordSql({
+  for (const [index, record] of input.records.entries()) {
+    const statements = await buildRecordStatements({
       runId: input.runId,
+      runNodeIdSql: ctxUuid("run_node_id"),
       rowNodeType: input.rowNodeType,
       scenario: input.scenario,
       agentId: input.agentId,
       record,
-    }));
+      index,
+    });
+    lines.push(statements.write);
+    lines.push("");
+    lines.push(statements.outcome);
     lines.push("");
   }
 
@@ -660,13 +759,23 @@ async function buildSqlOnlySourceArtifactSql(
 );`;
 }
 
-async function buildSqlOnlyRecordSql(input: {
+// The write statement and the statement that reads what it left. They are two
+// statements because a write is invisible to the snapshot that made it: the
+// status record_assertion() settled on can only be read afterwards.
+interface RecordStatements {
+  write: string;
+  outcome: string;
+}
+
+async function buildRecordStatements(input: {
   runId: string;
+  runNodeIdSql: string;
   rowNodeType: string;
   scenario: string | undefined;
   agentId: string;
   record: PipelineRecord;
-}): Promise<string> {
+  index: number;
+}): Promise<RecordStatements> {
   const rowKey = buildRowKey(input.record);
   const assertionKey = assertionKeyForRecord(input.runId, input.record);
   const payloadHash = crypto.createHash("sha256").update(JSON.stringify(input.record)).digest("hex");
@@ -702,7 +811,19 @@ async function buildSqlOnlyRecordSql(input: {
     `Assertion claim for ${rowKey}`,
   );
 
-  return `WITH existing AS (
+  const assertionType = assertionTypeForRecord(input.record);
+  const nodeKey = `row_node:${input.index}`;
+  const assertionRefKey = `assertion:${input.index}`;
+  const liveGuardSql = `SELECT 1
+    FROM rye.assertions a
+    WHERE a.subject_node_id = (SELECT id FROM node_ref)
+      AND a.assertion_type = ${sqlText(assertionType)}
+      AND a.assertion_key = ${sqlText(assertionKey)}
+      AND a.status IN ('accepted', 'candidate')
+      AND a.superseded_at IS NULL
+      AND a.claim->>'payload_hash' = ${sqlText(claim.payload_hash)}`;
+
+  const write = `WITH existing AS (
     SELECT id FROM rye.nodes
     WHERE external_source = ${sqlText(RYE_TABULAR_INTAKE.rowExternalSource)}
       AND external_id = ${sqlText(rowKey)}
@@ -736,35 +857,111 @@ event_ref AS (
       p_event_type := ${sqlText(eventTypeForRecord(input.record))},
       p_summary := ${sqlText(summaryForRecord(input.record))},
       p_properties := ${sqlJson(JSON.stringify(eventProperties))},
-      p_participant_ids := ARRAY[${ctxUuid("run_node_id")}, (SELECT id FROM node_ref)],
+      p_participant_ids := ARRAY[${input.runNodeIdSql}, (SELECT id FROM node_ref)],
       p_participant_roles := ARRAY['run', 'subject'],
       p_actor := ${sqlText(`agent:${input.agentId}`)}
     ) AS id
+),
+written AS (
+    SELECT rye.record_assertion(
+        p_assertion_type := ${sqlText(assertionType)},
+        p_assertion_key := ${sqlText(assertionKey)},
+        p_subject_node_id := (SELECT id FROM node_ref),
+        p_claim := ${sqlJson(JSON.stringify(claim))},
+        p_confidence := 1.0,
+        p_basis := 'observed',
+        p_evidence := ARRAY[
+          jsonb_build_object('kind', 'source', 'event_id', (SELECT id FROM event_ref))
+        ]
+    ) AS id
+    -- Live means accepted or waiting for review. current_valid_assertions
+    -- holds accepted rows only, so a guard that read it filed a second
+    -- identical suggestion every rerun under a policy that demotes this write.
+    WHERE NOT EXISTS (
+${liveGuardSql}
+    )
 )
-SELECT rye.record_assertion(
-    p_assertion_type := ${sqlText(assertionTypeForRecord(input.record))},
-    p_assertion_key := ${sqlText(assertionKey)},
-    p_subject_node_id := (SELECT id FROM node_ref),
-    p_claim := ${sqlJson(JSON.stringify(claim))},
-    p_confidence := 1.0,
-    p_basis := 'observed',
-    p_evidence := ARRAY[
-      jsonb_build_object('kind', 'source', 'event_id', (SELECT id FROM event_ref))
-    ]
-)
--- Live means accepted or waiting for review. current_valid_assertions holds
--- accepted rows only, so a guard that read it filed a second identical
--- suggestion every rerun under a policy that demotes this write.
-WHERE NOT EXISTS (
-    SELECT 1
+INSERT INTO _rye_tabular_intake_context (key, value)
+SELECT ${sqlText(nodeKey)}, (SELECT id::text FROM node_ref)
+UNION ALL
+SELECT ${sqlText(assertionRefKey)}, id::text FROM written
+ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;`;
+
+  const outcome = `DO $rye_tabular_intake_outcome$
+DECLARE
+  v_node_id uuid := (SELECT value::uuid FROM _rye_tabular_intake_context WHERE key = ${sqlText(nodeKey)});
+  v_new_id uuid := (SELECT value::uuid FROM _rye_tabular_intake_context WHERE key = ${sqlText(assertionRefKey)});
+  v_id uuid;
+  v_status text;
+  v_review_gate jsonb;
+  v_still_current uuid;
+  v_filed_this_run boolean;
+BEGIN
+  IF v_new_id IS NOT NULL THEN
+    -- This run wrote it. Whether it landed accepted or waiting is the row's
+    -- status; attrs.review_gate names the policy that held it.
+    v_id := v_new_id;
+    v_filed_this_run := true;
+  ELSE
+    -- The write was skipped: a live row already carries this exact claim. It
+    -- is either the accepted answer or a suggestion an earlier identical run
+    -- filed, which must be reported again rather than filed twice.
+    SELECT a.id
+    INTO v_id
     FROM rye.assertions a
-    WHERE a.subject_node_id = (SELECT id FROM node_ref)
-      AND a.assertion_type = ${sqlText(assertionTypeForRecord(input.record))}
+    WHERE a.subject_node_id = v_node_id
+      AND a.assertion_type = ${sqlText(assertionType)}
       AND a.assertion_key = ${sqlText(assertionKey)}
       AND a.status IN ('accepted', 'candidate')
       AND a.superseded_at IS NULL
       AND a.claim->>'payload_hash' = ${sqlText(claim.payload_hash)}
-);`;
+    ORDER BY (a.status = 'accepted') DESC, a.created_at, a.id
+    LIMIT 1;
+    v_filed_this_run := false;
+  END IF;
+
+  IF v_id IS NULL THEN
+    RETURN;
+  END IF;
+
+  SELECT a.status, a.attrs->'review_gate'
+  INTO v_status, v_review_gate
+  FROM rye.assertions a
+  WHERE a.id = v_id;
+
+  -- The claim that still answers while a suggestion waits.
+  SELECT a.id
+  INTO v_still_current
+  FROM rye.assertions a
+  WHERE a.subject_node_id = v_node_id
+    AND a.assertion_type = ${sqlText(assertionType)}
+    AND a.assertion_key = ${sqlText(assertionKey)}
+    AND a.status = 'accepted'
+    AND a.superseded_at IS NULL
+    AND a.id <> v_id
+  ORDER BY a.created_at DESC, a.id
+  LIMIT 1;
+
+  INSERT INTO _rye_tabular_intake_review (
+    assertion_id, subject_id, assertion_type, assertion_key,
+    status, review_policy, still_current_assertion_id, filed_this_run, waiting
+  )
+  VALUES (
+    v_id,
+    ${sqlText(rowKey)},
+    ${sqlText(assertionType)},
+    ${sqlText(assertionKey)},
+    v_status,
+    v_review_gate->>'review_policy',
+    COALESCE((v_review_gate->>'incumbent_assertion_id')::uuid, v_still_current),
+    v_filed_this_run,
+    (v_status IS DISTINCT FROM 'accepted' OR v_review_gate IS NOT NULL)
+  )
+  ON CONFLICT (assertion_id) DO NOTHING;
+END
+$rye_tabular_intake_outcome$;`;
+
+  return { write, outcome };
 }
 
 async function buildSqlOnlyRunSummarySql(input: SqlOnlyCommitInput, inputPath: string): Promise<string> {
@@ -809,7 +1006,36 @@ function buildSqlOnlySummarySelect(input: SqlOnlyCommitInput): string {
   'run_fingerprint_sha1', ${sqlText(input.runContext.runFingerprintSha1)},
   'source_rows', ${input.summary.source_rows},
   'mapped_records', ${input.summary.mapped_records},
-  'stage_records', ${input.summary.stage_records}
+  'stage_records', ${input.summary.stage_records},
+  'assertions', (
+    SELECT json_build_object(
+      'considered', count(*),
+      'accepted', count(*) FILTER (WHERE NOT r.waiting),
+      'waiting_for_review', count(*) FILTER (WHERE r.waiting),
+      'waiting_filed_this_run', count(*) FILTER (WHERE r.waiting AND r.filed_this_run),
+      'waiting_from_earlier_run', count(*) FILTER (WHERE r.waiting AND NOT r.filed_this_run)
+    )
+    FROM _rye_tabular_intake_review r
+  ),
+  'waiting_for_review', COALESCE(
+    (
+      SELECT json_agg(
+        json_build_object(
+          'assertion_id', r.assertion_id,
+          'subject_id', r.subject_id,
+          'assertion_type', r.assertion_type,
+          'assertion_key', r.assertion_key,
+          'review_policy', r.review_policy,
+          'still_current_assertion_id', r.still_current_assertion_id,
+          'filed_this_run', r.filed_this_run
+        )
+        ORDER BY r.subject_id, r.assertion_type, r.assertion_key
+      )
+      FROM _rye_tabular_intake_review r
+      WHERE r.waiting
+    ),
+    '[]'::json
+  )
 ) AS tabular_commit_rye_summary;`;
 }
 
@@ -983,108 +1209,46 @@ async function commitRecord(
   scenario: string | undefined,
   agentId: string,
   record: PipelineRecord,
-): Promise<void> {
-  const rowKey = buildRowKey(record);
-  const assertionKey = assertionKeyForRecord(runId, record);
-  const payloadHash = crypto.createHash("sha256").update(JSON.stringify(record)).digest("hex");
-  const claim = buildClaim({
+  index: number,
+): Promise<OutcomeRow | null> {
+  const statements = await buildRecordStatements({
     runId,
+    runNodeIdSql: `${sqlText(runNodeId)}::uuid`,
+    rowNodeType,
     scenario,
+    agentId,
     record,
-    payloadHash,
+    index,
   });
-  const rowNodeProperties = buildRowNodeProperties({
-    record,
-    runId,
-    scenario,
-  });
-  const eventProperties = buildRowEventProperties({
-    runId,
-    scenario,
-    record,
-  });
-  await assertValidPayload(
-    "rye_row_node_properties.schema.json",
-    rowNodeProperties,
-    `Row node properties for ${rowKey}`,
-  );
-  await assertValidPayload(
-    "rye_row_event_properties.schema.json",
-    eventProperties,
-    `Row event properties for ${rowKey}`,
-  );
-  await assertValidPayload(
-    schemaFileForClaim(record),
-    claim,
-    `Assertion claim for ${rowKey}`,
-  );
 
+  // One psql session per record, as before. The temp tables live only for that
+  // session, which is enough: the write statement hands the ids to the
+  // statement that reads what the write left, and the last line is this
+  // record's outcome.
   const sql = `
 SET search_path = rye, public, pg_catalog;
 ${sessionPreambleSql()}
-WITH existing AS (
-    SELECT id FROM rye.nodes
-    WHERE external_source = ${sqlText(RYE_TABULAR_INTAKE.rowExternalSource)}
-      AND external_id = ${sqlText(rowKey)}
-      AND archived_at IS NULL
-),
-updated AS (
-    UPDATE rye.nodes
-    SET label = ${sqlText(labelForRecord(record))},
-        properties = properties || ${sqlJson(JSON.stringify(rowNodeProperties))},
-        updated_at = now()
-    WHERE id IN (SELECT id FROM existing)
-    RETURNING id
-),
-inserted AS (
-    INSERT INTO rye.nodes (node_type, label, external_source, external_id, properties)
-    SELECT ${sqlText(rowNodeType)},
-           ${sqlText(labelForRecord(record))},
-           ${sqlText(RYE_TABULAR_INTAKE.rowExternalSource)},
-           ${sqlText(rowKey)},
-           ${sqlJson(JSON.stringify(rowNodeProperties))}
-    WHERE NOT EXISTS (SELECT 1 FROM existing)
-    RETURNING id
-),
-node_ref AS (
-    SELECT id FROM updated
-    UNION ALL
-    SELECT id FROM inserted
-),
-event_ref AS (
-    SELECT rye.record_event(
-      p_event_type := ${sqlText(eventTypeForRecord(record))},
-      p_summary := ${sqlText(summaryForRecord(record))},
-      p_properties := ${sqlJson(JSON.stringify(eventProperties))},
-      p_participant_ids := ARRAY[${sqlText(runNodeId)}::uuid, (SELECT id FROM node_ref)],
-      p_participant_roles := ARRAY['run', 'subject'],
-      p_actor := ${sqlText(`agent:${agentId}`)}
-    ) AS id
-)
-SELECT rye.record_assertion(
-    p_assertion_type := ${sqlText(assertionTypeForRecord(record))},
-    p_assertion_key := ${sqlText(assertionKey)},
-    p_subject_node_id := (SELECT id FROM node_ref),
-    p_claim := ${sqlJson(JSON.stringify(claim))},
-    p_confidence := 1.0,
-    p_basis := 'observed',
-    p_evidence := ARRAY[
-      jsonb_build_object('kind', 'source', 'event_id', (SELECT id FROM event_ref))
-    ]
-)
--- Live means accepted or waiting for review; see the note on the SQL-only path.
-WHERE NOT EXISTS (
-    SELECT 1
-    FROM rye.assertions a
-    WHERE a.subject_node_id = (SELECT id FROM node_ref)
-      AND a.assertion_type = ${sqlText(assertionTypeForRecord(record))}
-      AND a.assertion_key = ${sqlText(assertionKey)}
-      AND a.status IN ('accepted', 'candidate')
-      AND a.superseded_at IS NULL
-      AND a.claim->>'payload_hash' = ${sqlText(claim.payload_hash)}
-);`;
+${tempTablesSql()}
 
-  await runPsql(target, ["-v", "ON_ERROR_STOP=1", "-c", sql], undefined, repoRoot);
+${statements.write}
+
+${statements.outcome}
+
+SELECT json_build_object(
+  'assertion_id', r.assertion_id,
+  'subject_id', r.subject_id,
+  'assertion_type', r.assertion_type,
+  'assertion_key', r.assertion_key,
+  'status', r.status,
+  'review_policy', r.review_policy,
+  'still_current_assertion_id', r.still_current_assertion_id,
+  'filed_this_run', r.filed_this_run,
+  'waiting', r.waiting
+)::text
+FROM _rye_tabular_intake_review r;`;
+
+  const stdout = await runPsqlCapture(target, ["-Atq", "-v", "ON_ERROR_STOP=1", "-f", "-"], sql, repoRoot);
+  return parseOutcomeRow(stdout);
 }
 
 async function updateRunNodeSummary(
