@@ -779,6 +779,54 @@ BEGIN
   ) OR to_regclass('rye.active_disputes') IS NOT NULL THEN
     RAISE EXCEPTION 'removed v1 dispute or fact-promotion surfaces are still installed';
   END IF;
+
+  -- Advisory identity resolution and the merge-chain lookup (0033). All four
+  -- are reads: SECURITY INVOKER, each declaring its own search_path.
+  IF to_regprocedure('rye.normalize_identity_value(text, text)') IS NULL THEN
+    RAISE EXCEPTION 'normalize_identity_value function missing';
+  END IF;
+  IF to_regprocedure('rye.identity_keys(text, uuid)') IS NULL THEN
+    RAISE EXCEPTION 'identity_keys function missing';
+  END IF;
+  IF to_regprocedure('rye.resolve_node_identity(text, text, jsonb, int, uuid)') IS NULL THEN
+    RAISE EXCEPTION 'resolve_node_identity function missing';
+  END IF;
+  IF to_regprocedure('rye.resolve_merged_node(uuid)') IS NULL THEN
+    RAISE EXCEPTION 'resolve_merged_node function missing';
+  END IF;
+
+  IF EXISTS (
+      SELECT 1
+      FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = v_schema
+        AND p.proname IN ('resolve_node_identity', 'identity_keys',
+                          'normalize_identity_value', 'resolve_merged_node')
+        AND (
+            p.prosecdef
+            OR NOT EXISTS (
+                SELECT 1
+                FROM unnest(coalesce(p.proconfig, ARRAY[]::text[])) c
+                WHERE c LIKE 'search_path=%'
+            )
+        )
+  ) THEN
+    RAISE EXCEPTION
+      'the identity functions must be SECURITY INVOKER and set their own search_path';
+  END IF;
+
+  -- Identity resolution is advisory: nothing in the write path calls it.
+  IF EXISTS (
+      SELECT 1
+      FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = v_schema
+        AND p.proname <> 'resolve_node_identity'
+        AND p.prosrc LIKE '%resolve_node_identity%'
+  ) THEN
+    RAISE EXCEPTION
+      'resolve_node_identity must stay advisory; a function in the schema calls it';
+  END IF;
 END
 $$;
 SQL

@@ -53,6 +53,7 @@ schema/
     0004_agent_capabilities.sql — Agent INSERT policies, record_artifact(), classification propagation
     0005_function_fixes.sql — agent_node_summary, node_context, merge/create events, bulk link, CDC PK, link_record consistency
     0006_security_config.sql — Data-driven assertion type gating, role hierarchy, supporting table RLS
+    0033_identity_resolution.sql — Advisory identity resolution, merge-chain lookup
     0100_profile_crm.sql    — CRM profile (opportunities, pipelines, deal stages)
     0110_profile_pm.sql     — PM profile (tasks, projects, sprints)
 scripts/
@@ -150,7 +151,9 @@ Views: `current_valid_assertions` (accepted and effective now), `node_context`
 | `link_records_batch(schema, table, ids[], type, labels[], properties[])` | Bulk domain table import. Returns uuid[]. |
 | `refresh_materialized_views()` | Refresh all profile matviews (CONCURRENTLY) |
 | `log_agent_query(agent_id, query, summary, node_ids)` | Audit log for agent reads |
-| `merge_nodes(duplicate_id, canonical_id)` | Deduplicate nodes. Records `node_merge` event. |
+| `merge_nodes(duplicate_id, canonical_id)` | Deduplicate nodes. Records `node_merge` event. Not available to an agent — record the duplicate and ask a person. |
+| `resolve_node_identity(node_type, label, identity)` | Advisory identity lookup: `match` / `ambiguous` / `new`. Read-only, never blocks a write. |
+| `resolve_merged_node(node_id)` | Follow `node_merges` to the surviving node |
 
 ## Key Conventions
 
