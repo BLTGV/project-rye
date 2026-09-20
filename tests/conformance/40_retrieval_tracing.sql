@@ -5,7 +5,10 @@
 -- Work item: work/015-retrieval-eval-and-tracing.md. Migration 0034.
 --
 -- The eight numbered obligations from the decision, in order, plus the static
--- guard that keeps every read surface out of the write path.
+-- guard that keeps every read surface out of the write path, plus 40.9, which
+-- verification of work/015 added: a trace the helper refuses can still be
+-- hand-built through record_event(), and an event is immutable, so the view
+-- has to degrade such a row instead of raising on it.
 --
 -- Every case runs under a role RLS applies to: scripts/conformance.sh runs SQL
 -- suites under RYE_TEST_ROLE when the connection is a superuser, and under
@@ -427,6 +430,12 @@ BEGIN
             ('seq of 0',           '{"trace_id": "trace40-bad", "seq": 0}'::jsonb),
             ('negative seq',       '{"trace_id": "trace40-bad", "seq": -3}'::jsonb),
             ('fractional seq',     '{"trace_id": "trace40-bad", "seq": 1.5}'::jsonb),
+            -- seq above int4. agent_query_trace reads seq as an integer and an
+            -- event is immutable, so one of these would close the view for
+            -- every role for good if it were accepted.
+            ('seq above int4',     '{"trace_id": "trace40-bad", "seq": 2147483648}'::jsonb),
+            ('seq far above int4', '{"trace_id": "trace40-bad", "seq": 1767225600000}'::jsonb),
+            ('seq as 1e400',       '{"trace_id": "trace40-bad", "seq": 1e400}'::jsonb),
             ('non-numeric seq',    '{"trace_id": "trace40-bad", "seq": "two"}'::jsonb),
             ('a jsonb array',      '[{"trace_id": "trace40-bad", "seq": 1}]'::jsonb),
             ('a jsonb string',     '"trace40-bad"'::jsonb),
@@ -534,13 +543,13 @@ $$;
 -- 40.5 No read surface writes.
 --
 -- Two halves. The static half greps pg_proc.prosrc and is signature-agnostic,
--- so it covers find_nodes, find_paths, find_nodes_batch and neighborhood the
--- moment migration 0032 lands, without this file knowing their arguments. The
--- behavioural half counts events across the read surfaces that exist today and
--- can be called here.
+-- so it catches an auto-log in any rye function whatever its arguments. The
+-- behavioural half calls every read surface the contract names and counts
+-- events around them, with anti-vacuity on each: a call that found nothing
+-- must not pass as a call that logged nothing.
 --
--- Read surfaces absent from this tree are NOTICEd by name, never skipped in
--- silence: re-run this suite after 0032 merges.
+-- A read surface named here but absent from the instance is a failure, not a
+-- skip: 0032 and 0033 are applied migrations.
 -- --------------------------------------------------------------------------
 DO $$
 DECLARE
@@ -566,10 +575,10 @@ BEGIN
     END IF;
 
     -- And the named read surfaces write nothing at all: no event helper, no
-    -- INSERT. Checked by body, so it holds for whatever arguments 0032 gives
-    -- them.
+    -- INSERT. Checked by body, so it holds whatever arguments they take.
     FOREACH v_surface IN ARRAY ARRAY[
-        'find_nodes', 'find_nodes_batch', 'find_paths', 'neighborhood', 'agent_node_summary'
+        'find_nodes', 'find_nodes_batch', 'find_paths', 'neighborhood',
+        'agent_node_summary', 'resolve_node_identity', 'resolve_merged_node'
     ] LOOP
         IF NOT EXISTS (
             SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
@@ -591,8 +600,8 @@ BEGIN
     END LOOP;
 
     IF array_length(v_missing, 1) IS NOT NULL THEN
-        RAISE NOTICE
-            '40.5: NOT YET COVERED BEHAVIOURALLY -- these read surfaces are absent from this tree: %. They arrive with migration 0032 (work/013); re-run tests/conformance/40_retrieval_tracing.sql after it merges.',
+        RAISE EXCEPTION
+            '40.5: these read surfaces are absent, so this obligation cannot be proved: %. They come from migrations 0032 and 0033, which are applied.',
             array_to_string(v_missing, ', ');
     END IF;
 END
@@ -601,15 +610,52 @@ $$;
 DO $$
 DECLARE
     v_fenn    uuid;
+    v_odile   uuid;
     v_before  bigint;
     v_after   bigint;
     v_summary jsonb;
+    v_answer  jsonb;
     v_rows    bigint;
 BEGIN
     PERFORM set_config('app.current_role', 'admin', true);
     SELECT v INTO v_fenn FROM rt_fixture WHERE k = 'fenn';
+    SELECT v INTO v_odile FROM rt_fixture WHERE k = 'odile';
 
     SELECT count(*) INTO v_before FROM events;
+
+    -- The traversal reads (0032). Each must return at least one row, or a
+    -- call that found nothing would pass as a call that logged nothing.
+    SELECT count(*) INTO v_rows FROM find_nodes('Fenn', ARRAY['person']);
+    IF v_rows < 1 THEN
+        RAISE EXCEPTION '40.5: find_nodes found nothing, so it proves nothing';
+    END IF;
+
+    SELECT count(*) INTO v_rows
+    FROM find_nodes_batch(ARRAY['Fenn', 'Odile Instruments']);
+    IF v_rows < 2 THEN
+        RAISE EXCEPTION '40.5: find_nodes_batch returned % rows for two queries, so it proves nothing', v_rows;
+    END IF;
+
+    SELECT count(*) INTO v_rows
+    FROM find_paths(p_from_node_id := v_odile, p_direction := 'out');
+    IF v_rows < 1 THEN
+        RAISE EXCEPTION '40.5: find_paths walked no path from the fixture org, so it proves nothing';
+    END IF;
+
+    v_answer := neighborhood(p_node_id := v_fenn);
+    IF coalesce(jsonb_array_length(v_answer->'nodes'), 0) < 1 THEN
+        RAISE EXCEPTION '40.5: neighborhood returned no nodes, so it proves nothing';
+    END IF;
+
+    -- The identity reads (0033).
+    v_answer := resolve_node_identity('person', 'Fenn');
+    IF coalesce(jsonb_array_length(v_answer->'candidates'), 0) < 1 THEN
+        RAISE EXCEPTION '40.5: resolve_node_identity found no candidate for Fenn, so it proves nothing';
+    END IF;
+
+    IF resolve_merged_node(v_fenn) IS DISTINCT FROM v_fenn THEN
+        RAISE EXCEPTION '40.5: resolve_merged_node did not return the unmerged fixture node';
+    END IF;
 
     -- agent_node_summary: anti-vacuity is that it actually found the node.
     v_summary := agent_node_summary(v_fenn, 10);
@@ -818,6 +864,141 @@ BEGIN
     END IF;
 
     RAISE NOTICE '40.8 node_salience counts a traced query exactly as an untraced one';
+END
+$$;
+
+-- --------------------------------------------------------------------------
+-- 40.9 A hand-built trace cannot close the read surface. (Added at
+-- verification of work/015: an out-of-range seq raised `integer out of range`
+-- from agent_query_trace for every role, admin included.)
+--
+-- log_agent_query() refuses these shapes, but properties is a jsonb column and
+-- any session that may write can reach record_event() directly. Events are
+-- immutable and Rye deletes none, so a row the view could not read would close
+-- the only read surface tracing has, permanently, for everyone. Every shape
+-- below must degrade to null columns instead.
+-- --------------------------------------------------------------------------
+DO $$
+DECLARE
+    v_fenn   uuid;
+    v_case   record;
+    v_role   text;
+    v_rows   bigint;
+    v_seq    integer;
+    v_trace  text;
+    v_events bigint;
+BEGIN
+    PERFORM set_config('app.current_role', 'admin', true);
+    PERFORM set_config('app.current_teams', '', true);
+    SELECT v INTO v_fenn FROM rt_fixture WHERE k = 'fenn';
+
+    FOR v_case IN
+        SELECT * FROM (VALUES
+            ('seq above int4',   '{"trace_id":"trace40-raw","seq":2147483648}'::jsonb),
+            ('seq far above',    '{"trace_id":"trace40-raw","seq":1767225600000}'::jsonb),
+            ('seq as 1e400',     '{"trace_id":"trace40-raw","seq":1e400}'::jsonb),
+            ('seq below int4',   '{"trace_id":"trace40-raw","seq":-2147483649}'::jsonb),
+            ('seq negative',     '{"trace_id":"trace40-raw","seq":-5}'::jsonb),
+            ('seq fractional',   '{"trace_id":"trace40-raw","seq":1.5}'::jsonb),
+            ('seq as a string',  '{"trace_id":"trace40-raw","seq":"two"}'::jsonb),
+            ('seq as a numeric string', '{"trace_id":"trace40-raw","seq":"12"}'::jsonb),
+            ('seq as an object', '{"trace_id":"trace40-raw","seq":{"n":1}}'::jsonb),
+            ('seq as an array',  '{"trace_id":"trace40-raw","seq":[1]}'::jsonb),
+            ('seq as null',      '{"trace_id":"trace40-raw","seq":null}'::jsonb),
+            ('seq absent',       '{"trace_id":"trace40-raw"}'::jsonb),
+            ('trace_id object',  '{"trace_id":{"a":1},"seq":1}'::jsonb),
+            ('trace_id number',  '{"trace_id":7,"seq":1}'::jsonb),
+            ('trace_id absent',  '{"seq":1}'::jsonb),
+            ('tool an object',   '{"trace_id":"trace40-raw","seq":1,"tool":{"a":1}}'::jsonb),
+            ('intent an array',  '{"trace_id":"trace40-raw","seq":1,"intent":[1,2]}'::jsonb),
+            ('args an array',    '{"trace_id":"trace40-raw","seq":1,"args":[1,2]}'::jsonb),
+            ('results an object','{"trace_id":"trace40-raw","seq":1,"results":{"a":1}}'::jsonb),
+            ('selected an array','{"trace_id":"trace40-raw","seq":1,"selected":[1]}'::jsonb),
+            ('an empty object',  '{}'::jsonb)
+        ) AS c(label, trace)
+    LOOP
+        PERFORM record_event(
+            p_event_type        := 'agent_query',
+            p_summary           := 'hand built',
+            p_properties        := jsonb_build_object(
+                                       'query', v_case.label,
+                                       'agent_id', 'trace40-raw',
+                                       'trace', v_case.trace),
+            p_participant_ids   := ARRAY[v_fenn],
+            p_participant_roles := ARRAY['queried']
+        );
+    END LOOP;
+
+    -- Anti-vacuity: the rows really landed, and the view really covers them.
+    SELECT count(*) INTO v_events FROM events
+    WHERE event_type = 'agent_query' AND properties->>'agent_id' = 'trace40-raw';
+    IF v_events <> 21 THEN
+        RAISE EXCEPTION '40.9: % hand-built rows landed, expected 21', v_events;
+    END IF;
+
+    -- Every role reads the view without an error. This is the whole point: a
+    -- refusal here is an outage nobody can clear, because events are immutable.
+    FOREACH v_role IN ARRAY ARRAY['admin', 'team_member', 'viewer', 'agent:trace40', ''] LOOP
+        PERFORM set_config('app.current_role', v_role, true);
+        SELECT count(*) INTO v_rows FROM agent_query_trace;
+        IF v_rows < 1 THEN
+            RAISE EXCEPTION
+                '40.9: role "%" reads no trace rows at all, so reading the view proves nothing', v_role;
+        END IF;
+        -- And every column, not only the ones this suite happens to select.
+        PERFORM trace_id, seq, event_id, occurred_at, agent_id, query, summary,
+                tool, intent, args, results, selected, node_ids
+        FROM agent_query_trace;
+    END LOOP;
+
+    PERFORM set_config('app.current_role', 'admin', true);
+
+    -- Each degraded shape reads as a null, not as an error and not as a lie.
+    SELECT seq INTO v_seq FROM agent_query_trace
+    WHERE query = 'seq above int4' AND agent_id = 'trace40-raw';
+    IF v_seq IS NOT NULL THEN
+        RAISE EXCEPTION '40.9: an out-of-range seq read back as %, expected null', v_seq;
+    END IF;
+
+    SELECT count(*) INTO v_rows FROM agent_query_trace
+    WHERE agent_id = 'trace40-raw' AND query IN (
+        'seq above int4', 'seq far above', 'seq as 1e400', 'seq below int4',
+        'seq negative', 'seq fractional', 'seq as a string',
+        'seq as a numeric string', 'seq as an object', 'seq as an array',
+        'seq as null', 'seq absent', 'an empty object')
+      AND seq IS NOT NULL;
+    IF v_rows <> 0 THEN
+        RAISE EXCEPTION '40.9: % unreadable seq values read back as integers', v_rows;
+    END IF;
+
+    SELECT count(*) INTO v_rows FROM agent_query_trace
+    WHERE agent_id = 'trace40-raw'
+      AND query IN ('trace_id object', 'trace_id number', 'trace_id absent', 'an empty object')
+      AND trace_id IS NOT NULL;
+    IF v_rows <> 0 THEN
+        RAISE EXCEPTION '40.9: a non-text trace_id read back as a group key';
+    END IF;
+
+    SELECT count(*) INTO v_rows FROM agent_query_trace
+    WHERE agent_id = 'trace40-raw'
+      AND ((query = 'tool an object'    AND tool     IS NOT NULL)
+        OR (query = 'intent an array'   AND intent   IS NOT NULL)
+        OR (query = 'args an array'     AND args     IS NOT NULL)
+        OR (query = 'results an object' AND results  IS NOT NULL)
+        OR (query = 'selected an array' AND selected IS NOT NULL));
+    IF v_rows <> 0 THEN
+        RAISE EXCEPTION '40.9: a wrongly typed trace field read back as data';
+    END IF;
+
+    -- A well-formed trace written the same way still reads whole, so the
+    -- guards degrade only what is degraded.
+    SELECT trace_id INTO v_trace FROM agent_query_trace
+    WHERE agent_id = 'trace40-whole-agent';
+    IF v_trace IS DISTINCT FROM 'trace40-whole' THEN
+        RAISE EXCEPTION '40.9: the guards degraded a well-formed trace to %', v_trace;
+    END IF;
+
+    RAISE NOTICE '40.9 a hand-built trace degrades to nulls and never closes the view';
 END
 $$;
 

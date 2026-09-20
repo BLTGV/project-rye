@@ -198,6 +198,15 @@ BEGIN
                 'p_trace seq must be a whole number of at least 1; got %.',
                 p_trace->>'seq';
         END IF;
+        -- agent_query_trace reads seq as an integer, and an event is
+        -- immutable. A caller that reaches for an epoch in milliseconds or a
+        -- snowflake id would otherwise write one row that no reader could
+        -- ever get past.
+        IF v_seq > 2147483647 THEN
+            RAISE EXCEPTION
+                'p_trace seq must be at most 2147483647; got %. seq numbers a step within one loop -- 1, 2, 3 -- it is not a timestamp and not an id.',
+                p_trace->>'seq';
+        END IF;
 
         v_properties := v_properties || jsonb_build_object('trace', p_trace);
     END IF;
@@ -247,29 +256,53 @@ DROP TABLE rye_0034_saved_grants;
 -- participants this caller cannot see is absent from the view. A short trace
 -- therefore never means a short loop.
 --
--- seq is read defensively: the helper validates, but events.properties is a
--- jsonb column and a writer role can INSERT one directly, so a raw row with a
--- non-numeric seq shows a null rather than failing the whole view for every
--- reader. Such a row sorts last, where it is visible as the garbage it is.
+-- EVERY FIELD IS READ DEFENSIVELY, AND THIS IS THE LOAD-BEARING PART. The
+-- helper validates, but `events.properties` is a jsonb column and any session
+-- that may write can call record_event() with a hand-built properties.trace.
+-- An event is immutable and Rye deletes none, so a single bad row that made
+-- this view raise would make the feature's only read surface unreadable for
+-- every role, for good -- an out-of-range seq did exactly that before this
+-- guard, with `integer out of range` for admin too. So no stored value of any
+-- shape may produce an error here: a huge number, a negative, a fraction, a
+-- numeric string, `1e400`, an object where text was expected. Each degrades to
+-- a null column, and a null trace_id or seq sorts last, where it is visible as
+-- the garbage it is.
+--
+-- Mechanically: the extraction happens once in a LATERAL, guarded by
+-- jsonb_typeof, and only the THEN branch of a CASE ever casts. AND does not
+-- short-circuit in SQL -- the planner may evaluate operands in any order -- so
+-- a cast may never sit in the same AND chain as the test that makes it safe.
+--
+-- `->>` itself cannot raise, so agent_id and query stay as node_salience reads
+-- them. The trace's own fields are typed by the contract, so a value of the
+-- wrong json type reads as null rather than as its JSON text.
+--
+-- security_invoker, so RLS applies as everywhere. event_read_policy (0003)
+-- shows an event only when it has a visible participant or the caller is
+-- admin, and event_participants filters by node visibility, so an event whose
+-- participants this caller cannot see is absent from the view. A short trace
+-- therefore never means a short loop.
 -- --------------------------------------------------------------------------
 CREATE OR REPLACE VIEW agent_query_trace
 WITH (security_invoker = true) AS
 SELECT
-    e.properties->'trace'->>'trace_id' AS trace_id,
+    g.trace_id,
     CASE
-        WHEN jsonb_typeof(e.properties->'trace'->'seq') = 'number'
-        THEN trunc((e.properties->'trace'->>'seq')::numeric)::integer
+        WHEN g.seq_num >= 1
+         AND g.seq_num <= 2147483647
+         AND g.seq_num = trunc(g.seq_num)
+        THEN g.seq_num::integer
     END AS seq,
     e.id AS event_id,
     e.occurred_at,
     e.properties->>'agent_id' AS agent_id,
     e.properties->>'query' AS query,
     e.summary,
-    e.properties->'trace'->>'tool' AS tool,
-    e.properties->'trace'->>'intent' AS intent,
-    e.properties->'trace'->'args' AS args,
-    e.properties->'trace'->'results' AS results,
-    e.properties->'trace'->'selected' AS selected,
+    g.tool,
+    g.intent,
+    g.args,
+    g.results,
+    g.selected,
     ARRAY(
         SELECT ep.node_id
         FROM event_participants ep
@@ -277,9 +310,27 @@ SELECT
         ORDER BY ep.node_id
     ) AS node_ids
 FROM events e
+CROSS JOIN LATERAL (SELECT e.properties->'trace' AS t) tr
+CROSS JOIN LATERAL (
+    SELECT
+        CASE WHEN jsonb_typeof(tr.t->'trace_id') = 'string'
+             THEN tr.t->>'trace_id' END                              AS trace_id,
+        CASE WHEN jsonb_typeof(tr.t->'seq') = 'number'
+             THEN (tr.t->>'seq')::numeric END                        AS seq_num,
+        CASE WHEN jsonb_typeof(tr.t->'tool') = 'string'
+             THEN tr.t->>'tool' END                                  AS tool,
+        CASE WHEN jsonb_typeof(tr.t->'intent') = 'string'
+             THEN tr.t->>'intent' END                                AS intent,
+        CASE WHEN jsonb_typeof(tr.t->'args') = 'object'
+             THEN tr.t->'args' END                                   AS args,
+        CASE WHEN jsonb_typeof(tr.t->'results') = 'array'
+             THEN tr.t->'results' END                                AS results,
+        CASE WHEN jsonb_typeof(tr.t->'selected') = 'object'
+             THEN tr.t->'selected' END                               AS selected
+) g
 WHERE e.event_type = 'agent_query'
   AND jsonb_typeof(e.properties->'trace') = 'object'
 ORDER BY 1, 2, 4, 3;
 
 COMMENT ON VIEW agent_query_trace IS
-    'One row per agent_query event carrying properties.trace: the steps of an agent retrieval loop, grouped by trace_id and ordered by seq, then occurred_at and event_id. security_invoker, so an event whose participants the caller cannot see is absent and a short trace never means a short loop. Ordering is by seq and not by time because record_event() stamps occurred_at with transaction start, so every step of one loop in one transaction shares it.';
+    'One row per agent_query event carrying properties.trace: the steps of an agent retrieval loop, grouped by trace_id and ordered by seq, then occurred_at and event_id. security_invoker, so an event whose participants the caller cannot see is absent and a short trace never means a short loop. Ordering is by seq and not by time because record_event() stamps occurred_at with transaction start, so every step of one loop in one transaction shares it. Every trace field is type-guarded and seq is range-guarded: a hand-built trace written straight through record_event() degrades to null columns and never makes this view raise, because an event is immutable and one such row would otherwise close the read surface for every role.';
