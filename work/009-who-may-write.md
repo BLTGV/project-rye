@@ -1,6 +1,6 @@
 # 009 who-may-write
 
-- status: open
+- status: done
 - opened: 2026-09-20
 - areas: schema
 - contracts: contracts/sql-surface.md
@@ -33,13 +33,13 @@ carries the authority of the person it acts for and none of its own."
 - `assertion_insert_policy` gates assertion types, never roles.
 
 ## Acceptance criteria
-- [ ] A `viewer` session and a session with no role set cannot insert, update, archive, or delete nodes, edges, events, event participants, assertions, assertion evidence, or artifacts, by raw SQL or through any helper. Reads are unchanged. The Architect lists every table and helper covered.
-- [ ] No caller other than a Rye admin can archive, end, delete, or re-point the things that decide which review policy governs a subject: onboarding_scope nodes, `scope_governs_subject` and `scope_governs_source` edges, and any other edge or node governing_scope() reads. The Architect names the full set from governing_scope() and scope_review_policy().
-- [ ] After every refused attempt, scope_review_policy() for the subject is unchanged and an agent write that was a candidate before is still a candidate.
-- [ ] merge_nodes(): an agent or viewer gets a plain refusal that says who can merge, not "Duplicate node not found", on both owner types. A caller allowed to merge still can, on both owner types.
-- [ ] Every existing suite, seed, replay load, scripts/rye subcommand, and the admin Worker still work. Where a test or script relied on writing with no role set, it now sets one, and the report lists each such change.
-- [ ] A conformance or security test covers each case under a non-superuser role and under the non-superuser owner, fails without the new migration, and refuses to pass vacuously (superuser, row_security off, role not read back, ROW_COUNT unchecked).
-- [ ] `./scripts/test-all.sh` passes.
+- [x] A `viewer` session and a session with no role set cannot insert, update, archive, or delete nodes, edges, events, event participants, assertions, assertion evidence, or artifacts, by raw SQL or through any helper. Reads are unchanged. The Architect lists every table and helper covered.
+- [x] No caller other than a Rye admin can archive, end, delete, or re-point the things that decide which review policy governs a subject: onboarding_scope nodes, `scope_governs_subject` and `scope_governs_source` edges, and any other edge or node governing_scope() reads. The Architect names the full set from governing_scope() and scope_review_policy().
+- [x] After every refused attempt, scope_review_policy() for the subject is unchanged and an agent write that was a candidate before is still a candidate.
+- [x] merge_nodes(): an agent or viewer gets a plain refusal that says who can merge, not "Duplicate node not found", on both owner types. A caller allowed to merge still can, on both owner types.
+- [x] Every existing suite, seed, replay load, scripts/rye subcommand, and the admin Worker still work. Where a test or script relied on writing with no role set, it now sets one, and the report lists each such change.
+- [x] A conformance or security test covers each case under a non-superuser role and under the non-superuser owner, fails without the new migration, and refuses to pass vacuously (superuser, row_security off, role not read back, ROW_COUNT unchecked).
+- [x] `./scripts/test-all.sh` passes.
 
 ## Constraints
 - One new migration, 0026. No applied migration edited; 0022 to 0025 are applied.
@@ -62,7 +62,11 @@ carries the authority of the person it acts for and none of its own."
 - Tests 30 and 31 had to change: they attacked as viewer and unset, which can no longer write. Their write loops now use agent:t and team_member, and the viewer and unset cases move to test 32 as refusals. Overturn: Lead.
 
 ## Verified
-- filled in at close
+- Verifier, three passes by execution under both database owner types, committed, read back as admin. Third pass PASS on a tree carrying 0026 and 0027 together: viewer and unset sessions write nothing to the seven core tables or node_source_map, by raw SQL or through any helper, including all eight SECURITY DEFINER writers (list derived from pg_proc; the same calls succeed as admin in the same run); role-string spellings fail closed; scope and governance structure is admin-only for every verb and scope_review_policy() stayed strict after every attempt; merge_nodes() refuses agents, viewer, unset, and system:cdc with a plain 42501 before the lock, including for an absent id, and refuses a non-admin on a governed node; system:cdc can only insert events and participants; CDC records role-less, viewer, and agent:t domain writes with session_role, and the caller's role is restored after savepoints, multi-row statements, and a forced CDC failure; all write policies keep every prior conjunct; trigger order on assertions is settle gate, gate_may_write, immutable, insert_review under C and en_US; bulk cost 1.18x on a 5,000-row insert. Suite 32 fails without 0026 under both owners and refuses a superuser.
+- Refusal shape differs: a refused INSERT raises 42501; a refused UPDATE or DELETE by an ordinary session is zero rows on every owner type; only a session that IS a superuser owner sees the trigger raise. Tests assert the row.
+- Lead, integration, 2026-09-20: merged at 07022ba; final combined run on b7da6fd, `./scripts/test-all.sh` exit 0, both owner types.
+- Not verified: any deployed instance.
+
 
 ## Reports
 ### Architect, 2026-09-20 (commits 7356ce2, 32504b7, 940a5a9)
@@ -123,4 +127,4 @@ crm_code_counters was not bookkeeping (a viewer could rewind a counter and
 the next create_task() collided); moved to work/011, migration 0029.
 
 ## Close
-status line and date
+done 2026-09-20. Merged to agent-roles at 07022ba; combined suite passed on b7da6fd. Two verifier failures, each a different hole (definer helpers under a superuser owner; node_source_map as a CDC write primitive), both closed. The Lead overturned one Architect ruling (CDC must keep recording).
