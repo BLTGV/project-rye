@@ -1,6 +1,6 @@
 # 008 assertion-lifecycle-gate
 
-- status: open, integrating. Ruling received (see "Ruled by Casey"). Four verifier passes; every HIGH is closed; one MEDIUM and one LOW remain, both rulings. Not merged.
+- status: done
 - opened: 2026-09-19
 - areas: schema
 - contracts: contracts/sql-surface.md
@@ -61,15 +61,15 @@ already showed that ending a review_policy drops scope_review_policy() from
 strict to open, and that 0023 now refuses it. This item must not reopen it.
 
 ## Acceptance criteria
-- [ ] Under an agent role, a viewer, a team member, and no role set, a direct INSERT of an accepted assertion of an ordinary type does not land accepted outside what record_assertion() would have allowed the same caller in the same scope. The Architect decides whether it is refused or lands as a suggestion, and says why.
-- [ ] Under the same four callers, no raw UPDATE promotes a candidate, whatever session settings the caller sets first. Every helper-owned setting is tried, not only the two known ones.
-- [ ] Under the same four callers, no raw UPDATE ends an accepted assertion, narrows its window, rewrites its attrs, or changes its classification, whatever settings the caller sets first.
-- [ ] Every lifecycle helper still works for a caller it worked for before: record_assertion, accept_assertion, reject_candidate, supersede_assertion, schedule_assertion_change, record_distillation, resolve_knowledge_gap, mark_assertion_outcome, window narrowing inside record_assertion, classification propagation from evidence, merge_nodes, and the crm and pm profile helpers that write assertions. The Architect lists the full set from the migrations; the list above is the Lead's starting point, not the answer.
-- [ ] A helper still refuses what it refused before: an agent under a strict review policy cannot accept through accept_assertion().
-- [ ] work/005 is unchanged in effect: tests/conformance/30_configuration_gate.sql passes unmodified, and ending or promoting a registry_entry or review_policy as a non-admin is still refused.
-- [ ] A conformance or security test covers each case above under a non-superuser role, fails on a tree without the new migration, and refuses to pass vacuously: it refuses to run as a superuser or with row_security off, it checks ROW_COUNT after every UPDATE and DELETE (RLS turns a refused write into zero rows, not an error), and it proves the session role was actually set (`SET app.current_role = ...` is a syntax error because current_role is reserved; use set_config()).
-- [ ] `./scripts/docker-test.sh test --reset --profiles crm,pm` passes from an empty volume.
-- [ ] The contract and the migration header state the protection boundary in the terms of "What this does and does not protect" above.
+- [x] Under an agent role, a viewer, a team member, and no role set, a direct INSERT of an accepted assertion of an ordinary type does not land accepted outside what record_assertion() would have allowed the same caller in the same scope. The Architect decides whether it is refused or lands as a suggestion, and says why.
+- [x] Under the same four callers, no raw UPDATE promotes a candidate, whatever session settings the caller sets first. Every helper-owned setting is tried, not only the two known ones.
+- [x] Under the same four callers, no raw UPDATE ends an accepted assertion, narrows its window, rewrites its attrs, or changes its classification, whatever settings the caller sets first.
+- [x] Every lifecycle helper still works for a caller it worked for before: record_assertion, accept_assertion, reject_candidate, supersede_assertion, schedule_assertion_change, record_distillation, resolve_knowledge_gap, mark_assertion_outcome, window narrowing inside record_assertion, classification propagation from evidence, merge_nodes, and the crm and pm profile helpers that write assertions. The Architect lists the full set from the migrations; the list above is the Lead's starting point, not the answer.
+- [x] A helper still refuses what it refused before: an agent under a strict review policy cannot accept through accept_assertion().
+- [x] work/005 is unchanged in effect: tests/conformance/30_configuration_gate.sql passes unmodified, and ending or promoting a registry_entry or review_policy as a non-admin is still refused.
+- [x] A conformance or security test covers each case above under a non-superuser role, fails on a tree without the new migration, and refuses to pass vacuously: it refuses to run as a superuser or with row_security off, it checks ROW_COUNT after every UPDATE and DELETE (RLS turns a refused write into zero rows, not an error), and it proves the session role was actually set (`SET app.current_role = ...` is a syntax error because current_role is reserved; use set_config()).
+- [x] `./scripts/docker-test.sh test --reset --profiles crm,pm` passes from an empty volume.
+- [x] The contract and the migration header state the protection boundary in the terms of "What this does and does not protect" above.
 
 ## Constraints
 - Additive: one new numbered migration, 0025. 0022 is work/004 and 0024 is work/006, both in another session's worktrees and not yet on this branch; 0023 is work/005. No applied migration is edited, 0023 included.
@@ -98,19 +98,16 @@ strict to open, and that 0023 now refuses it. This item must not reopen it.
 - No agent-kit change: the skill already tells agents to use the helpers. If the Architect changes a helper's signature or a caller-visible message, agent-kit is added. Overturn: Architect.
 
 ## Verified
-Nothing is merged. What follows was checked by execution on the builder's
-branch worktree-agent-adaac359cced8c325 at 21919b9 (agent-roles ff99729
-merged in), by the Verifier, third pass, on a live Docker install under SET
-ROLE to a non-superuser role, with writes committed and rows re-read:
-- Holds for agent:t, viewer, team_member, and no role, with every helper-owned setting forged: a direct accepted INSERT is judged by the scope's review policy exactly as record_assertion() would (accepted under open, candidate under strict and candidates_only); no raw UPDATE promotes a candidate; no raw UPDATE narrows a window without a successor, rewrites or drops attrs keys, changes classification, un-ends a row, or moves accepted back to candidate; a cross-tuple replacement, a decoy replacement, a two-subject row, and a future-effective promotion into an instant an accepted row holds are all refused.
-- Every helper in decision 0008 obligation 8 still commits, asserted by effect. accept_assertion() still refuses agent:t under strict. Test 30 is byte-identical to agent-roles and passes. Test 31 fails without 0025 and refuses a superuser. `./scripts/docker-test.sh test --reset --profiles crm,pm` passes from an empty volume. Constraint audit passes: no current_user, session_user, pg_has_role, SECURITY DEFINER, or new table; all seven functions declare search_path.
-- DOES NOT HOLD (open HIGH): a caller can end an accepted assertion by naming a replacement it cannot read back. Both replacement checks (0025 lines 426 and 558, `IF FOUND`) run under the caller's RLS, so a row the caller classifies above its own read level passes both. Reproduced as viewer, committed: forge the supersede settings, UPDATE the accepted row setting superseded_at and superseded_by to a new id, INSERT that id as a candidate of another type and key with classification 'restricted', COMMIT. The incumbent is ended and current_valid_assertions has 0 rows for the tuple. This is erasure, the thing this item exists to stop. It is the one fail-open decision 0008 section A chose on purpose.
-- DOES NOT HOLD (LOW): 0025 line 534 says the contract discloses that fail-open; the contract's list of limits does not.
+- Lead, integration, 2026-09-20: base 453e5fd (agent-roles with claude/funny-tu-65d029 merged at 285d694, carrying work/004 with 0022, work/006 with 0024, and work/007-ci). Merged worktree-agent-adaac359cced8c325 (64e9e14 through 5f2d98e), no conflicts. Final tree fddd6ab. `./scripts/test-all.sh` exit 0: Docker flow with a superuser owner, the whole suite again under a NOSUPERUSER NOBYPASSRLS owner run from the host so 21, 22, 23 execute, tests 30 and 31 and both security suites under each owner, admin build, site build. No container left. Log: scratchpad suite-fddd6ab.log.
+- Verifier, six passes by execution on live installs, the last two under BOTH owner types, as agent:t, viewer, team_member, and no role, with every helper-owned setting forged, writes committed, and results read back as admin. On 015c7a9 all acceptance criteria pass except one overstated phrase. Holds: a direct accepted INSERT is judged as record_assertion() would judge it; no raw UPDATE promotes a candidate beyond what accept_assertion() gives the same caller; no raw UPDATE ends an accepted assertion without an accepted, unsuperseded, readable assertion still standing on the same subject, type, and key; refused too are a null, decoy, cross-tuple, invisible, born-closed, or live-candidate replacement, window narrowing with no successor, attrs rewrite with no outcome, classification change, un-ending, demotion, two-subject rows, and a future-effective promotion over a live incumbent. Every lifecycle helper commits, asserted by effect, under both owners. accept_assertion() still refuses an agent under strict. 0022, 0023, 0024, test 30, and tests/security/02 are byte-identical to the other session's verified versions; test 30's eleven message assertions still see the settle gate first. Test 31 fails without 0025 under both owner types and refuses a superuser. verify.sh fails on a dropped 0025 trigger and on a dropped 0022 policy.
+- Lead, after the sixth pass: the overstated phrase ("the chain ends somewhere current") is removed from the contract and decision (453e5fd) and from 0025 (5f2d98e). Checked by diff, not by a seventh pass: since 015c7a9, 0025 changed in comment lines only, and test 31 gained obligation 19.
+- Stated limits, measured, not defects (contract, "The row is the gate, not the route"): the outcome label can be written by hand; supersede_assertion() does not consult review policy; a raw insert resolves scope without a witness; only agent:* callers are policy-gated on promotion, as in accept_assertion(); a caller who cannot read an accepted rival can leave two overlapping accepted rows (raw 2 and helper 2 under a non-superuser owner; raw 2 and helper 1 under the Docker superuser owner, because accept_assertion() is SECURITY DEFINER); the inferred-displacement search shares that cause and has no fixture; the replacement test is blind to the effective window, as supersede_assertion() with a future date is; merge_nodes() into a strict scope followed by reject_candidate() on the copy empties both keys through helpers alone.
+- Not verified: any deployed instance, Supabase's pooler, a GitHub runner. Nothing was pushed or applied to a real database.
 
 ## Ruled by Casey, 2026-09-20
 Take the Lead's recommendation on both remaining findings: change no code, disclose the hidden-rival overlap as a stated limit and correct the false sentence, reword the erasure claim to "replaced, or moved into review". Also: integrate the other session's verified items (work/004 with 0022, work/006 with 0024, work/007-ci) so everything merges together. Architect wording: da2f316. Their branch merged into agent-roles at 285d694.
 
-## Open ruling, 2026-09-20 (fourth pass, builder df43fa1, Architect 002044a)
+## History: open ruling, 2026-09-20 (fourth pass, builder df43fa1, Architect 002044a)
 Closed and re-verified on df43fa1: the invisible-replacement erasure, in
 twelve committed runs (four callers by three hidden classifications), a
 replacement on an unseen node, a chain ending in an invisible row, and an
@@ -124,7 +121,7 @@ Remaining:
 - LOW. An accepted row may be ended naming a same-tuple replacement that is a candidate, leaving no accepted value and one row in review_queue. Requiring the replacement to be accepted would break merge_nodes() under a strict scope, which is the default already taken. The contract's bold claim "never ends with nothing replacing it" reads stronger than the rule.
 Lead's recommendation: change no code. Disclose the MEDIUM as a stated limit and correct the false sentence; reword the LOW's claim to "replaced, or moved into review". The alternative for the MEDIUM, a SECURITY DEFINER reader used only to refuse, would tell a caller that a hidden row exists, is a no-op on Supabase where the owner is bound by RLS, and cuts against the constraint on reading past RLS.
 
-## Hand-off to Casey (after the third pass; superseded by "Open ruling" above)
+## History: hand-off after the third pass
 Verification failed three times. Each failure was a different problem and each earlier one was fixed and re-verified, so no single problem survived two attempts; but three passes each finding a new HIGH is the signal the two-strike rule exists for, so the Lead stopped rather than run a third fix.
 - Recommended next step, small: fail closed. In both replacement checks, raise when the named row is not visible (`IF NOT FOUND THEN RAISE`) in place of passing. The Verifier checked the cost: supersede_assertion() copies the incumbent's classification, so a helper's replacement is always as readable as the row it replaces. Architect amends decision 0008 section A and the contract's limits; builder edits 0025 in place (it is applied nowhere) and adds the attack to test 31; Verifier runs a fourth pass.
 - The question worth a person's judgment: whether "the row is the gate" is converging. Found so far by attack, not by the design: a cross-tuple exemption, a null-collapsing comparison, a skipped rival test, NEW.subject_ref being null in BEFORE triggers, two-subject rows, and RLS-invisible replacements. The alternative the Architect rejected (REVOKE UPDATE plus SECURITY DEFINER helpers) is a no-op on Supabase and the Docker login, where the connection is the table owner.
@@ -225,5 +222,14 @@ cuts. Full flow passed on port 54359.
 See "Open ruling". SELECT inventory complete at eleven. Criteria 1, 3 to 8,
 and 10 pass; 2 and 9 turn on the ruling.
 
+### Integration and passes five and six, 2026-09-20
+Other session's branch merged into agent-roles at 285d694; item renumbered
+007 to 008 (2107dcd). Builder 149d583: clean merge, 0025 unchanged for the
+non-superuser owner, test-all.sh green. Verifier pass five: FAIL, MEDIUM, a
+replacement born already closed; Lead added the two-transaction route
+through reject_candidate(). Architect 9a2006d: test the key, not the named
+row. Builder 015c7a9. Verifier pass six: all code criteria pass under both
+owners; LOW, one overstated phrase. Lead 453e5fd, builder 5f2d98e.
+
 ## Close
-status line and date
+done 2026-09-20. Merged to agent-roles at fddd6ab with work/004, work/006, and work/007-ci; combined suite passed under both owner types. Not pushed. Six verifier passes; five fix rounds, each on a different finding. Follow-ups to open: what viewer and an unset role may write at all (insert assertions, archive a scope node or its scope_governs_subject edge, delete that edge, call merge_nodes); supersede_assertion() does not consult review policy; merge_nodes() plus governing_scope() pick the governing scope by lowest uuid after a cross-scope merge; merge_nodes under an agent role on a non-superuser owner (from work/006); a fixture for the inferred-displacement search; a worktree bootstrap for admin/ and site/ node_modules; accept_assertion() reading past RLS where the owner is a superuser.
