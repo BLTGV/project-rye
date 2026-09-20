@@ -178,9 +178,14 @@ SQL
 
 subject_id="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atq <<<"$seed_sql" | tail -n 1)"
 
+# The role is set by its own earlier statement in the same psql session, not
+# by a CTE or a lateral the planner is free to reorder past the RLS filter on
+# the governance tables. `\g /dev/null` keeps its output out of the captured
+# token.
 issue_token() {
   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atq <<SQL
 SET search_path = rye, public, pg_catalog;
+SELECT set_config('app.current_role', 'admin', false) \g /dev/null
 SELECT rye.issue_agent_token('$1', '$2'${3:+, $3});
 SQL
 }
@@ -589,15 +594,16 @@ expect_present "auth off sees an account-area candidate" "$open_queue" "$mcp_can
 
 candidate_token_id="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atq <<SQL
 SET search_path = rye, public, pg_catalog;
-WITH cfg AS (SELECT set_config('app.current_role', 'admin', false))
+SELECT set_config('app.current_role', 'admin', false) \g /dev/null
 SELECT id
-FROM rye.agent_api_tokens, cfg
+FROM rye.agent_api_tokens
 WHERE token_hash = encode(digest('${candidate_token}', 'sha256'), 'hex')
 LIMIT 1;
 SQL
 )"
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atq <<SQL >/dev/null
 SET search_path = rye, public, pg_catalog;
+SELECT set_config('app.current_role', 'admin', false);
 SELECT rye.revoke_agent_token('${candidate_token_id}'::uuid, 'api-security-test');
 SQL
 

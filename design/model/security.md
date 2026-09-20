@@ -463,3 +463,77 @@ RLS is enabled and forced on all supporting and configuration tables.
 |---|---|
 | SELECT | All roles (needed by `redact_properties()`) |
 | INSERT/UPDATE/DELETE | `admin` only |
+
+It is also the instance's list of role names. The governance policies in section 7 read it to decide whether a session is a named role.
+
+---
+
+## 7. Governance Table RLS
+
+Nine tables say which areas exist, who holds authority in them, which channels feed them, which agents exist, what each agent may do, and what each agent did. RLS is enabled and forced on all nine. `app.current_role` decides — never `current_user`, never `pg_has_role()`.
+
+### 7.1 Session shapes
+
+| Shape | Matched when `app.current_role` is |
+|---|---|
+| admin | `admin` |
+| named role | any `role_classification_access.role_name` |
+| agent-shaped | `agent:<key>`, whether or not an identity by that key exists |
+| bound agent | `agent:<agent_key>` of an `active` `agent_identities` row |
+| unknown | anything else, including unset |
+
+Two read-only helpers are the definition. `rye_current_agent_key()` returns the part after `agent:`, or null; it reads no table, so it is safe inside `agent_identities`' own policy. `rye_current_agent_id()` resolves that key to an identity id, or null; it reads the roster, so it may be used only in policies on tables below `agent_identities`. Neither is `SECURITY DEFINER`. **Own rows** always means `agent_id = rye_current_agent_id()`.
+
+**`app.current_user_id` is a label, not a binding.** It is the actor string helpers write into events, `created_by`, and audit payloads. It is free text, it is frequently a human or a test marker, and no rule here reads it. A session whose label names a different agent than its role is not an error: the label is ignored, and the session is the agent its role names, or no agent at all. `agent_can_promote_in_scope()` resolved the acting agent from the label before this and now resolves through `rye_current_agent_id()` only. A test or client that sets `app.current_role` to `agent:<key>` must use the stored key of the identity whose grants it expects.
+
+### 7.2 Who reads, who writes
+
+| Table | admin | named role | bound agent | agent-shaped only | unknown |
+|---|---|---|---|---|---|
+| `knowledge_domains` | read all; insert, update, delete | read all | read areas it holds | nothing | nothing |
+| `domain_authorities` | read all; insert, update, delete | read all | read rows of areas it holds | nothing | nothing |
+| `channel_domain_subscriptions` | read all; insert, update, delete | read all | read rows of areas it holds | nothing | nothing |
+| `domain_claim_policies` | read all; insert, update, delete | read all | read rows of areas it holds | nothing | nothing |
+| `agent_identities` | read all; insert, update, delete | read all | read all | read all | nothing |
+| `agent_capability_grants` | read all; insert, update, delete | nothing | read own rows | nothing | nothing |
+| `agent_action_log` | read all; insert only | nothing | read own rows | nothing | nothing |
+| `api_idempotency_keys` | read all; insert, delete | nothing | read own rows | nothing | nothing |
+| `agent_api_tokens` | read all; insert, update, delete | nothing | nothing | nothing | nothing |
+
+An agent **holds** an area when it has an active, unexpired `agent_capability_grants` row whose `domain_id` is that area or null. The capability name is not part of the rule.
+
+The whole roster is readable by every session that can see anything else. `agent_identities` carries no secret, and it is the deny-list for "an agent is never a settler". A deny-list some callers cannot read is a deny-list that fails open.
+
+`agent_action_log` is append-only for everyone, admin included, exactly as `events` and `assertion_evidence` are. There is no UPDATE or DELETE policy on it.
+
+### 7.3 No policy reads its own table
+
+A policy whose expression subqueries its own table raises `infinite recursion detected in policy for relation`. One that calls a function reading its own table recurses to `stack depth limit exceeded` — `SECURITY DEFINER` included. So the tables are ordered, and a policy reads only levels strictly below its own:
+
+| Level | Tables |
+|---|---|
+| 0 | `role_classification_access`, `assertion_type_access`, `field_classifications` |
+| 1 | `agent_identities` |
+| 2 | `agent_capability_grants`, `agent_action_log`, `api_idempotency_keys`, `agent_api_tokens` |
+| 3 | `knowledge_domains`, `domain_authorities`, `channel_domain_subscriptions`, `domain_claim_policies` |
+
+The chain area → grants → identities → roles terminates. That is why the roster's read rule is key-only rather than "names an active identity": at level 1 there is nothing left to ask.
+
+### 7.4 Writes go through the helpers, and the policies enforce it
+
+`ensure_knowledge_domain`, `subscribe_channel_to_domain`, `grant_domain_authority`, `create_agent_identity`, and `grant_agent_capability` stay `SECURITY INVOKER` with no role check in the body. What refuses a non-admin is the admin-only write policy on the table each one writes — the same rule that governs a direct `INSERT`, so there is one rule in one place.
+
+Two writes are made on behalf of a caller who is not an admin, and both use the write-path gate of section 2.6:
+
+| Gate value | Policy | Function |
+|---|---|---|
+| `record_agent_action` | `agent_action_log_insert_policy` | `record_agent_action()` |
+| `agent_create_candidate` | `api_idempotency_keys_insert_policy` | `agent_create_candidate()` |
+
+The log insert is admitted from any session so that a denial is recorded even when the caller was impersonating another agent. `record_agent_action()` therefore generates the row id itself rather than using `INSERT ... RETURNING`: `RETURNING` reads the new row back, which puts it through a SELECT policy that admits only the caller's own rows, and a log write that has to be readable by its writer is not an audit trail.
+
+### 7.5 `SECURITY DEFINER` does not bypass these policies
+
+Under `FORCE ROW LEVEL SECURITY` with an owner that is not a superuser — the Supabase case — a `SECURITY DEFINER` function is still subject to every policy, evaluated with the caller's session variables, because `app.current_role` is session state and the function does not change it. Marking a function `DEFINER` buys no visibility here. The agent functions keep working because the rows they read are readable to the session that calls them and the rows they write are admitted by a named gate.
+
+Refusals are not uniform. A refused `INSERT` raises `42501`. A refused `UPDATE` or `DELETE` raises nothing and affects zero rows. A refused `SELECT` returns zero rows.

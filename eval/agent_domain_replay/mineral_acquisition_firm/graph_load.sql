@@ -1,4 +1,5 @@
 SET search_path = rye, public, pg_catalog;
+SELECT set_config('app.current_role', 'admin', false);
 
 SELECT rye.ensure_knowledge_domain('acquisition-pipeline', 'Acquisition Pipeline', 'Deal stages, owners, next actions, and close timing.');
 SELECT rye.ensure_knowledge_domain('account-updates', 'Account Updates', 'Seller, owner, and account health updates shared across channels.');
