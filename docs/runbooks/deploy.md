@@ -84,13 +84,20 @@ npx wrangler rollback <deployment-id>
 **What it is:** `scripts/test-nonsuperuser-owner.sh`, run as a named step
 ("sql (nonsuperuser owner)") inside `scripts/test-all.sh`, alongside the
 existing superuser-owner step. It brings up its own disposable postgres
-(`scripts/docker-test.sh`, own port/compose project), creates a database
-owned by an ordinary `NOSUPERUSER NOBYPASSRLS` role (extensions installed
+(`scripts/docker-test.sh`, own port) and creates a database owned by an
+ordinary `NOSUPERUSER NOBYPASSRLS` role (extensions installed
 by the superuser first, then handed to the owner — mirrors Supabase), and
 runs `install.sh` + `conformance.sh` as that role from the host. It exists
 because a superuser database owner bypasses row-level security for itself
 and every `SECURITY DEFINER` function it owns; Supabase's owner is not a
 superuser, and five bugs on 2026-09-19 were invisible to CI without this.
+
+`docker-compose.yml` sets no project name, and both this step and the
+existing superuser-owner step run `docker-test.sh` from the same
+directory, so they share one compose project and differ only by port.
+`test-all.sh` runs them in sequence — the first step tears its container
+down before the second resets it — which is what makes that safe. Do not
+run the two steps at the same time from one checkout.
 
 **Run it alone:**
 
