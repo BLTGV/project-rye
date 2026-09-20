@@ -42,6 +42,12 @@ SELECT link_record(
 
 Calling it again with updated properties merges them into the existing node.
 
+### The mapping is keyed by the source row
+
+`node_source_map`'s primary key is `(source_schema, source_table, source_id)`. One source row names one node. One node may hold many source rows, including many rows of the same table — which is what `merge_nodes()` leaves behind, because it re-points every mapping the duplicate held and deletes none. So a join back to a domain table may return several rows for a merged entity, and that multiplicity is the point: each source row keeps its graph identity.
+
+`link_record()` for a merged source row therefore returns the canonical node and creates nothing. Before migration `0031` the key named `node_id` instead of `source_id`, so a merge deleted the duplicate's mapping whenever the canonical already mapped a row of the same table, and the next `link_record()` for that row minted a fresh, empty node. `rye_restore_merged_source_maps()` repairs instances that carry such merges; `0031` runs it once.
+
 ### Bulk import
 
 ```sql

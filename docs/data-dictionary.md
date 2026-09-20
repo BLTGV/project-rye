@@ -106,9 +106,13 @@ Maps graph nodes to records in domain tables.
 
 **Why it exists:** Rye is an overlay. When a graph node represents a row in an existing table (a customer, a product, a ticket), this table records the mapping. This enables joins back to the source table and drives CDC — only rows with a mapping produce change events.
 
-**Key columns:** `node_id`, `source_schema`, `source_table`, `source_id`, `synced_at`. Primary key: `(node_id, source_schema, source_table)`.
+**Key columns:** `node_id`, `source_schema`, `source_table`, `source_id`, `synced_at`. Primary key: `(source_schema, source_table, source_id)` since `0031` — the key is the source row. One source row names one node; one node may hold many source rows, which is what a merge leaves behind. `idx_nsm_node` serves the reverse lookup.
+
+Before `0031` the key was `(node_id, source_schema, source_table)`, one mapping per source table per node. `merge_nodes()` therefore could not re-point the duplicate's mapping when the canonical already mapped a row of the same table — the ordinary dedup case — and deleted it instead. The source row lost its graph identity with no error, and the next `link_record()` for it minted a fresh, empty node: the merged duplicate came back without its edges, assertions, or history. A merge now re-points every mapping and deletes none.
 
 **Write convention:** Use `link_record()` instead of inserting directly — it creates both the node and the source map entry.
+
+**Repair:** `rye_restore_merged_source_maps()` puts back mappings that pre-`0031` merges dropped.
 
 #### `node_merges` — Deduplication Tracking
 
@@ -462,7 +466,7 @@ link_record(p_source_schema, p_source_table, p_source_id, p_node_type, p_label, 
 
 Connects a domain table row to the graph. Creates a node (with `external_id` / `external_source`) and a `node_source_map` entry. Each distinct `source_id` creates a new node. Calling again with the same `(schema, table, source_id)` updates the existing node's properties.
 
-Lookup order: checks `node_source_map` first (canonical path), then falls back to `external_id`/`external_source` on the nodes table. A unique index on `node_source_map(source_schema, source_table, source_id)` prevents duplicate mappings.
+Lookup order: checks `node_source_map` first (canonical path), then falls back to `external_id`/`external_source` on the nodes table. `node_source_map`'s primary key is `(source_schema, source_table, source_id)`, so a source row names one node. After a merge the mapping points at the canonical node, and `link_record()` for that row returns it and creates nothing.
 
 **Why it exists:** The two-step pattern of `INSERT INTO nodes` + `INSERT INTO node_source_map` is error-prone and repetitive. This function makes domain integration a single idempotent call.
 
@@ -1007,6 +1011,18 @@ Merges a duplicate node into a canonical node. Records a `node_merge` event (bef
 **Why it exists:** Cross-source deduplication is a common operational problem. When two nodes represent the same real-world entity, all their graph relationships need to follow the merge. This function handles the full redirect atomically.
 
 **Who may call it.** A merge is irreversible, it moves one subject's history onto another, and it crosses review policies, so it is for people. Four refusals, all `42501` and all raised **before the first `FOR UPDATE`**: a role `rye_role_may_write()` is false for (`merge_nodes requires a role that may write`), an agent-shaped role (`merge_nodes is not available to an agent`; record the duplicate and ask a person), `system:cdc` (`merge_nodes is not available to system:cdc, which only records domain changes`), and a non-admin merging a duplicate that is an `onboarding_scope` node or an endpoint of a live governance edge (`Merging a node a scope governs requires a Rye admin`). The ordering matters: `SELECT ... FOR UPDATE` applies the UPDATE policy as a silent filter, so a gate placed after the lock reported `Duplicate node % not found` about a node the caller could see. After `0026` that message means the node is absent or invisible and nothing else.
+
+**Source mappings travel; none is deleted.** Since `0031` every `node_source_map` row the duplicate holds is re-pointed at the canonical node. The key is `(source_schema, source_table, source_id)`, which does not contain `node_id`, so a re-point never collides and the canonical node ends up holding one mapping per merged source row. `link_record()` for any of those rows returns the canonical node, and change capture attaches that row's later events to it.
+
+#### `rye_restore_merged_source_maps()`
+
+```
+rye_restore_merged_source_maps() → jsonb
+```
+
+Puts back source mappings that a pre-`0031` merge deleted, reading `node_merges` and the archived duplicate's `external_id` / `external_source`. Admin only, `SECURITY INVOKER`, re-runnable, and a no-op once every mapping is correct — which is every instance installed from `0031` onward. Migration `0031` runs it once.
+
+Returns counts. `restored`: a mapping was put back on the merge's terminal canonical node. `already_mapped`: the source row already maps there. `occupied`: the source row maps to some other node — the resurrected duplicate the old key minted on the next lazy link, which may have accumulated its own history, so nothing is re-pointed silently; the remedy is `merge_nodes(mapped_node, canonical)`. `ambiguous`: two archived duplicates claim the same source row and were merged into different canonicals. `unresolved`: `external_source` matched no surviving `(source_schema, source_table)` pair, or matched several. The last three are left alone and reported.
 
 #### `agent_node_summary()`
 
