@@ -31,6 +31,9 @@ past the merge.
 ## Assumed by default
 - Not included, because they are features and not defects: admin API stats fields, plugin manifests contributing self-settled types, a replay runner, agent-role describe_category (work/001 to 003 follow-ups). Overturn: Casey.
 - Not fixable from here: confirming `psql` exists on the GitHub runner (needs a push and the workflow scope).
+- Migration numbers used: 0028, 0029, 0030, 0124. Overturn: Lead.
+- Mention-linking in add_comment() starts working (it never did). No in-repo caller exists, so no output changed. Overturn: Casey.
+- node_merges has no update or delete for anyone, admin included: a wrong merge is answered by a new merge and its event. Overturn: Casey.
 
 ## Verified
 - filled in at close
@@ -52,6 +55,26 @@ inodes with the main checkout.
 ### Architect, 2026-09-20 (commit 7356ce2)
 Contract sentence: no alias FROM a gated configuration type. rye-cli
 contract line for `settle-gate <assertion_type>`.
+
+### Later rounds, 2026-09-20
+Builder schema: 0028 alias guard, settle-gate CLI, test 31 obligation 20
+(13437a7, aace681, 7b71ab0). Verifier pass one: PASS. Added from work/009's
+Verifier: 0029 RLS on crm_code_counters and node_merges (9a9a156). Verifier
+pass two: FAIL, a writing role could start a counter anywhere and lpad
+truncated past 9999; bootstrap not referenced from area records. Builder
+61f9fa9, f5529c8: first-row rule, widening, rye_may_write_table() keeps
+system:cdc out, 0030 review_gate marker for record_assertion and
+record_distillation, 0124 for the pm profile. Verifier pass three: all
+criteria pass; FAIL on add_comment()'s regex, which had never matched
+(doubled backslash in a dollar-quoted body, carried from 0110). Builder
+e7cf9ec: fixed, suite 36 measures participants; Lead checked the diff and
+merged without a fourth pass. Operator: bootstrap v2 exited 141 (SIGPIPE);
+v3 refuses the main checkout after the Lead ran v2 there and npm ci wiped
+admin/ and site/ node_modules (restored from a worktree's hard links);
+v4 closes the empty-install edge. Admin: check:db closes require, dynamic
+import, subpath import, aliased client (882eb88). Agent-kit 0d70c5a,
+4156e97: skills, guides, rubrics, both intake commits rerun-safe, tabular
+step requires a person's role. Verifier: FAIL then PASS.
 
 ## Close
 status line and date

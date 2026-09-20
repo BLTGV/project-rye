@@ -79,5 +79,18 @@ ignores the returned status; pattern-library common-patterns.md line 64.
 effective_review_policy(): stricter of the two resolutions. 0027 also
 replaces record_assertion and record_distillation. Fix attempt 1 sent.
 
+### Builder schema, 2026-09-20, fix attempt 1 (commit 02f4242)
+effective_review_policy(); record_assertion() carried from 0023 with 17
+changed lines, all in the policy resolution; record_distillation() from
+0018. Suite renamed 33.
+
+### Verifier, 2026-09-20, second pass: PASS
+108 cells (3 DEFAULT_SCOPE by 3 witness-scope policies by 6 helpers by 2
+roles) all commit, accepted only when both resolutions are open. Branch
+hunt clean. Bodies differ only in the policy resolution. LOW: the other two
+demoting helpers wrote no review_gate marker; closed in work/011 (0030).
+INFO: moving DEFAULT_SCOPE off a strict scope is now two steps (suggest,
+then accept).
+
 ## Close
 status line and date

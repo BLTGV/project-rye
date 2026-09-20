@@ -97,5 +97,30 @@ second line; names in the contract. CDC records under system:cdc (Lead's
 overturn), insert on events and participants only, session_role recorded.
 Fix attempt 1 sent to the builder.
 
+### Builder schema, 2026-09-20, fix attempt 1 (commit ccabd0f)
+rye_gate_may_write() BEFORE ROW trigger on the seven core tables, names per
+the contract; system:cdc row and capture_domain_change() role swap around
+record_event() only, session_role recorded; merge_nodes() refuses
+system:cdc. Test 32 derives the prosecdef writers from pg_proc (eight) and
+raises if one is uncovered. Negative controls reproduce the hole on 2c9a781.
+
+### Verifier, 2026-09-20, second pass: FAIL
+All eight definer writers refused for viewer and unset on both owners;
+system:cdc contained; role restored after savepoints, multi-row statements,
+and a forced CDC failure; bulk cost 1.18x on 5,000 rows. MEDIUM, new:
+node_source_map's insert policy was WITH CHECK (true), so a viewer could map
+any visible node into a tracked table, or re-point a mapping, and have CDC
+write events against it.
+
+### Builder schema, 2026-09-20, fix attempt 2 (commit bee3a52)
+node_source_map gated by the same conjunct and trigger. Sweep of supporting
+tables: all others already refused, except node_merges and
+crm_code_counters, which had no RLS. Lead first listed those as bookkeeping.
+
+### Verifier, 2026-09-20, third pass: PASS
+On a tree carrying 0026 and 0027 together, both owners. Found that
+crm_code_counters was not bookkeeping (a viewer could rewind a counter and
+the next create_task() collided); moved to work/011, migration 0029.
+
 ## Close
 status line and date
