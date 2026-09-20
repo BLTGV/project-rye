@@ -65,14 +65,65 @@ export function sqlFor(instance: InstanceConfig) {
   return client;
 }
 
+export type RyeSessionRole = "admin" | "reader";
+
+type Sql = ReturnType<typeof postgres>;
+type UnsafeParams = Parameters<Sql["unsafe"]>[1];
+
 /**
- * Wraps a query so the rye RLS `app.current_role` session var is set within
- * the same statement. The Composio recon showed multi-statement set_config
- * is rejected and a bare SELECT under RLS returns no rows.
+ * The `cfg` relation every rye query still joins. It sets nothing and returns
+ * exactly one row, so `, cfg` and `FROM cfg` keep their meaning while the
+ * planner is free to place it anywhere.
  *
- * Usage: ryeQuery(sql, sql`SELECT n.id FROM rye.nodes n, cfg LIMIT 5`)
- * The query MUST join `, cfg` once so the CTE is referenced.
+ * It used to be `SELECT set_config('app.current_role','admin',false)`, on the
+ * assumption that a CTE runs before the rest of the statement. It does not:
+ * PostgreSQL may evaluate an RLS qual on a scanned table before the CTE is
+ * executed (EXPLAIN ANALYZE shows `CTE cfg -> Result (never executed)` next to
+ * `Rows Removed by Filter`), so every governance query returned zero rows once
+ * RLS was forced and the table owner was not a superuser. A
+ * `FROM (SELECT set_config(...)) cfg CROSS JOIN LATERAL (...)` shape has the
+ * same hole — the subquery is pulled up and the join commuted. Only an
+ * aggregate or LIMIT in between hides it, which is why some call sites
+ * appeared to work.
  */
-export function withAdminCte(role: "admin" | "reader" = "admin") {
-  return `WITH cfg AS (SELECT set_config('app.current_role','${role}',false)) `;
+const CFG_CTE = "WITH cfg AS (SELECT 1 AS rye_cfg) ";
+const CFG_CTE_RECURSIVE = "WITH RECURSIVE cfg AS (SELECT 1 AS rye_cfg) ";
+
+/**
+ * Runs one rye query with `app.current_role` reliably set before any
+ * RLS-filtered scan.
+ *
+ * The role is set by its own statement, first, inside a transaction:
+ *
+ *   BEGIN; SELECT set_config('app.current_role', $1, true); <query>; COMMIT;
+ *
+ * Statement order is not a planner decision, so this holds no matter how the
+ * query is planned. Three properties make it safe on a pooler:
+ *
+ * - it is not the multi-statement form the pooler rejects; each statement is
+ *   sent on its own, in one transaction;
+ * - a transaction pooler pins one server connection for the life of a
+ *   transaction, so the setting is still there for the second statement;
+ * - `is_local = true` makes the setting transaction-local, so COMMIT discards
+ *   it and the admin role cannot ride a pooled connection into another
+ *   tenant's session. The old `false` could.
+ *
+ * Pass `recursive: true` when the query's own CTE list needs `WITH RECURSIVE`.
+ */
+export async function ryeQuery<T extends any[] = (postgres.Row & Iterable<postgres.Row>)[]>(
+  sql: Sql,
+  text: string,
+  params?: UnsafeParams,
+  opts: { role?: RyeSessionRole; recursive?: boolean } = {}
+): Promise<postgres.RowList<T>> {
+  const role: RyeSessionRole = opts.role ?? "admin";
+  const header = opts.recursive ? CFG_CTE_RECURSIVE : CFG_CTE;
+  // Wrapped in an object: postgres.js Promise.all's an array returned from
+  // begin(), which would strip RowList off the result.
+  const out = await sql.begin(async (tx) => {
+    await tx.unsafe("SELECT set_config('app.current_role', $1, true)", [role]);
+    const rows = await tx.unsafe<T>(header + text, params);
+    return { rows };
+  });
+  return out.rows;
 }

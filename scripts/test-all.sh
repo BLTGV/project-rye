@@ -23,9 +23,29 @@ run_step() {
   fi
 }
 
+# The node-dependent conformance tests (21/22/23) run from the host and need
+# this skill's own npm deps; CI only runs `npm ci` for admin/ and site/, so
+# install them here once, ahead of any step that runs the suite. Skipped
+# when node_modules already exists (e.g. a local symlink into a sibling
+# checkout).
+if [[ -f skills/rye-source-context-intake/package.json && ! -d skills/rye-source-context-intake/node_modules ]]; then
+  echo
+  echo "=== installing skills/rye-source-context-intake dependencies ==="
+  npm ci --prefix skills/rye-source-context-intake
+fi
+
 # 1. SQL schema: install + conformance + security tests, via the existing
-#    docker-compose-managed postgres flow (scripts/docker-test.sh).
+#    docker-compose-managed postgres flow (scripts/docker-test.sh). This
+#    owner is a superuser, so it bypasses row-level security for itself and
+#    every SECURITY DEFINER function it owns — the same shape as a local
+#    Postgres superuser, not Supabase.
 run_step "sql (docker-test.sh)" ./scripts/docker-test.sh test --reset --profiles crm,pm
+
+# 1b. Same suite, owned by an ordinary NOSUPERUSER NOBYPASSRLS role — the
+#     shape Supabase actually runs in production. Row-level security and
+#     SECURITY DEFINER functions are exercised for real here; step 1 alone
+#     cannot catch bugs that only RLS enforcement would surface.
+run_step "sql (nonsuperuser owner)" ./scripts/test-nonsuperuser-owner.sh
 
 # 2. Admin app (Cloudflare Worker + Vite/React): typecheck + build.
 if [[ -f admin/package.json ]]; then

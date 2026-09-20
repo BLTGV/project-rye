@@ -267,6 +267,142 @@ BEGIN
     RAISE EXCEPTION 'assertion_evidence RLS is not enabled+forced';
   END IF;
 
+  IF to_regprocedure('rye.rye_current_agent_key()') IS NULL THEN
+    RAISE EXCEPTION 'rye_current_agent_key function missing';
+  END IF;
+  IF to_regprocedure('rye.rye_current_agent_id()') IS NULL THEN
+    RAISE EXCEPTION 'rye_current_agent_id function missing';
+  END IF;
+
+  -- The nine governance tables: RLS enabled AND forced on every one.
+  IF EXISTS (
+      SELECT required.table_name
+      FROM (VALUES
+          ('knowledge_domains'),
+          ('domain_authorities'),
+          ('channel_domain_subscriptions'),
+          ('domain_claim_policies'),
+          ('agent_identities'),
+          ('agent_capability_grants'),
+          ('agent_action_log'),
+          ('api_idempotency_keys'),
+          ('agent_api_tokens')
+      ) required(table_name)
+      WHERE NOT EXISTS (
+          SELECT 1
+          FROM pg_class c
+          JOIN pg_namespace n ON n.oid = c.relnamespace
+          WHERE n.nspname = v_schema
+            AND c.relname = required.table_name
+            AND c.relrowsecurity = true
+            AND c.relforcerowsecurity = true
+      )
+  ) THEN
+    RAISE EXCEPTION 'one or more governance tables are not RLS enabled+forced: %',
+      (SELECT string_agg(required.table_name, ', ')
+       FROM (VALUES
+           ('knowledge_domains'),
+           ('domain_authorities'),
+           ('channel_domain_subscriptions'),
+           ('domain_claim_policies'),
+           ('agent_identities'),
+           ('agent_capability_grants'),
+           ('agent_action_log'),
+           ('api_idempotency_keys'),
+           ('agent_api_tokens')
+       ) required(table_name)
+       WHERE NOT EXISTS (
+           SELECT 1
+           FROM pg_class c
+           JOIN pg_namespace n ON n.oid = c.relnamespace
+           WHERE n.nspname = v_schema
+             AND c.relname = required.table_name
+             AND c.relrowsecurity = true
+             AND c.relforcerowsecurity = true
+       ));
+  END IF;
+
+  -- Every governance policy named by contracts/sql-surface.md is installed.
+  IF EXISTS (
+      SELECT required.policyname
+      FROM (VALUES
+          ('knowledge_domains', 'knowledge_domains_read_policy'),
+          ('knowledge_domains', 'knowledge_domains_insert_policy'),
+          ('knowledge_domains', 'knowledge_domains_update_policy'),
+          ('knowledge_domains', 'knowledge_domains_delete_policy'),
+          ('domain_authorities', 'domain_authorities_read_policy'),
+          ('domain_authorities', 'domain_authorities_insert_policy'),
+          ('domain_authorities', 'domain_authorities_update_policy'),
+          ('domain_authorities', 'domain_authorities_delete_policy'),
+          ('channel_domain_subscriptions', 'channel_domain_subscriptions_read_policy'),
+          ('channel_domain_subscriptions', 'channel_domain_subscriptions_insert_policy'),
+          ('channel_domain_subscriptions', 'channel_domain_subscriptions_update_policy'),
+          ('channel_domain_subscriptions', 'channel_domain_subscriptions_delete_policy'),
+          ('domain_claim_policies', 'domain_claim_policies_read_policy'),
+          ('domain_claim_policies', 'domain_claim_policies_insert_policy'),
+          ('domain_claim_policies', 'domain_claim_policies_update_policy'),
+          ('domain_claim_policies', 'domain_claim_policies_delete_policy'),
+          ('agent_identities', 'agent_identities_read_policy'),
+          ('agent_identities', 'agent_identities_insert_policy'),
+          ('agent_identities', 'agent_identities_update_policy'),
+          ('agent_identities', 'agent_identities_delete_policy'),
+          ('agent_capability_grants', 'agent_capability_grants_read_policy'),
+          ('agent_capability_grants', 'agent_capability_grants_insert_policy'),
+          ('agent_capability_grants', 'agent_capability_grants_update_policy'),
+          ('agent_capability_grants', 'agent_capability_grants_delete_policy'),
+          ('agent_action_log', 'agent_action_log_read_policy'),
+          ('agent_action_log', 'agent_action_log_insert_policy'),
+          ('api_idempotency_keys', 'api_idempotency_keys_read_policy'),
+          ('api_idempotency_keys', 'api_idempotency_keys_insert_policy'),
+          ('api_idempotency_keys', 'api_idempotency_keys_delete_policy'),
+          ('agent_api_tokens', 'agent_api_tokens_admin_read'),
+          ('agent_api_tokens', 'agent_api_tokens_admin_write')
+      ) required(tablename, policyname)
+      WHERE NOT EXISTS (
+          SELECT 1
+          FROM pg_policies p
+          WHERE p.schemaname = v_schema
+            AND p.tablename = required.tablename
+            AND p.policyname = required.policyname
+      )
+  ) THEN
+    RAISE EXCEPTION 'one or more governance RLS policies are missing';
+  END IF;
+
+  -- agent_action_log is append-only for everyone, admin included.
+  IF EXISTS (
+      SELECT 1
+      FROM pg_policies
+      WHERE schemaname = v_schema
+        AND tablename = 'agent_action_log'
+        AND cmd IN ('UPDATE', 'DELETE')
+  ) THEN
+    RAISE EXCEPTION 'agent_action_log has an UPDATE or DELETE policy; it must be append-only';
+  END IF;
+
+  -- The two writes made on a non-admin's behalf use the named write_path gate.
+  IF NOT EXISTS (
+      SELECT 1
+      FROM pg_policies
+      WHERE schemaname = v_schema
+        AND tablename = 'agent_action_log'
+        AND policyname = 'agent_action_log_insert_policy'
+        AND coalesce(with_check, '') LIKE '%record_agent_action%'
+  ) THEN
+    RAISE EXCEPTION 'agent_action_log_insert_policy does not admit the record_agent_action gate';
+  END IF;
+
+  IF NOT EXISTS (
+      SELECT 1
+      FROM pg_policies
+      WHERE schemaname = v_schema
+        AND tablename = 'api_idempotency_keys'
+        AND policyname = 'api_idempotency_keys_insert_policy'
+        AND coalesce(with_check, '') LIKE '%agent_create_candidate%'
+  ) THEN
+    RAISE EXCEPTION 'api_idempotency_keys_insert_policy does not admit the agent_create_candidate gate';
+  END IF;
+
   IF NOT EXISTS (
       SELECT 1
       FROM pg_policies

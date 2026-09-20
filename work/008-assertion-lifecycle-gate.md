@@ -1,6 +1,6 @@
-# 007 assertion-lifecycle-gate
+# 008 assertion-lifecycle-gate
 
-- status: blocked, handed to Casey 2026-09-19: verification failed three times, a different HIGH each time. Not merged.
+- status: open, integrating. Ruling received (see "Ruled by Casey"). Four verifier passes; every HIGH is closed; one MEDIUM and one LOW remain, both rulings. Not merged.
 - opened: 2026-09-19
 - areas: schema
 - contracts: contracts/sql-surface.md
@@ -86,7 +86,7 @@ strict to open, and that 0023 now refuses it. This item must not reopen it.
 - 2026-09-19, Casey: do not push.
 
 ## Assumed by default
-- Item number 007 and migration 0025, because another session holds work/004 with 0022 and work/006 with 0024. Overturn: Lead.
+- Item number 008 and migration 0025. Opened as 007; renumbered 2026-09-20 at integration because the other session had closed work/007-ci-nonsuperuser-owner by then. Reports below that say work/007 mean this item. Overturn: Lead.
 - The four other forged paths found during reproduction (window, outcome attrs, classification, and the supersede id) are in scope, since they are the same defect. Overturn: Casey.
 - Admin keeps the ability it has today. Whether an admin may do by raw UPDATE what a helper does is the Architect's call. Overturn: Architect.
 - Viewer and no-role callers being able to insert assertions at all is reported, and fixed here only if the Architect finds it is the same mechanism. Overturn: Architect.
@@ -107,7 +107,24 @@ ROLE to a non-superuser role, with writes committed and rows re-read:
 - DOES NOT HOLD (open HIGH): a caller can end an accepted assertion by naming a replacement it cannot read back. Both replacement checks (0025 lines 426 and 558, `IF FOUND`) run under the caller's RLS, so a row the caller classifies above its own read level passes both. Reproduced as viewer, committed: forge the supersede settings, UPDATE the accepted row setting superseded_at and superseded_by to a new id, INSERT that id as a candidate of another type and key with classification 'restricted', COMMIT. The incumbent is ended and current_valid_assertions has 0 rows for the tuple. This is erasure, the thing this item exists to stop. It is the one fail-open decision 0008 section A chose on purpose.
 - DOES NOT HOLD (LOW): 0025 line 534 says the contract discloses that fail-open; the contract's list of limits does not.
 
-## Hand-off to Casey
+## Ruled by Casey, 2026-09-20
+Take the Lead's recommendation on both remaining findings: change no code, disclose the hidden-rival overlap as a stated limit and correct the false sentence, reword the erasure claim to "replaced, or moved into review". Also: integrate the other session's verified items (work/004 with 0022, work/006 with 0024, work/007-ci) so everything merges together. Architect wording: da2f316. Their branch merged into agent-roles at 285d694.
+
+## Open ruling, 2026-09-20 (fourth pass, builder df43fa1, Architect 002044a)
+Closed and re-verified on df43fa1: the invisible-replacement erasure, in
+twelve committed runs (four callers by three hidden classifications), a
+replacement on an unseen node, a chain ending in an invisible row, and an
+invisible successor; the incumbent survived every time on an admin
+read-back. All earlier fixes hold. Full Docker flow passes. One deliberate
+new refusal confirmed: record_assertion() with p_classification above the
+caller's own read level, superseding a lower-classified accepted incumbent,
+fails at COMMIT with the incumbent intact.
+Remaining:
+- MEDIUM. A caller who cannot see an accepted rival (classified above its read level) can raw-promote a visible candidate on the same tuple and leave two overlapping accepted rows. accept_assertion() by the same caller leaves one in the Docker install, because it is SECURITY DEFINER over a superuser owner and reads past RLS, which means it ends a row the caller cannot see. On Supabase the owner is not a superuser, so helper and raw path agree. The contract's sentence that the helper reads rivals "the same way" is therefore false in the reference install. The inferred-displacement search has the same root cause and is untested (fixture could not be built).
+- LOW. An accepted row may be ended naming a same-tuple replacement that is a candidate, leaving no accepted value and one row in review_queue. Requiring the replacement to be accepted would break merge_nodes() under a strict scope, which is the default already taken. The contract's bold claim "never ends with nothing replacing it" reads stronger than the rule.
+Lead's recommendation: change no code. Disclose the MEDIUM as a stated limit and correct the false sentence; reword the LOW's claim to "replaced, or moved into review". The alternative for the MEDIUM, a SECURITY DEFINER reader used only to refuse, would tell a caller that a hidden row exists, is a no-op on Supabase where the owner is bound by RLS, and cuts against the constraint on reading past RLS.
+
+## Hand-off to Casey (after the third pass; superseded by "Open ruling" above)
 Verification failed three times. Each failure was a different problem and each earlier one was fixed and re-verified, so no single problem survived two attempts; but three passes each finding a new HIGH is the signal the two-strike rule exists for, so the Lead stopped rather than run a third fix.
 - Recommended next step, small: fail closed. In both replacement checks, raise when the named row is not visible (`IF NOT FOUND THEN RAISE`) in place of passing. The Verifier checked the cost: supersede_assertion() copies the incumbent's classification, so a helper's replacement is always as readable as the row it replaces. Architect amends decision 0008 section A and the contract's limits; builder edits 0025 in place (it is applied nowhere) and adds the attack to test 31; Verifier runs a fourth pass.
 - The question worth a person's judgment: whether "the row is the gate" is converging. Found so far by attack, not by the design: a cross-tuple exemption, a null-collapsing comparison, a skipped rival test, NEW.subject_ref being null in BEFORE triggers, two-subject rows, and RLS-invisible replacements. The alternative the Architect rejected (REVOKE UPDATE plus SECURITY DEFINER helpers) is a no-op on Supabase and the Docker login, where the connection is the table owner.
@@ -190,6 +207,23 @@ complete. New HIGH: RLS-invisible replacement erases an accepted row (see
 Verified). LOW: a comment cites a contract disclosure that does not exist.
 Scope neutralisation by viewer fools record_assertion() equally, so not a
 finding against 0025. Lead: stopped; see Hand-off.
+
+### Architect, 2026-09-20 (commit 002044a)
+Fail closed: at commit, a formerly accepted row's superseded_by must name a
+replacement the caller can read with the same type and key; same for a
+narrowed window's successor. The BEFORE decoy check still passes on an
+absent row. No helper exception. One deliberate new refusal
+(record_assertion classifying its replacement above the caller's level).
+
+### Builder schema, 2026-09-20, fix attempt 3 (commit df43fa1)
+Invisible-replacement attack committed on 21919b9 for all four callers, now
+refused. RETURN NULL in the constraint trigger's first branch had skipped
+later checks. Every SELECT in the triggers listed with which way blindness
+cuts. Full flow passed on port 54359.
+
+### Verifier, 2026-09-20, fourth pass on df43fa1: FAIL (MEDIUM, LOW)
+See "Open ruling". SELECT inventory complete at eleven. Criteria 1, 3 to 8,
+and 10 pass; 2 and 9 turn on the ruling.
 
 ## Close
 status line and date

@@ -79,6 +79,42 @@ npx wrangler deployments list
 npx wrangler rollback <deployment-id>
 ```
 
+## CI: non-superuser owner check
+
+**What it is:** `scripts/test-nonsuperuser-owner.sh`, run as a named step
+("sql (nonsuperuser owner)") inside `scripts/test-all.sh`, alongside the
+existing superuser-owner step. It brings up its own disposable postgres
+(`scripts/docker-test.sh`, own port) and creates a database owned by an
+ordinary `NOSUPERUSER NOBYPASSRLS` role (extensions installed
+by the superuser first, then handed to the owner — mirrors Supabase), and
+runs `install.sh` + `conformance.sh` as that role from the host. It exists
+because a superuser database owner bypasses row-level security for itself
+and every `SECURITY DEFINER` function it owns; Supabase's owner is not a
+superuser, and five bugs on 2026-09-19 were invisible to CI without this.
+
+`docker-compose.yml` sets no project name, and both this step and the
+existing superuser-owner step run `docker-test.sh` from the same
+directory, so they share one compose project and differ only by port.
+`test-all.sh` runs them in sequence — the first step tears its container
+down before the second resets it — which is what makes that safe. Do not
+run the two steps at the same time from one checkout.
+
+**Run it alone:**
+
+```bash
+RYE_POSTGRES_PORT=54351 ./scripts/test-nonsuperuser-owner.sh
+```
+
+It refuses before running any test if the role it is about to test as
+turns out to be a superuser or may bypass RLS.
+
+**Reproduce a failure by hand:** connect with `psql` as the owner role
+printed in the script's output (`rye_owner` by default) against the
+database it created (`rye_nonsuperuser` by default) on
+`127.0.0.1:${RYE_POSTGRES_PORT}`, and re-run the specific `tests/conformance`
+or `tests/security` file that failed with `SET search_path` set first, the
+same way `scripts/conformance.sh` does it.
+
 ## Notes
 
 - All three units are independent: a failed admin deploy does not affect the

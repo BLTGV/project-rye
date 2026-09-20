@@ -228,6 +228,14 @@ psql_exec() {
   psql_run "$1"
 }
 
+# Every `agents` subcommand touches the governance tables, which are admin-only
+# for writes and for most reads. The role has to be set by a statement of its
+# own, before the one that reads: a CTE or a lateral join gets pulled up and the
+# nested loop commuted, so the RLS qual is evaluated before set_config runs and
+# the scan sees no role at all. `\g /dev/null` keeps this statement's output out
+# of anything the caller captures.
+ADMIN_ROLE_SQL="SELECT set_config('app.current_role', 'admin', false) \\g /dev/null"
+
 psql_json() {
   psql_run "$1" -qAt
 }
@@ -1115,7 +1123,8 @@ EOF
       [[ -n "$label" ]] || die "agents create requires --label."
 
       if [[ "$OUTPUT_JSON" -eq 1 ]]; then
-        psql_json "SELECT jsonb_build_object(
+        psql_json "${ADMIN_ROLE_SQL}
+SELECT jsonb_build_object(
   'agent_id', rye.create_agent_identity($(sql_literal "$key"), $(sql_literal "$label"), $(sql_literal "$runtime"), nullif($(sql_literal "$scope_ref"), '')),
   'agent_key', rye.rye_slugify_key($(sql_literal "$key")),
   'label', $(sql_literal "$label"),
@@ -1124,7 +1133,8 @@ EOF
         return
       fi
 
-      psql_exec "SELECT rye.create_agent_identity($(sql_literal "$key"), $(sql_literal "$label"), $(sql_literal "$runtime"), nullif($(sql_literal "$scope_ref"), '')) AS agent_id;"
+      psql_exec "${ADMIN_ROLE_SQL}
+SELECT rye.create_agent_identity($(sql_literal "$key"), $(sql_literal "$label"), $(sql_literal "$runtime"), nullif($(sql_literal "$scope_ref"), '')) AS agent_id;"
       ;;
     grant)
       local key=""
@@ -1172,7 +1182,8 @@ EOF
       [[ -n "$capability" ]] || die "agents grant requires --capability."
 
       if [[ "$OUTPUT_JSON" -eq 1 ]]; then
-        psql_json "SELECT jsonb_build_object(
+        psql_json "${ADMIN_ROLE_SQL}
+SELECT jsonb_build_object(
   'grant_id', rye.grant_agent_capability($(sql_literal "$key"), $(sql_literal "$capability"), nullif($(sql_literal "$domain_key"), ''), nullif($(sql_literal "$scope_ref"), ''), nullif($(sql_literal "$expires_at"), '')::timestamptz),
   'agent_key', rye.rye_slugify_key($(sql_literal "$key")),
   'capability', $(sql_literal "$capability"),
@@ -1182,7 +1193,8 @@ EOF
         return
       fi
 
-      psql_exec "SELECT rye.grant_agent_capability($(sql_literal "$key"), $(sql_literal "$capability"), nullif($(sql_literal "$domain_key"), ''), nullif($(sql_literal "$scope_ref"), ''), nullif($(sql_literal "$expires_at"), '')::timestamptz) AS grant_id;"
+      psql_exec "${ADMIN_ROLE_SQL}
+SELECT rye.grant_agent_capability($(sql_literal "$key"), $(sql_literal "$capability"), nullif($(sql_literal "$domain_key"), ''), nullif($(sql_literal "$scope_ref"), ''), nullif($(sql_literal "$expires_at"), '')::timestamptz) AS grant_id;"
       ;;
     issue-token)
       local key=""
@@ -1219,11 +1231,13 @@ EOF
       [[ -n "$key" ]] || die "agents issue-token requires --key."
 
       if [[ "$OUTPUT_JSON" -eq 1 ]]; then
-        psql_json "SELECT rye.issue_agent_token_record($(sql_literal "$key"), nullif($(sql_literal "$label"), ''), nullif($(sql_literal "$expires_at"), '')::timestamptz);"
+        psql_json "${ADMIN_ROLE_SQL}
+SELECT rye.issue_agent_token_record($(sql_literal "$key"), nullif($(sql_literal "$label"), ''), nullif($(sql_literal "$expires_at"), '')::timestamptz);"
         return
       fi
 
-      psql_exec "SELECT
+      psql_exec "${ADMIN_ROLE_SQL}
+SELECT
   issued->>'token_id' AS token_id,
   issued->>'token' AS one_time_token
 FROM rye.issue_agent_token_record($(sql_literal "$key"), nullif($(sql_literal "$label"), ''), nullif($(sql_literal "$expires_at"), '')::timestamptz) AS issued;"
@@ -1254,15 +1268,17 @@ EOF
       [[ -n "$token_id" ]] || die "agents revoke-token requires --token-id."
 
       if [[ "$OUTPUT_JSON" -eq 1 ]]; then
-        psql_json "SELECT jsonb_build_object('token_id', $(sql_literal "$token_id"), 'revoked', rye.revoke_agent_token($(sql_literal "$token_id")::uuid, 'scripts/rye agents revoke-token'));"
+        psql_json "${ADMIN_ROLE_SQL}
+SELECT jsonb_build_object('token_id', $(sql_literal "$token_id"), 'revoked', rye.revoke_agent_token($(sql_literal "$token_id")::uuid, 'scripts/rye agents revoke-token'));"
         return
       fi
 
-      psql_exec "SELECT rye.revoke_agent_token($(sql_literal "$token_id")::uuid, 'scripts/rye agents revoke-token') AS revoked;"
+      psql_exec "${ADMIN_ROLE_SQL}
+SELECT rye.revoke_agent_token($(sql_literal "$token_id")::uuid, 'scripts/rye agents revoke-token') AS revoked;"
       ;;
     list)
       if [[ "$OUTPUT_JSON" -eq 1 ]]; then
-        psql_json "WITH cfg AS (SELECT set_config('app.current_role','admin',false))
+        psql_json "${ADMIN_ROLE_SQL}
 SELECT jsonb_build_object(
   'agents', COALESCE(jsonb_agg(jsonb_build_object(
     'agent_id', ai.id,
@@ -1293,11 +1309,11 @@ SELECT jsonb_build_object(
     )
   ) ORDER BY ai.agent_key), '[]'::jsonb)
 )
-FROM rye.agent_identities ai, cfg;"
+FROM rye.agent_identities ai;"
         return
       fi
 
-      psql_exec "WITH cfg AS (SELECT set_config('app.current_role','admin',false))
+      psql_exec "${ADMIN_ROLE_SQL}
 SELECT
   ai.agent_key,
   ai.label,
@@ -1311,7 +1327,7 @@ SELECT
       AND tok.revoked_at IS NULL
       AND (tok.expires_at IS NULL OR tok.expires_at > now())
   ) AS active_token_count
-FROM rye.agent_identities ai, cfg
+FROM rye.agent_identities ai
 ORDER BY ai.agent_key;
 
 SELECT
@@ -1349,7 +1365,8 @@ EOF
       [[ "$limit" =~ ^[0-9]+$ ]] || die "agents audit --limit must be an integer."
 
       if [[ "$OUTPUT_JSON" -eq 1 ]]; then
-        psql_json "SELECT jsonb_build_object(
+        psql_json "${ADMIN_ROLE_SQL}
+SELECT jsonb_build_object(
   'actions', COALESCE(jsonb_agg(jsonb_build_object(
     'id', l.id,
     'agent_key', ai.agent_key,
@@ -1374,7 +1391,8 @@ LEFT JOIN rye.knowledge_domains kd ON kd.id = l.domain_id;"
         return
       fi
 
-      psql_exec "SELECT
+      psql_exec "${ADMIN_ROLE_SQL}
+SELECT
   l.created_at,
   ai.agent_key,
   l.action,

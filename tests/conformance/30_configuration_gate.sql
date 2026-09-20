@@ -74,7 +74,22 @@ DECLARE
     v_agent_id     uuid;
     v_alias_cand   uuid;
     v_answer       jsonb;
+    v_area_agent   uuid;
+    -- Who asks the settlement question, before and after the attacks. Each
+    -- role is always compared with its own earlier answer, never with an
+    -- admin's. contracts/sql-surface.md, "Governance tables: who reads, who
+    -- writes", and the settlement lookup's "Who may call it, and what each
+    -- caller sees", give a session that cannot see the area
+    -- domain_not_found, so an admin baseline is not the answer a blind
+    -- caller is owed. The list holds a bound agent that may see the fixture
+    -- area, an agent-shaped role bound to no identity, and an unset role.
+    v_ask_roles    text[] := ARRAY[
+        'admin', 'agent:config_gate_area', 'agent:t', 'viewer', 'team_member', ''
+    ];
+    v_base_exp     jsonb := '{}'::jsonb;
+    v_base_self    jsonb := '{}'::jsonb;
     v_baseline     jsonb;
+    v_blind        boolean;
     v_bob          uuid;
     v_cand         uuid;
     v_claim        jsonb;
@@ -204,6 +219,19 @@ BEGIN
         p_owner_node_id := v_dana
     );
 
+    -- One agent that is bound and holds the fixture area, so at least one
+    -- agent in the comparison below has a real settlement answer to lose.
+    -- Keys are stored slugified; ask under the slug form.
+    v_area_agent := create_agent_identity(
+        'config_gate_area', 'Configuration gate area agent', 'test');
+    PERFORM grant_agent_capability(
+        'config_gate_area', 'rye.knowledge.read',
+        p_domain_key := 'conformance-config-gate'
+    );
+    IF v_area_agent IS NULL THEN
+        RAISE EXCEPTION 'The fixture area agent was not created';
+    END IF;
+
     -- ------------------------------------------------------------------
     -- Obligation 10, first half: the answer before anyone attacks it.
     -- An expectation is set on John by his manager, so John never settles
@@ -224,6 +252,36 @@ BEGIN
     THEN
         RAISE EXCEPTION 'Expected Bob to settle an expectation on John before the attack, got %', v_baseline;
     END IF;
+
+    -- The same question asked by every role that will ask it again after
+    -- the attacks. Each role's own answer now is what it is owed later.
+    FOREACH v_role IN ARRAY v_ask_roles LOOP
+        PERFORM set_config('app.current_role', v_role, true);
+        v_answer := rye_settlers(
+            p_subject_id := v_john,
+            p_claim_type := 'expectation',
+            p_speaker_id := v_john,
+            p_domain_key := 'conformance-config-gate',
+            p_speech_act := 'self_commitment'
+        );
+        v_base_exp := v_base_exp || jsonb_build_object(v_role, v_answer);
+
+        -- Pin the visibility rule rather than assume it: a role that cannot
+        -- read the area is told domain_not_found, and a role that can is
+        -- told who settles.
+        v_blind := v_role IN ('agent:t', '');
+        IF v_blind AND (v_answer->>'reason' IS DISTINCT FROM 'domain_not_found'
+                        OR v_answer->>'step' IS DISTINCT FROM 'none') THEN
+            RAISE EXCEPTION
+                'Role "%" cannot see the fixture area, so it is owed domain_not_found before the attacks, got %',
+                v_role, v_answer;
+        END IF;
+        IF NOT v_blind AND v_answer->>'step' IS DISTINCT FROM 'relationship' THEN
+            RAISE EXCEPTION
+                'Role "%" should see the fixture area before the attacks, got %', v_role, v_answer;
+        END IF;
+    END LOOP;
+    PERFORM set_config('app.current_role', 'admin', true);
 
     -- ==================================================================
     -- Obligation 1. A non-admin's accepted configuration write lands as a
@@ -731,6 +789,40 @@ BEGIN
         RAISE EXCEPTION 'Premise broken: a declared self type does not settle to the subject: %', v_selfbase;
     END IF;
 
+    -- Each role's own answer before the erase attempts.
+    FOREACH v_role IN ARRAY v_ask_roles LOOP
+        PERFORM set_config('app.current_role', v_role, true);
+        v_answer := rye_settlers(
+            p_subject_id := v_john,
+            p_claim_type := 'availability',
+            p_speaker_id := v_john,
+            p_domain_key := 'conformance-config-gate',
+            p_speech_act := 'self_commitment'
+        );
+        v_base_self := v_base_self || jsonb_build_object(v_role, v_answer);
+        v_blind := v_role IN ('agent:t', '');
+        IF v_blind AND (v_answer->>'reason' IS DISTINCT FROM 'domain_not_found'
+                        OR v_answer->>'step' IS DISTINCT FROM 'none') THEN
+            RAISE EXCEPTION
+                'Role "%" cannot see the fixture area, so it is owed domain_not_found for a self type, got %',
+                v_role, v_answer;
+        END IF;
+        -- A sighted role's baseline is checked, not merely stored: an
+        -- already-wrong baseline would make the comparison after the
+        -- attacks agree with itself and prove nothing.
+        IF NOT v_blind AND (
+               v_answer->>'step' IS DISTINCT FROM 'relationship'
+               OR v_answer->'settlers'->0->>'node_id' IS DISTINCT FROM v_john::text
+               OR v_answer->'settlers'->0->>'relationship' IS DISTINCT FROM 'self'
+               OR v_answer->'speaker'->>'is_settler' IS DISTINCT FROM 'true'
+           ) THEN
+            RAISE EXCEPTION
+                'Role "%" should be told John settles his own availability before the erase attempts, got %',
+                v_role, v_answer;
+        END IF;
+    END LOOP;
+    PERFORM set_config('app.current_role', 'admin', true);
+
     FOREACH v_role IN ARRAY ARRAY['agent:t', 'viewer', 'team_member', ''] LOOP
         PERFORM set_config('app.current_role', v_role, true);
         v_failed := false;
@@ -752,7 +844,7 @@ BEGIN
         END IF;
     END LOOP;
 
-    FOREACH v_role IN ARRAY ARRAY['admin', 'agent:t', 'viewer'] LOOP
+    FOREACH v_role IN ARRAY v_ask_roles LOOP
         PERFORM set_config('app.current_role', v_role, true);
         v_answer := rye_settlers(
             p_subject_id := v_john,
@@ -761,15 +853,37 @@ BEGIN
             p_domain_key := 'conformance-config-gate',
             p_speech_act := 'self_commitment'
         );
-        IF v_answer->'settlers'->0->>'node_id' IS DISTINCT FROM v_selfbase->'settlers'->0->>'node_id'
-           OR v_answer->'settlers'->0->>'relationship' IS DISTINCT FROM v_selfbase->'settlers'->0->>'relationship'
-           OR v_answer->'speaker'->>'is_settler' IS DISTINCT FROM v_selfbase->'speaker'->>'is_settler'
+        IF v_answer->>'step' IS DISTINCT FROM v_base_self->v_role->>'step'
+           OR v_answer->>'reason' IS DISTINCT FROM v_base_self->v_role->>'reason'
+           OR v_answer->>'settler_count' IS DISTINCT FROM v_base_self->v_role->>'settler_count'
+           OR v_answer->'settlers'->0->>'node_id' IS DISTINCT FROM v_base_self->v_role->'settlers'->0->>'node_id'
+           OR v_answer->'settlers'->0->>'relationship' IS DISTINCT FROM v_base_self->v_role->'settlers'->0->>'relationship'
+           OR v_answer->'speaker'->>'is_settler' IS DISTINCT FROM v_base_self->v_role->'speaker'->>'is_settler'
         THEN
             RAISE EXCEPTION
                 'Role "%" sees a different answer for a declared self type after the erase attempts: % vs %',
-                v_role, v_answer, v_selfbase;
+                v_role, v_answer, v_base_self->v_role;
         END IF;
     END LOOP;
+
+    -- The strongest statement of what obligation 10 is for: a session that
+    -- can see everything is told exactly what it was told before.
+    PERFORM set_config('app.current_role', 'admin', true);
+    v_answer := rye_settlers(
+        p_subject_id := v_john,
+        p_claim_type := 'availability',
+        p_speaker_id := v_john,
+        p_domain_key := 'conformance-config-gate',
+        p_speech_act := 'self_commitment'
+    );
+    IF v_answer->'settlers'->0->>'node_id' IS DISTINCT FROM v_selfbase->'settlers'->0->>'node_id'
+       OR v_answer->'settlers'->0->>'relationship' IS DISTINCT FROM v_selfbase->'settlers'->0->>'relationship'
+       OR v_answer->'speaker'->>'is_settler' IS DISTINCT FROM v_selfbase->'speaker'->>'is_settler'
+    THEN
+        RAISE EXCEPTION
+            'An admin sees a different answer for a declared self type after the erase attempts: % vs %',
+            v_answer, v_selfbase;
+    END IF;
 
     -- An admin keeps every lifecycle operation on the same rows: supersede
     -- the incumbent, and narrow an accepted window through the helper.
@@ -907,7 +1021,7 @@ BEGIN
     -- the answer to who may settle an expectation on John is unchanged,
     -- for every role that can ask.
     -- ==================================================================
-    FOREACH v_role IN ARRAY ARRAY['admin', 'agent:t', 'viewer'] LOOP
+    FOREACH v_role IN ARRAY v_ask_roles LOOP
         PERFORM set_config('app.current_role', v_role, true);
         v_answer := rye_settlers(
             p_subject_id := v_john,
@@ -916,15 +1030,16 @@ BEGIN
             p_domain_key := 'conformance-config-gate',
             p_speech_act := 'self_commitment'
         );
-        IF v_answer->>'step' IS DISTINCT FROM v_baseline->>'step'
-           OR v_answer->>'settler_count' IS DISTINCT FROM v_baseline->>'settler_count'
-           OR v_answer->'settlers'->0->>'node_id' IS DISTINCT FROM v_baseline->'settlers'->0->>'node_id'
-           OR v_answer->'settlers'->0->>'relationship' IS DISTINCT FROM v_baseline->'settlers'->0->>'relationship'
-           OR v_answer->'speaker'->>'is_settler' IS DISTINCT FROM v_baseline->'speaker'->>'is_settler'
+        IF v_answer->>'step' IS DISTINCT FROM v_base_exp->v_role->>'step'
+           OR v_answer->>'reason' IS DISTINCT FROM v_base_exp->v_role->>'reason'
+           OR v_answer->>'settler_count' IS DISTINCT FROM v_base_exp->v_role->>'settler_count'
+           OR v_answer->'settlers'->0->>'node_id' IS DISTINCT FROM v_base_exp->v_role->'settlers'->0->>'node_id'
+           OR v_answer->'settlers'->0->>'relationship' IS DISTINCT FROM v_base_exp->v_role->'settlers'->0->>'relationship'
+           OR v_answer->'speaker'->>'is_settler' IS DISTINCT FROM v_base_exp->v_role->'speaker'->>'is_settler'
         THEN
             RAISE EXCEPTION
                 'Role "%" sees a different settlement answer after the non-admin writes: % vs %',
-                v_role, v_answer, v_baseline;
+                v_role, v_answer, v_base_exp->v_role;
         END IF;
         IF EXISTS (
             SELECT 1 FROM jsonb_array_elements(v_answer->'settlers') AS s(value)
@@ -933,6 +1048,26 @@ BEGIN
             RAISE EXCEPTION 'Role "%" was told John settles an expectation set on him: %', v_role, v_answer;
         END IF;
     END LOOP;
+
+    -- Same again in one place for the session that can see everything.
+    PERFORM set_config('app.current_role', 'admin', true);
+    v_answer := rye_settlers(
+        p_subject_id := v_john,
+        p_claim_type := 'expectation',
+        p_speaker_id := v_john,
+        p_domain_key := 'conformance-config-gate',
+        p_speech_act := 'self_commitment'
+    );
+    IF v_answer->>'step' IS DISTINCT FROM v_baseline->>'step'
+       OR v_answer->>'settler_count' IS DISTINCT FROM v_baseline->>'settler_count'
+       OR v_answer->'settlers'->0->>'node_id' IS DISTINCT FROM v_baseline->'settlers'->0->>'node_id'
+       OR v_answer->'settlers'->0->>'relationship' IS DISTINCT FROM v_baseline->'settlers'->0->>'relationship'
+       OR v_answer->'speaker'->>'is_settler' IS DISTINCT FROM v_baseline->'speaker'->>'is_settler'
+    THEN
+        RAISE EXCEPTION
+            'An admin sees a different settlement answer after the non-admin writes: % vs %',
+            v_answer, v_baseline;
+    END IF;
 
     -- ==================================================================
     -- Obligation 11, anti-vacuity. The same two rows, accepted by an

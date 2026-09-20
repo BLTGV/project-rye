@@ -43,8 +43,13 @@ require_not_contains() {
   fi
 }
 
+# The governance tables are admin-only for writes, and agent_api_tokens is
+# admin-only for reads too, so every psql block here sets the admin role in its
+# own session first. A session with no role set writes nothing and reads no
+# token, which is the point of the policies, not a bug in the test.
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q <<'SQL' >/dev/null
 SET search_path = rye, public, pg_catalog;
+SELECT set_config('app.current_role', 'admin', false);
 SELECT rye.ensure_knowledge_domain('cli-account-updates', 'CLI Account Updates', 'CLI agent security test domain.');
 SQL
 
@@ -64,6 +69,7 @@ require_contains "$token" "rye_" "issued token"
 
 auth_before="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atq <<SQL
 SET search_path = rye, public, pg_catalog;
+SELECT set_config('app.current_role', 'admin', false) \g /dev/null
 SELECT rye.authenticate_agent_token('${token}') IS NOT NULL;
 SQL
 )"
@@ -83,6 +89,7 @@ require_contains "$revoke_json" '"revoked": true' "agents revoke-token --json"
 
 auth_after="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atq <<SQL
 SET search_path = rye, public, pg_catalog;
+SELECT set_config('app.current_role', 'admin', false) \g /dev/null
 SELECT rye.authenticate_agent_token('${token}') IS NULL;
 SQL
 )"
@@ -95,5 +102,17 @@ audit_json="$("${rye_cmd[@]}" agents audit --limit 20 --json)"
 require_contains "$audit_json" "agent_token_revoke" "agents audit --json"
 require_not_contains "$audit_json" "token_hash" "agents audit --json"
 require_not_contains "$audit_json" "$token" "agents audit --json"
+
+# The table forms read the same tables through a different query shape. The
+# --json aggregate happens to block subquery pullup; the table form does not, so
+# it is the one that catches a role set too late to reach the RLS qual.
+list_table="$("${rye_cmd[@]}" agents list)"
+require_contains "$list_table" "cli_agent_security" "agents list"
+require_contains "$list_table" "rye.context.read" "agents list"
+require_not_contains "$list_table" "token_hash" "agents list"
+
+audit_table="$("${rye_cmd[@]}" agents audit --limit 20)"
+require_contains "$audit_table" "agent_token_revoke" "agents audit"
+require_contains "$audit_table" "cli_agent_security" "agents audit"
 
 echo "CLI agent security test passed"
