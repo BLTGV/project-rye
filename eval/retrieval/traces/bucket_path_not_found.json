@@ -1,0 +1,45 @@
+{
+  "arm": "bucket_probe_path_not_found",
+  "scenario": "harbor_point",
+  "run_id": "bucket-probe-2026-09-20",
+  "note": "Recorded from psql on 2026-09-20. The entry point is found on the first call; the walk is then capped at one hop, so the three-hop chain to the penalty never returns and none of the three expected edges is in any step's results. Intended bucket: path_not_found — the fix is the depth argument, not the search phrasing.",
+  "results": [
+    {
+      "question_id": "q-causal-02",
+      "steps": [
+        {
+          "seq": 1,
+          "tool": "find_nodes",
+          "intent": "locate the supplier",
+          "args": { "p_query": "Coastal Steel Supply" },
+          "results": [
+            { "node_id": "fa000001-0001-0001-0001-000000000006", "label": "Coastal Steel Supply", "score": 0.95, "match_reason": "exact_label", "used": true }
+          ],
+          "selected": { "node_id": "fa000001-0001-0001-0001-000000000006", "from_seq": 1, "from_phrasing": "Coastal Steel Supply" }
+        },
+        {
+          "seq": 2,
+          "tool": "find_paths",
+          "intent": "causal link to the penalty, one hop to keep it cheap",
+          "args": { "p_from_node_id": "fa000001-0001-0001-0001-000000000006", "p_to_node_id": "fa000001-0004-0001-0001-000000000002", "p_semantics": ["causal"], "p_max_depth": 1, "p_direction": "out" },
+          "results": []
+        },
+        {
+          "seq": 3,
+          "tool": "find_paths",
+          "intent": "drop the target and see what one hop reaches at all",
+          "args": { "p_from_node_id": "fa000001-0001-0001-0001-000000000006", "p_semantics": ["causal"], "p_max_depth": 1, "p_direction": "out" },
+          "results": [
+            { "node_path": ["fa000001-0001-0001-0001-000000000006", "fa000001-0004-0001-0001-000000000001"], "edge_path": ["fa000002-0002-0001-0001-000000000001"], "edge_type_path": ["affects"], "depth": 1 },
+            { "node_path": ["fa000001-0001-0001-0001-000000000006", "fa000001-0004-0001-0001-000000000003"], "edge_path": ["fa000002-0002-0001-0001-000000000004"], "edge_type_path": ["affects"], "depth": 1 }
+          ]
+        }
+      ],
+      "answer": {
+        "refused": false,
+        "text": "Coastal Steel Supply caused a rebar shortage and a plate steel backorder, but I see no link from them to the late delivery penalty.",
+        "node_ids": ["fa000001-0004-0001-0001-000000000001"]
+      }
+    }
+  ]
+}

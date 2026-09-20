@@ -22,12 +22,21 @@ node eval/retrieval/score_retrieval.mjs --trace path.json
 The scorer needs no database and no dependencies. Its input is a trace; the
 database is only needed to produce one.
 
+The seed sets `app.current_role = 'admin'` itself, because the write gate
+refuses a `viewer` and a role-less session; the database role running `psql`
+needs INSERT on the `rye` tables. It ends by checking its own outcome: under a
+scope whose review policy is `strict`, or `candidates_only` with a basis other
+than observed, `record_assertion()` files suggestions instead of current
+claims, and it stops with a message naming that rather than leaving a fixture
+whose direct-fact questions all score as retrieval misses.
+
 The fixture loads into any Rye install. Producing a `rye_graph` trace against
-it additionally needs the traversal surfaces — `find_nodes_batch`,
-`find_paths`, `neighborhood` and the `edge_semantics` registry — so that arm
-depends on PR #19. The `causal_path` questions are meaningless without the
-semantics filter: with it, the supplier-to-penalty chain resolves in three
-hops; without it, the associative decoy returns a spurious one-hop "cause".
+it additionally needs the traversal surfaces — `find_nodes`,
+`find_nodes_batch`, `find_paths`, `neighborhood` and the `edge_semantics`
+registry, all from migration `0032`. The `causal_path` questions are
+meaningless without the semantics filter: with it, the supplier-to-penalty
+chain resolves in three hops; without it, the associative decoy returns a
+spurious one-hop "cause".
 
 ## Why the trace, not the answer
 
@@ -56,10 +65,21 @@ So the scorer reads the whole step list and assigns a mechanical cause:
 `entry_missed` deliberately outranks `refused_answerable`: an agent that
 honestly declines because it never found the entity has an entry-point
 problem, and calling that a refusal hides the only actionable cause.
+`traces/bucket_entry_missed.json` and `traces/bucket_refused_answerable.json`
+are that pair: both end in a refusal, and they land in different buckets.
+
+One `traces/bucket_*.json` file per bucket holds a short failing trace, so the
+scorer's assignment can be checked against the cause it is supposed to name.
+Their steps were recorded against the seeded fixture; only the answers are
+written by hand.
 
 Trace shape is specified in [`trace_format.md`](trace_format.md). It is the
 eval-time half of issue #21 — it writes nothing and does not depend on
-`log_agent_query()`, so read-only agents can be measured.
+`log_agent_query()`, so read-only agents can be measured. The same step shape
+is what `log_agent_query()`'s `p_trace` accepts
+(`contracts/sql-surface.md`, "Retrieval tracing"), so one reader handles a
+harness trace and a production loop alike — but the scorer never reads the
+database, because an agent that may not write cannot trace.
 
 ## Metrics and what each one decides
 
@@ -97,7 +117,10 @@ discriminate rather than to be representative. Every element exists to make one
 measurement possible:
 
 - near-duplicate labels (`Meridian Fence & Gate` / `Meridian Fencing Supply`)
-- an abbreviation-only label (`HPF Marine Services`) that no threshold reaches
+- an abbreviation-only label (`HPF Drydock`) that no threshold reaches: the
+  natural phrasing scores 0.2500 against it, under the 0.35 floor, while the
+  parent company scores 0.7576 on the same query, so the miss arrives as the
+  wrong company rather than as an empty result
 - a paraphrase-only target ("the fence company")
 - a 3-hop causal chain with a real answer
 - an **associative decoy**: a `regarding` edge connecting the two ends of that
@@ -120,12 +143,15 @@ Stated plainly so the harness is not mistaken for a completed comparison.
   agnostic, but producing `rag_baseline` or `hybrid` needs an embedding
   provider and a driver, which live outside this repo.
 - **No trace producer.** An agent runs the scenario and emits the JSON. The
-  format is simple enough to hand-write, which is how
-  `traces/example_rye_graph.json` was built.
-- **`traces/example_rye_graph.json` is invented.** It exists so the scorer's
-  own behavior is checkable without an LLM in the loop, and its mix of passes
-  and failures was chosen to make several buckets fire. Its numbers mean
-  nothing about Rye.
+  format is simple enough to hand-write and to read out of psql, which is how
+  `traces/` was built.
+- **No model has run against this.** Every step in `traces/` was recorded by
+  hand from psql against the seeded fixture, so the ids, scores, match reasons
+  and edge paths are real. The *answers* are written, chosen to make each
+  bucket fire, so the scorer's own behavior is checkable without an LLM in the
+  loop. The metrics in `report.md` are therefore a property of those written
+  answers and say nothing about Rye. There is no token or latency data either,
+  so `tokens_per_correct_answer` reports `n/a`.
 - **One scenario, 16 questions.** Enough to validate the instrument, not to set
   a threshold. Roughly 40–60 across several scenarios before a 20% cutoff is
   more than noise — at 16, one question is six points.

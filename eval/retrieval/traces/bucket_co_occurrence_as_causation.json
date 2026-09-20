@@ -1,0 +1,43 @@
+{
+  "arm": "bucket_probe_co_occurrence",
+  "scenario": "harbor_point",
+  "run_id": "bucket-probe-2026-09-20",
+  "note": "Recorded from psql on 2026-09-20. The arm leaves p_semantics off, so the `regarding` decoy comes back as a one-hop path and is cited as support. The conclusion happens to be true, and the question still fails: co-occurrence was offered as cause. Intended bucket: co_occurrence_as_causation.",
+  "results": [
+    {
+      "question_id": "q-causal-02",
+      "steps": [
+        {
+          "seq": 1,
+          "tool": "find_nodes",
+          "intent": "locate the supplier",
+          "args": { "p_query": "Coastal Steel Supply" },
+          "results": [
+            { "node_id": "fa000001-0001-0001-0001-000000000006", "label": "Coastal Steel Supply", "score": 0.95, "match_reason": "exact_label", "used": true }
+          ],
+          "selected": { "node_id": "fa000001-0001-0001-0001-000000000006", "from_seq": 1, "from_phrasing": "Coastal Steel Supply" }
+        },
+        {
+          "seq": 2,
+          "tool": "find_paths",
+          "intent": "shortest connection to the penalty, semantics left off",
+          "args": { "p_from_node_id": "fa000001-0001-0001-0001-000000000006", "p_to_node_id": "fa000001-0004-0001-0001-000000000002", "p_max_depth": 1, "p_direction": "out" },
+          "results": [
+            {
+              "node_path": ["fa000001-0001-0001-0001-000000000006", "fa000001-0004-0001-0001-000000000002"],
+              "edge_path": ["fa000002-0003-0001-0001-000000000001"],
+              "edge_type_path": ["regarding"],
+              "depth": 1
+            }
+          ]
+        }
+      ],
+      "answer": {
+        "refused": false,
+        "text": "Yes — there is a direct link between Coastal Steel Supply and the late delivery penalty.",
+        "node_ids": ["fa000001-0004-0001-0001-000000000002"],
+        "cited_edge_ids": ["fa000002-0003-0001-0001-000000000001"]
+      }
+    }
+  ]
+}

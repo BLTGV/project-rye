@@ -15,6 +15,13 @@
 --
 -- Idempotent. Fixed UUIDs under the fa000001 prefix so ground truth in
 -- questions.json stays stable across reloads.
+--
+-- ROLE. The write gate (migration 0026) refuses a viewer and a role-less
+-- session, so this file sets `admin` itself rather than inheriting whatever
+-- the psql session had. `admin` and not `team_member`, because the last block
+-- reads current_valid_assertions to check its own outcome. The database role
+-- running psql needs INSERT on the rye tables; scripts/conformance.sh grants
+-- exactly that to rye_conformance.
 
 SET search_path = rye, public, pg_catalog;
 
@@ -42,9 +49,17 @@ INSERT INTO nodes (id, node_type, label, external_id, external_source, propertie
     ('fa000001-0001-0001-0001-000000000003', 'org', 'Meridian Fencing Supply', NULL, NULL,
      '{"category":"supplier"}', '{"classification":"public"}'),
 
-    -- Abbreviation-only label: no trigram threshold reaches this from the
-    -- expanded name.
-    ('fa000001-0001-0001-0001-000000000004', 'org', 'HPF Marine Services', NULL, NULL,
+    -- Abbreviation-only label. `HPF` expands to the operating company's name
+    -- and nothing else in the label survives the expansion, so the natural
+    -- phrasing scores 0.2500 against it -- under the 0.35 floor in
+    -- find_nodes(). Measured on PG15 with pg_trgm:
+    --   similarity('HPF Drydock', 'Harbor Point Fabrication Drydock') = 0.2500
+    -- The parent org scores 0.7576 on the same query, so the miss shows up as
+    -- "returned the parent company instead", which is what a real one looks
+    -- like. A label sharing a word with the expansion is not this test: the
+    -- earlier 'HPF Marine Services' scored 0.5313 against 'Harbor Point
+    -- Marine Services' and was found on the first call.
+    ('fa000001-0001-0001-0001-000000000004', 'org', 'HPF Drydock', NULL, NULL,
      '{"category":"affiliate"}', '{"classification":"public"}'),
 
     -- External identity target
@@ -78,7 +93,8 @@ ON CONFLICT (id) DO NOTHING;
 -- Edges
 -- --------------------------------------------------------------------------
 -- Causal convention here is cause -affects-> effect, matching the core
--- edge_semantics registry from migration 0020.
+-- edge_semantics registry seeded by migration 0032: `affects` is causal,
+-- `regarding` is associative, `employs` and `assigned_to` are structural.
 
 INSERT INTO edges (id, edge_type, source_id, target_id, properties) VALUES
     -- Structural
@@ -205,5 +221,65 @@ BEGIN
 
     -- Deliberately absent: any payment_terms assertion. That gap is the
     -- refusal target, and an agent that answers it is confabulating.
+END;
+$$;
+
+-- --------------------------------------------------------------------------
+-- Check the fixture's own outcome
+-- --------------------------------------------------------------------------
+-- record_assertion() does not always accept. Under a scope whose review
+-- policy is `strict`, or `candidates_only` with a basis other than observed,
+-- the write lands as a suggestion for a person to accept, and a candidate is
+-- absent from current_valid_assertions. The rows would exist, the fixture
+-- would load without error, and every direct-fact question would then score
+-- as a retrieval failure that is really a policy setting. So say it here.
+--
+-- The remedy is to load the fixture into a database with no scope governing
+-- these subjects, or to accept the candidates with accept_assertion() as a
+-- settler. This file does not accept on anyone's behalf: an agent writes
+-- candidates and only a person's accept makes a claim current.
+
+DO $$
+DECLARE
+    v_expected CONSTANT int := 4;
+    v_current  int;
+    v_pending  int;
+BEGIN
+    SELECT count(*) INTO v_current
+    FROM current_valid_assertions a
+    WHERE (a.subject_node_id, a.assertion_type) IN (
+        ('fa000001-0003-0001-0001-000000000001'::uuid, 'project_status'),
+        ('fa000001-0004-0001-0001-000000000001'::uuid, 'issue_cause'),
+        ('fa000001-0004-0001-0001-000000000003'::uuid, 'issue_cause'),
+        ('fa000001-0001-0001-0001-000000000002'::uuid, 'subcontractor_role')
+    );
+
+    IF v_current < v_expected THEN
+        SELECT count(*) INTO v_pending
+        FROM assertions a
+        WHERE a.status = 'candidate'
+          AND a.superseded_at IS NULL
+          AND (a.subject_node_id, a.assertion_type) IN (
+              ('fa000001-0003-0001-0001-000000000001'::uuid, 'project_status'),
+              ('fa000001-0004-0001-0001-000000000001'::uuid, 'issue_cause'),
+              ('fa000001-0004-0001-0001-000000000003'::uuid, 'issue_cause'),
+              ('fa000001-0001-0001-0001-000000000002'::uuid, 'subcontractor_role')
+          );
+
+        RAISE EXCEPTION
+            'harbor_point loaded % of % assertions as current (% waiting for review). A review policy on a scope governing these subjects demoted them to candidates, so the direct-fact and provenance questions cannot be answered and would score as retrieval misses. Load the fixture where no scope governs these subjects, or have a settler accept the candidates.',
+            v_current, v_expected, v_pending;
+    END IF;
+
+    -- The refusal target has to stay absent, or q-unanswerable-01 grades a
+    -- correct answer as confabulation.
+    IF EXISTS (
+        SELECT 1 FROM assertions
+        WHERE subject_node_id = 'fa000001-0001-0001-0001-000000000002'
+          AND assertion_type = 'payment_terms'
+    ) THEN
+        RAISE EXCEPTION
+            'a payment_terms assertion exists on Meridian Fence & Gate; q-unanswerable-01 is a refusal target and needs that gap to stay open';
+    END IF;
 END;
 $$;

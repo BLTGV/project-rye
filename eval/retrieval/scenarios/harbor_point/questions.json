@@ -57,7 +57,7 @@
     },
     {
       "id": "q-entry-abbrev-01",
-      "question": "What does Harbor Point Marine Services handle?",
+      "question": "What does Harbor Point Fabrication Drydock handle?",
       "class": "entry_point",
       "answerable": true,
       "entry": {
@@ -65,7 +65,7 @@
         "difficulty": "abbreviation"
       },
       "answer": { "expected_node_ids": ["fa000001-0001-0001-0001-000000000004"] },
-      "notes": "Label is 'HPF Marine Services'. No trigram threshold reaches this from the expanded name. Fixable by vocabulary visibility (see issue #17) or by embeddings — this question is what tells those two apart."
+      "notes": "Label is 'HPF Drydock'. Measured: similarity('HPF Drydock', 'Harbor Point Fabrication Drydock') = 0.2500, under find_nodes()'s 0.35 floor, so no threshold argument reaches it — the floor is the pg_trgm.similarity_threshold GUC and a lower p_threshold cannot go below it. The parent org scores 0.7576 on the same query, so the miss surfaces as the wrong company. Reformulating to 'drydock' does reach it, through the label_contains tier at 0.40. Fixable by vocabulary visibility (see issue #17) or by embeddings — this question is what tells those two apart."
     },
     {
       "id": "q-entry-paraphrase-01",
