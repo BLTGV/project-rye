@@ -454,7 +454,14 @@ COMMENT ON FUNCTION link_record(text, text, text, text, text, jsonb, text) IS
 --                  Skipped.
 --
 -- A chain that does not terminate within 32 hops, or cycles, is skipped rather
--- than mapped onto an archived intermediate.
+-- than mapped onto an archived intermediate, and counted unresolved.
+--
+-- node_merges is treated as untrusted. Its insert policy (0029) asks only that
+-- the role may write, so a row there may be forged: a merge that never
+-- happened, a future date, a duplicate that is still live. A row is followed
+-- only when its duplicate node is archived; where several rows name one
+-- duplicate the earliest by merged_at then id wins, so a later forged row
+-- cannot redirect a real merge; and a cycle stops the walk.
 --
 -- SECURITY INVOKER, and admin-only: it writes mappings on a caller's behalf
 -- from evidence, which is a repair, not bookkeeping. Under an owner that RLS
@@ -476,34 +483,64 @@ BEGIN
             USING ERRCODE = '42501';
     END IF;
 
-    WITH RECURSIVE latest_merge AS (
-        SELECT DISTINCT ON (duplicate_id) duplicate_id, canonical_id
-        FROM node_merges
-        ORDER BY duplicate_id, merged_at DESC
+    WITH RECURSIVE
+    -- node_merges is not trusted evidence. Its insert policy asks only that
+    -- the role may write, so a row there may name a merge that never
+    -- happened, be dated in the future, or point at a node that is still
+    -- live. Three rules follow, the same ones the reader in 0033 applies:
+    --
+    --   * a row counts only when its duplicate node is actually archived,
+    --     which is the state a real merge leaves;
+    --   * where several rows name one duplicate, the earliest by merged_at
+    --     then id wins, so a later forged row cannot redirect a real merge;
+    --   * a cycle terminates the walk and the duplicate is reported
+    --     unresolved rather than mapped onto a guess.
+    merge_edge AS (
+        SELECT DISTINCT ON (m.duplicate_id) m.duplicate_id, m.canonical_id
+        FROM node_merges m
+        JOIN nodes d ON d.id = m.duplicate_id
+        WHERE d.archived_at IS NOT NULL
+        ORDER BY m.duplicate_id, m.merged_at, m.id
     ),
     chain AS (
-        SELECT lm.duplicate_id, lm.canonical_id, 1 AS depth
-        FROM latest_merge lm
+        SELECT e.duplicate_id, e.canonical_id, 1 AS depth,
+               ARRAY[e.duplicate_id, e.canonical_id] AS seen,
+               false AS cycled
+        FROM merge_edge e
         UNION ALL
-        SELECT c.duplicate_id, lm.canonical_id, c.depth + 1
+        SELECT c.duplicate_id, e.canonical_id, c.depth + 1,
+               c.seen || e.canonical_id,
+               e.canonical_id = ANY(c.seen)
         FROM chain c
-        JOIN latest_merge lm ON lm.duplicate_id = c.canonical_id
-        WHERE c.depth < 32
+        JOIN merge_edge e ON e.duplicate_id = c.canonical_id
+        WHERE c.depth < 32 AND NOT c.cycled
     ),
     deepest AS (
-        SELECT DISTINCT ON (duplicate_id) duplicate_id, canonical_id
+        SELECT DISTINCT ON (duplicate_id) duplicate_id, canonical_id, cycled
         FROM chain
         ORDER BY duplicate_id, depth DESC
     ),
-    -- A "canonical" that is itself a merged duplicate means the chain was
-    -- truncated by the depth cap or cycles. Mapping onto it would name an
-    -- archived node.
+    -- A chain that cycled, or whose last canonical is itself a duplicate --
+    -- the depth cap -- has no terminal node. Mapping onto what it reached
+    -- would name an archived intermediate or a forgery.
     terminal AS (
         SELECT d.duplicate_id, d.canonical_id
         FROM deepest d
-        WHERE NOT EXISTS (
-            SELECT 1 FROM latest_merge lm WHERE lm.duplicate_id = d.canonical_id
-        )
+        WHERE NOT d.cycled
+          AND NOT EXISTS (
+              SELECT 1 FROM merge_edge e WHERE e.duplicate_id = d.canonical_id
+          )
+    ),
+    broken AS (
+        SELECT d.duplicate_id
+        FROM deepest d
+        JOIN nodes n ON n.id = d.duplicate_id
+        WHERE (d.cycled OR EXISTS (
+                  SELECT 1 FROM merge_edge e WHERE e.duplicate_id = d.canonical_id
+              ))
+          AND n.archived_at IS NOT NULL
+          AND n.external_id IS NOT NULL
+          AND strpos(coalesce(n.external_source, ''), '.') > 0
     ),
     lost AS (
         SELECT t.canonical_id, n.id AS duplicate_id,
@@ -534,6 +571,8 @@ BEGIN
         SELECT DISTINCT duplicate_id
         FROM candidate
         WHERE source_schema IS NULL OR pair_matches <> 1
+        UNION
+        SELECT duplicate_id FROM broken
     ),
     grouped AS (
         SELECT source_schema, source_table, source_id,
@@ -581,7 +620,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION rye_restore_merged_source_maps() IS
-    'Re-create source mappings that a pre-0031 merge deleted, from node_merges plus the archived duplicate''s external_id/external_source. Admin only, SECURITY INVOKER, re-runnable, and a no-op once every mapping is correct. Returns counts: restored, already_mapped, occupied (the source row maps to another node -- remedy with merge_nodes on it), ambiguous (two duplicates claim the row, merged to different canonicals), unresolved (external_source matched no surviving source table, or several).';
+    'Re-create source mappings that a pre-0031 merge deleted, from node_merges plus the archived duplicate''s external_id/external_source. node_merges is untrusted: a row is followed only when its duplicate node is archived, the earliest row per duplicate wins, and a cycle stops the walk. Admin only, SECURITY INVOKER, re-runnable, and a no-op once every mapping is correct. Returns counts: restored, already_mapped, occupied (the source row maps to another node -- remedy with merge_nodes on it), ambiguous (two duplicates claim the row, merged to different canonicals), unresolved (external_source matched no surviving source table, or several).';
 
 DO $$
 DECLARE
@@ -597,3 +636,9 @@ BEGIN
     END IF;
 END;
 $$;
+
+-- The role set at the top of this file is session-wide, because migrate.sh
+-- gives each migration its own psql session and closes it. An operator who
+-- pipes every migration into one session instead would carry admin into the
+-- next file, so the file puts it back.
+SELECT set_config('app.current_role', '', false);

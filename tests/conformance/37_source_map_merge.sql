@@ -581,6 +581,99 @@ BEGIN
 END
 $$;
 
+-- --------------------------------------------------------------------------
+-- 6. node_merges is untrusted evidence.
+--
+-- Its insert policy (0029) asks only that the role may write, so any writing
+-- session can plant a row for a merge that never happened. The repair walks
+-- that table to decide where a lost mapping belongs, so it follows a row only
+-- when the duplicate node is actually archived, and takes the earliest row per
+-- duplicate rather than the latest.
+--
+-- The forged rows are planted as an ordinary writing role, which is what main
+-- still allows. work/014 adds an insert guard in migration 0033; if the guard
+-- is present the plant is refused, and this block says so and stops rather
+-- than asserting about a row that does not exist.
+-- --------------------------------------------------------------------------
+DO $$
+DECLARE
+    v_canon    uuid;
+    v_decoy    uuid;
+    v_lost     uuid;
+    v_live     uuid;
+    v_mapped   uuid;
+    v_alive    boolean;
+    v_guarded  boolean := false;
+    v_report   jsonb;
+BEGIN
+    PERFORM set_config('app.current_role', 'admin', true);
+
+    v_canon := link_record('b012', 'forge', '1', 'person', 'Marsh Forge Canonical');
+    v_decoy := link_record('b012', 'forge', '9', 'person', 'Marsh Forge Decoy');
+
+    -- One real merge, then its mapping is lost the way the old key lost it.
+    v_lost := link_record('b012', 'forge', '2', 'person', 'Marsh Forge Lost');
+    PERFORM merge_nodes(v_lost, v_canon, 'test:source-map-merge');
+    DELETE FROM node_source_map
+    WHERE source_schema = 'b012' AND source_table = 'forge' AND source_id = '2';
+
+    -- The forgery: the canonical node is alive and was never merged, but a
+    -- row says it was. Following it would put the lost mapping on the decoy.
+    BEGIN
+        INSERT INTO node_merges (duplicate_id, canonical_id, merged_by)
+        VALUES (v_canon, v_decoy, 'forged');
+    EXCEPTION WHEN OTHERS THEN
+        v_guarded := true;
+    END;
+
+    IF v_guarded THEN
+        RAISE NOTICE
+            'node_merges now refuses a forged row; the repair''s own untrusted-evidence rules are unchanged and untested here';
+        RETURN;
+    END IF;
+
+    -- A second forged row on a real duplicate, dated later, pointing
+    -- elsewhere: the earliest row per duplicate has to win.
+    INSERT INTO node_merges (duplicate_id, canonical_id, merged_at, merged_by)
+    VALUES (v_lost, v_decoy, now() + interval '1 day', 'forged');
+
+    v_report := rye_restore_merged_source_maps();
+
+    SELECT node_id INTO v_mapped FROM node_source_map
+    WHERE source_schema = 'b012' AND source_table = 'forge' AND source_id = '2';
+
+    IF v_mapped IS NULL THEN
+        RAISE EXCEPTION 'The repair did not restore the real merge''s mapping: %', v_report;
+    END IF;
+    IF v_mapped = v_decoy THEN
+        RAISE EXCEPTION
+            'A forged node_merges row redirected the repair: source row 2 maps to the decoy %', v_decoy;
+    END IF;
+    IF v_mapped IS DISTINCT FROM v_canon THEN
+        RAISE EXCEPTION
+            'Source row 2 maps to % after the repair, expected the real canonical %',
+            v_mapped, v_canon;
+    END IF;
+
+    -- The forged row named a node that is still live, so nothing about it
+    -- moved: it is not archived and it keeps its own mapping.
+    SELECT archived_at IS NULL INTO v_alive FROM nodes WHERE id = v_canon;
+    IF NOT v_alive THEN
+        RAISE EXCEPTION 'The forged row archived a live node';
+    END IF;
+    SELECT node_id INTO v_live FROM node_source_map
+    WHERE source_schema = 'b012' AND source_table = 'forge' AND source_id = '1';
+    IF v_live IS DISTINCT FROM v_canon THEN
+        RAISE EXCEPTION
+            'A forged row re-pointed a live node''s own mapping: 1 maps to %', v_live;
+    END IF;
+
+    RAISE NOTICE
+        'Forged node_merges rows ignored: source row 2 restored to the real canonical, report %',
+        v_report;
+END
+$$;
+
 DO $$
 BEGIN
     RAISE NOTICE 'Source-map row identity: every obligation passed';
