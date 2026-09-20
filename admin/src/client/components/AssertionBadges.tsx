@@ -27,14 +27,40 @@ export function ConfidenceChip({
   effective,
   stored,
   prior,
+  projected,
 }: {
   effective: number | null | undefined;
   stored: number | null | undefined;
   prior?: number | null;
+  /**
+   * What a suggestion would carry if it were accepted now
+   * (projected_effective_confidence). Same arithmetic as the effective value,
+   * with the suggestion left out of its own competing discount.
+   */
+  projected?: number | null;
 }) {
   const effectiveValue = numeric(effective);
   const storedValue = numeric(stored);
   const priorValue = numeric(prior);
+  const projectedValue = numeric(projected);
+
+  if (effectiveValue === null && projectedValue !== null) {
+    return (
+      <span
+        className="chip"
+        title={
+          storedValue !== null
+            ? `How sure Rye would be if this were accepted now: ${pct(projectedValue)}. Stated certainty ${pct(storedValue)}.`
+            : `How sure Rye would be if this were accepted now: ${pct(projectedValue)}.`
+        }
+      >
+        {pct(projectedValue)} if accepted
+        {storedValue !== null && storedValue !== projectedValue ? (
+          <span className="text-[color:var(--color-ink-dim)]">/ {pct(storedValue)} stated</span>
+        ) : null}
+      </span>
+    );
+  }
 
   if (effectiveValue !== null) {
     return (

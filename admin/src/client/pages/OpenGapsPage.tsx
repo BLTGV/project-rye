@@ -134,15 +134,69 @@ function StaleDigestLine({ digest }: { digest: StaleDigestRow }) {
           stale
         </span>
         {digest.newer_subject_assertion ? (
-          <span className="pill">newer facts on subject</span>
+          <span className="pill">
+            newer facts on subject
+            {digest.newer_latest_asserted_at
+              ? ` · newest ${fmtDate(digest.newer_latest_asserted_at)}`
+              : ""}
+          </span>
         ) : null}
         {digest.overturned_source ? <span className="pill">source overturned</span> : null}
         <span className="chip">as of {fmtDate(digest.watermark)}</span>
       </div>
+      {/* The view names the culprit by id, so the badge links to it instead of
+          leaving the reader to search. */}
+      <CulpritLinks
+        label="What is newer"
+        subjectNodeId={digest.subject_node_id}
+        ids={digest.newer_assertion_ids}
+      />
+      <CulpritLinks
+        label="What was overturned"
+        subjectNodeId={digest.subject_node_id}
+        ids={digest.overturned_source_assertion_ids}
+      />
       <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded-md bg-[color:var(--color-canvas)] p-2 font-mono text-[11px] leading-5 text-[color:var(--color-ink-muted)] scrollbar">
         {JSON.stringify(digest.claim ?? {}, null, 2)}
       </pre>
     </li>
+  );
+}
+
+// stale_digests names what made a digest stale, by id. When the subject is a
+// node, each id links to that subject's assertions; otherwise it is shown so it
+// can at least be looked up. An empty list is not rendered: the arrays are
+// empty rather than null when the matching flag is false.
+function CulpritLinks({
+  label,
+  subjectNodeId,
+  ids,
+}: {
+  label: string;
+  subjectNodeId: string | null;
+  ids: string[] | null;
+}) {
+  if (!ids || ids.length === 0) return null;
+  return (
+    <div className="mb-2 flex flex-wrap items-center gap-2 text-[11px] text-[color:var(--color-ink-muted)]">
+      <span className="field-label">{label}</span>
+      {ids.map((id) =>
+        subjectNodeId ? (
+          <Link
+            key={id}
+            to={`/nodes/${subjectNodeId}?tab=assertions`}
+            title={id}
+            className="chip font-mono hover:text-[color:var(--color-rye)]"
+          >
+            {id.slice(0, 8)}
+          </Link>
+        ) : (
+          <span key={id} className="chip font-mono" title={id}>
+            {id.slice(0, 8)}
+          </span>
+        )
+      )}
+    </div>
   );
 }
 

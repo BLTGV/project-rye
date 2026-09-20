@@ -74,6 +74,12 @@ expect_field() {
   [[ "$got" == "$expected" ]] || fail "$desc — expected $path = '$expected', got '$got'"
 }
 
+# expect_value <description> <got> <expected>
+expect_value() {
+  local desc="$1" got="$2" expected="$3"
+  [[ "$got" == "$expected" ]] || fail "$desc — expected '$expected', got '$got'"
+}
+
 # expect_absent <description> <haystack> <needle>
 expect_absent() {
   local desc="$1" body="$2" needle="$3"
@@ -514,6 +520,278 @@ expect_absent "title agent candidates/review is filtered" "$title_review" "mixed
 
 reviewer_review="$(curl -sS -H "$(auth "$reviewer_token")" "${BASE_URL}/api/candidates/review?include_closed=1&q=mixedheldmarker")"
 expect_present "reviewer candidates/review sees its own area" "$reviewer_review" "mixedheldmarker"
+
+# ---------------------------------------------------------------------------
+# Review fields and counts: contracts/admin-api.md, "Review fields and counts".
+# The route projects the views from migration 0035 rather than recomputing
+# them, so every field below must arrive populated, and the two states must
+# stay disjoint.
+# ---------------------------------------------------------------------------
+
+# One subject carrying: an accepted incumbent with evidence, a live suggestion
+# on the same tuple, a settle-gated suggestion, and a declined one. The marker
+# is in the subject label, which the route's `q` filter matches, so none of
+# these assertions depends on how many rows other suites left behind.
+review_fixture="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atq <<'SQL' | tail -n 1
+SET search_path = rye, public, pg_catalog;
+SELECT set_config('app.current_role', 'admin', false) \g /dev/null
+CREATE TEMP TABLE t_api_review (k text PRIMARY KEY, v uuid);
+DO $$
+DECLARE
+  v_node uuid;
+  v_witness uuid;
+  v_event uuid;
+  v_incumbent uuid;
+  v_candidate uuid;
+  v_gated uuid;
+  v_declined uuid;
+  v_project uuid;
+  v_source uuid;
+  v_digest uuid;
+  v_newer uuid;
+BEGIN
+  INSERT INTO nodes (node_type, label) VALUES ('account', 'API apireviewmarker Account')
+  RETURNING id INTO v_node;
+  INSERT INTO nodes (node_type, label) VALUES ('person', 'API apireviewmarker Witness')
+  RETURNING id INTO v_witness;
+
+  v_event := record_event('call', 'API apireviewmarker evidence call', '{}'::jsonb,
+                          ARRAY[v_node], ARRAY['subject'], 'user:api-security');
+
+  v_incumbent := record_assertion(
+      'account_health', '{"health":"amber"}', v_node,
+      p_confidence := 0.6, p_basis := 'reported',
+      p_evidence := ARRAY[jsonb_build_object('kind', 'source', 'event_id', v_event,
+                                             'witness_node_id', v_witness)]);
+  v_candidate := record_assertion(
+      'account_health', '{"health":"green"}', v_node,
+      p_confidence := 0.8, p_status := 'candidate', p_basis := 'reported',
+      p_evidence := ARRAY[jsonb_build_object('kind', 'source', 'event_id', v_event,
+                                             'witness_node_id', v_witness)]);
+
+  -- A team_member may not settle a configuration type, so record_assertion()
+  -- demotes this one and marks it. That is waiting_reason = settle_gate.
+  PERFORM set_config('app.current_role', 'team_member', true);
+  v_gated := record_assertion(
+      'registry_entry', '{"value":"apireviewmarker"}', v_node,
+      p_assertion_key := 'apireviewmarker:settle', p_basis := 'assumed');
+  PERFORM set_config('app.current_role', 'admin', true);
+
+  v_declined := record_assertion(
+      'service_tier', '{"tier":"platinum"}', v_node,
+      p_assertion_key := 'apireviewmarker:declined', p_confidence := 0.5,
+      p_status := 'candidate', p_basis := 'assumed');
+  PERFORM reject_candidate(v_declined, 'Duplicate of the signed order',
+                           'user:api-security', 'duplicate');
+
+  -- A stale summary with its culprit: a digest carrying a watermark, and a
+  -- fact newer than that watermark. now() is frozen inside this block, so the
+  -- newer row outruns the watermark by hand. Seeded here rather than borrowed
+  -- from another suite, so the check below can never pass vacuously.
+  INSERT INTO nodes (node_type, label) VALUES ('project', 'API apireviewmarker Rollout')
+  RETURNING id INTO v_project;
+  v_source := record_assertion('project_status', '{"status":"active"}', v_project,
+                               p_assertion_key := 'default', p_basis := 'assumed');
+  v_digest := record_distillation(
+      p_subject_node_id := v_project, p_subject_edge_id := NULL,
+      p_assertion_key := 'apireviewmarker:digest',
+      p_claim := '{"summary":"rollout is on track"}',
+      p_source_assertion_ids := ARRAY[v_source], p_source_event_ids := '{}'::uuid[],
+      p_agent := 'test:api-security');
+  INSERT INTO assertions (assertion_type, assertion_key, subject_node_id,
+                          claim, asserted_at, basis)
+  VALUES ('project_update', 'apireviewmarker:after-digest', v_project,
+          '{"value":"newer"}', clock_timestamp() + interval '1 millisecond', 'assumed')
+  RETURNING id INTO v_newer;
+
+  INSERT INTO t_api_review (k, v) VALUES
+    ('a_candidate', v_candidate),
+    ('b_declined', v_declined),
+    ('c_gated', v_gated),
+    ('d_incumbent', v_incumbent),
+    ('e_digest', v_digest),
+    ('f_newer', v_newer);
+END
+$$;
+SELECT string_agg(v::text, ' ' ORDER BY k) FROM t_api_review;
+SQL
+)"
+read -r suggestion_id declined_id gated_id incumbent_id digest_id newer_id <<<"$review_fixture"
+for fixture_id in "$suggestion_id" "$declined_id" "$gated_id" "$incumbent_id" "$digest_id" "$newer_id"; do
+  [[ -n "$fixture_id" ]] || fail "review fixture is incomplete, got '$review_fixture'"
+done
+
+# suggestion_field <json> <assertion id> <field>
+suggestion_field() {
+  node -e "const d = JSON.parse(process.argv[1]); const id = process.argv[2]; const f = process.argv[3];
+    for (const g of d.groups ?? []) for (const c of g.candidates ?? []) if (c.id === id) {
+      const v = c[f];
+      if (v === undefined) process.exit(2);
+      console.log(v === null ? 'null' : typeof v === 'object' ? JSON.stringify(v) : String(v));
+      process.exit(0);
+    }
+    process.exit(3);" "$1" "$2" "$3"
+}
+
+# group_field <json> <assertion id> <field> — the group that holds it
+group_field() {
+  node -e "const d = JSON.parse(process.argv[1]); const id = process.argv[2]; const f = process.argv[3];
+    for (const g of d.groups ?? []) for (const c of g.candidates ?? []) if (c.id === id) {
+      const v = f.split('.').reduce((cur, k) => cur?.[k], g);
+      if (v === undefined) process.exit(2);
+      console.log(v === null ? 'null' : typeof v === 'object' ? JSON.stringify(v) : String(v));
+      process.exit(0);
+    }
+    process.exit(3);" "$1" "$2" "$3"
+}
+
+# declined_field <json> <assertion id> <field>
+declined_field() {
+  node -e "const d = JSON.parse(process.argv[1]); const id = process.argv[2]; const f = process.argv[3];
+    for (const r of d.rejected ?? []) if (r.id === id) {
+      const v = r[f];
+      if (v === undefined) process.exit(2);
+      console.log(v === null ? 'null' : typeof v === 'object' ? JSON.stringify(v) : String(v));
+      process.exit(0);
+    }
+    process.exit(3);" "$1" "$2" "$3"
+}
+
+# expect_suggestion <description> <json> <id> <field> <expected>
+expect_suggestion() {
+  local desc="$1" body="$2" id="$3" field="$4" expected="$5"
+  local got
+  got="$(suggestion_field "$body" "$id" "$field" || true)"
+  [[ "$got" == "$expected" ]] || fail "$desc — expected $field = '$expected', got '$got'"
+}
+
+waiting_json="$(curl -sS -H "$(auth "$reviewer_token")" "${BASE_URL}/api/review/assertions?q=apireviewmarker")"
+expect_field "review state defaults to waiting" "$waiting_json" "state" "waiting"
+
+# A suggestion projects a number. effective_confidence() stays null for it.
+projected="$(suggestion_field "$waiting_json" "$suggestion_id" "projected_effective_confidence" || true)"
+[[ -n "$projected" && "$projected" != "null" ]] || {
+  fail "projected_effective_confidence is '$projected' for a live suggestion"
+}
+node -e "const v = Number(process.argv[1]); if (!(v > 0 && v <= 1)) { console.error('projected_effective_confidence out of range: ' + process.argv[1]); process.exit(1); }" "$projected"
+expect_suggestion "effective_confidence stays null for a suggestion" \
+  "$waiting_json" "$suggestion_id" "effective_confidence" "null"
+
+# The evidence summary comes from the view, not from a client-side count.
+expect_suggestion "evidence_count" "$waiting_json" "$suggestion_id" "evidence_count" "1"
+expect_suggestion "witness_count" "$waiting_json" "$suggestion_id" "witness_count" "1"
+expect_suggestion "evidence_kinds" "$waiting_json" "$suggestion_id" "evidence_kinds" '["source"]'
+latest_evidence="$(suggestion_field "$waiting_json" "$suggestion_id" "latest_evidence_at" || true)"
+[[ -n "$latest_evidence" && "$latest_evidence" != "null" ]] || {
+  fail "latest_evidence_at is '$latest_evidence' for a suggestion with evidence"
+}
+
+# The incumbent is the row an acceptance would supersede, and it says whether
+# it is also the answer Rye gives today.
+expect_field "incumbent id comes from the view" \
+  "$(group_field "$waiting_json" "$suggestion_id" "incumbent" || true)" "id" "$incumbent_id"
+expect_field "incumbent is_current" \
+  "$(group_field "$waiting_json" "$suggestion_id" "incumbent" || true)" "is_current" "true"
+incumbent_effective="$(group_field "$waiting_json" "$suggestion_id" "incumbent.effective_confidence" || true)"
+[[ -n "$incumbent_effective" && "$incumbent_effective" != "null" ]] || {
+  fail "incumbent.effective_confidence is '$incumbent_effective'"
+}
+
+# Why it is waiting. Never null: the view writes "none".
+expect_value "a plainly recorded suggestion is not gated" \
+  "$(group_field "$waiting_json" "$suggestion_id" "waiting_reason" || true)" "none"
+expect_value "a settle-gated suggestion says so" \
+  "$(group_field "$waiting_json" "$gated_id" "waiting_reason" || true)" "settle_gate"
+expect_suggestion "the suggestion carries its own reason" \
+  "$waiting_json" "$gated_id" "waiting_reason" "settle_gate"
+gated_detail="$(group_field "$waiting_json" "$gated_id" "waiting_detail" || true)"
+[[ "$gated_detail" != "null" && -n "$gated_detail" ]] || {
+  fail "waiting_detail is '$gated_detail' on a settle-gated tuple"
+}
+
+# total and filtered mean what contracts/admin-api.md says: neither depends on
+# limit or offset, and the returned array is at most a page of filtered.
+counts_json="$(curl -sS -H "$(auth "$reviewer_token")" "${BASE_URL}/api/review/assertions?limit=1")"
+node -e "const d = JSON.parse(process.argv[1]);
+  const s = d.stats;
+  if (typeof s.total !== 'number' || typeof s.filtered !== 'number') {
+    console.error('stats.total/filtered missing: ' + JSON.stringify(s)); process.exit(1);
+  }
+  if (s.filtered > s.total) { console.error('filtered > total: ' + JSON.stringify(s)); process.exit(1); }
+  if (d.groups.length > 1) { console.error('limit=1 returned ' + d.groups.length + ' groups'); process.exit(1); }
+  if (s.filtered < d.groups.length) { console.error('filtered under-counts the page'); process.exit(1); }
+  if (s.filtered <= 1) { console.error('anti-vacuity: filtered is ' + s.filtered + ', paging is untested'); process.exit(1); }
+" "$counts_json"
+
+# ?state=rejected is the same route, and the two sets never mix.
+rejected_json="$(curl -sS -H "$(auth "$reviewer_token")" "${BASE_URL}/api/review/assertions?state=rejected&q=apireviewmarker")"
+expect_field "rejected state echoes itself" "$rejected_json" "state" "rejected"
+expect_field "rejected state returns no waiting groups" "$rejected_json" "groups" "[]"
+expect_value "declined by" "$(declined_field "$rejected_json" "$declined_id" "rejected_by" || true)" "user:api-security"
+expect_value "declined reason" "$(declined_field "$rejected_json" "$declined_id" "rejected_reason" || true)" "Duplicate of the signed order"
+expect_value "declined outcome" "$(declined_field "$rejected_json" "$declined_id" "rejected_outcome" || true)" "duplicate"
+declined_at="$(declined_field "$rejected_json" "$declined_id" "rejected_at" || true)"
+[[ -n "$declined_at" && "$declined_at" != "null" ]] || fail "rejected_at is '$declined_at'"
+declined_event="$(declined_field "$rejected_json" "$declined_id" "rejection_event_id" || true)"
+[[ -n "$declined_event" && "$declined_event" != "null" ]] || fail "rejection_event_id is '$declined_event'"
+
+expect_absent "a declined suggestion is never waiting" "$waiting_json" "$declined_id"
+expect_absent "a waiting suggestion is never declined" "$rejected_json" "$suggestion_id"
+
+# A stale digest names what made it stale.
+stale_json="$(curl -sS -H "$(auth "$reviewer_token")" "${BASE_URL}/api/stale-digests?limit=500")"
+node -e "const rows = JSON.parse(process.argv[1]);
+  const digestId = process.argv[2];
+  const newerId = process.argv[3];
+  const seeded = rows.find((r) => r.id === digestId);
+  if (!seeded) { console.error('anti-vacuity: the seeded stale digest is not listed'); process.exit(1); }
+  if (!seeded.newer_assertion_ids.includes(newerId)) {
+    console.error('the stale digest does not name what made it stale: ' + JSON.stringify(seeded.newer_assertion_ids));
+    process.exit(1);
+  }
+  if (!seeded.newer_latest_asserted_at) { console.error('newer_latest_asserted_at is null'); process.exit(1); }
+  for (const r of rows) {
+    for (const f of ['newer_assertion_ids', 'overturned_source_assertion_ids']) {
+      if (!Array.isArray(r[f])) { console.error(f + ' is not an array: ' + JSON.stringify(r[f])); process.exit(1); }
+    }
+    if (r.newer_subject_assertion !== (r.newer_assertion_ids.length > 0)) {
+      console.error('newer_subject_assertion disagrees with newer_assertion_ids'); process.exit(1);
+    }
+    if (r.overturned_source !== (r.overturned_source_assertion_ids.length > 0)) {
+      console.error('overturned_source disagrees with overturned_source_assertion_ids'); process.exit(1);
+    }
+  }
+" "$stale_json" "$digest_id" "$newer_id"
+
+# Deny by default still holds on both states. A token without rye.review.read
+# is refused whichever state it names; a token that holds it in another area
+# reaches the route, because the route table declares a global check.
+expect_status "no-grant token on the rejected state" 403 \
+  -H "$(auth "$nogrant_token")" "${BASE_URL}/api/review/assertions?state=rejected"
+expect_status "context-read-only token on the waiting state" 403 \
+  -H "$(auth "$candidate_token")" "${BASE_URL}/api/review/assertions"
+expect_status "context-read-only token on the rejected state" 403 \
+  -H "$(auth "$candidate_token")" "${BASE_URL}/api/review/assertions?state=rejected"
+expect_status "scoped review token on the waiting state" 200 \
+  -H "$(auth "$title_token")" "${BASE_URL}/api/review/assertions"
+expect_status "scoped review token on the rejected state" 200 \
+  -H "$(auth "$title_token")" "${BASE_URL}/api/review/assertions?state=rejected"
+
+# The same fields arrive for a token whose rye.review.read names one area.
+title_waiting="$(curl -sS -H "$(auth "$title_token")" "${BASE_URL}/api/review/assertions?q=apireviewmarker")"
+expect_suggestion "scoped token sees the evidence summary" \
+  "$title_waiting" "$suggestion_id" "evidence_count" "1"
+title_projected="$(suggestion_field "$title_waiting" "$suggestion_id" "projected_effective_confidence" || true)"
+[[ -n "$title_projected" && "$title_projected" != "null" ]] || {
+  fail "scoped token got projected_effective_confidence '$title_projected'"
+}
+title_rejected="$(curl -sS -H "$(auth "$title_token")" "${BASE_URL}/api/review/assertions?state=rejected&q=apireviewmarker")"
+expect_value "scoped token declined by" \
+  "$(declined_field "$title_rejected" "$declined_id" "rejected_by" || true)" "user:api-security"
+
+# An unknown state is rejected by validation rather than silently ignored.
+expect_status "unknown review state" 400 \
+  -H "$(auth "$reviewer_token")" "${BASE_URL}/api/review/assertions?state=banana"
 
 # ---------------------------------------------------------------------------
 # The MCP adapter's tools keep working.
