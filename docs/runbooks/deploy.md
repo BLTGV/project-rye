@@ -115,6 +115,34 @@ database it created (`rye_nonsuperuser` by default) on
 or `tests/security` file that failed with `SET search_path` set first, the
 same way `scripts/conformance.sh` does it.
 
+## Preparing a fresh worktree for `./scripts/test-all.sh`
+
+**What it is:** `scripts/bootstrap-worktree.sh`. A fresh git worktree has no
+`node_modules` in `admin/`, `site/`, or `skills/rye-source-context-intake/`.
+Without them, `test-all.sh` dies partway through (`tsx: command not found`
+at conformance test 21, then `astro: command not found` in the site build),
+and a plain `npm ci` in `admin/` tries to build `sharp` from source, which is
+slow and can fail outright.
+
+**Run it once per fresh worktree, before `test-all.sh`:**
+
+```bash
+./scripts/bootstrap-worktree.sh
+```
+
+For each of the three directories it copies `node_modules` from the main
+checkout (found via `git worktree list`) when that checkout has one whose
+`package-lock.json` hashes the same — hard-linked (`cp -al`) when the
+worktree shares a filesystem with the main checkout, otherwise a full copy
+(`cp -a`; never a symlink, since sharp/astro/tsx resolve real paths). It only
+falls back to `npm ci` when no usable copy exists. It never writes into the
+main checkout, and it stamps each `node_modules` it prepares so a second run
+is a no-op.
+
+**Rollback:** nothing to roll back — it only ever adds `node_modules`
+directories inside the worktree. Delete `node_modules` in the affected
+directory and re-run to force a fresh copy or `npm ci`.
+
 ## Notes
 
 - All three units are independent: a failed admin deploy does not affect the
