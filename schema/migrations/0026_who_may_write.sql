@@ -194,6 +194,53 @@ CREATE TRIGGER trg_artifacts_gate_may_write
     BEFORE INSERT OR UPDATE OR DELETE ON artifacts
     FOR EACH ROW EXECUTE FUNCTION rye_gate_may_write();
 
+-- ---------------------------------------------------------------------------
+-- node_source_map follows the same rule as the seven, and for the same reason.
+--
+-- It was the one supporting table a non-writing session could still change:
+-- nsm_insert_policy was WITH CHECK (true) and nsm_update_policy asked only that
+-- the node be visible. A mapping decides which node a tracked table's change
+-- events attach to, so a viewer could map a source id of its choosing onto a
+-- node of its choosing and then have CDC record its own text against that node,
+-- or re-point an operator's mapping so a real table's future events land
+-- somewhere else. Neither write is bookkeeping; both change what Rye records
+-- later. link_record() was already refused by the rule on `nodes`; this closes
+-- the raw route.
+--
+-- system:cdc gets nothing here: it reads node_source_map and never writes it,
+-- and rye_gate_may_write() admits it only for INSERT on events and
+-- event_participants.
+-- ---------------------------------------------------------------------------
+DROP POLICY IF EXISTS nsm_insert_policy ON node_source_map;
+CREATE POLICY nsm_insert_policy ON node_source_map
+    FOR INSERT
+    WITH CHECK (rye_role_may_write());
+
+DROP POLICY IF EXISTS nsm_update_policy ON node_source_map;
+CREATE POLICY nsm_update_policy ON node_source_map
+    FOR UPDATE
+    USING (
+        rye_role_may_write()
+        AND EXISTS (SELECT 1 FROM nodes WHERE id = node_source_map.node_id)
+    )
+    WITH CHECK (
+        rye_role_may_write()
+        AND EXISTS (SELECT 1 FROM nodes WHERE id = node_source_map.node_id)
+    );
+
+DROP POLICY IF EXISTS nsm_delete_policy ON node_source_map;
+CREATE POLICY nsm_delete_policy ON node_source_map
+    FOR DELETE
+    USING (
+        rye_role_may_write()
+        AND current_setting('app.current_role', true) IN ('admin', 'manager')
+    );
+
+DROP TRIGGER IF EXISTS trg_node_source_map_gate_may_write ON node_source_map;
+CREATE TRIGGER trg_node_source_map_gate_may_write
+    BEFORE INSERT OR UPDATE OR DELETE ON node_source_map
+    FOR EACH ROW EXECUTE FUNCTION rye_gate_may_write();
+
 -- ============================================================================
 -- B. THE GOVERNANCE STRUCTURE IS ADMIN-ONLY
 -- ============================================================================

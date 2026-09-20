@@ -1592,6 +1592,137 @@ BEGIN
 END
 $$;
 
+-- --------------------------------------------------------------------------
+-- Obligation 16. node_source_map follows the same rule as the core tables.
+--
+-- A mapping decides which node a tracked table's change events attach to. With
+-- `nsm_insert_policy` at WITH CHECK (true) a viewer could map a source id of
+-- its choosing onto a node of its choosing and have CDC record its own text
+-- against that node, and with `nsm_update_policy` asking only that the node be
+-- visible it could re-point an operator's mapping so a real table's future
+-- events landed elsewhere. Both are writes, not bookkeeping.
+--
+-- The raw mapping writes are asserted here, under both owner types. The CDC
+-- consequence -- that no event attaches to the viewer's node afterwards -- is
+-- asserted in tests/conformance/07_domain_integration.sh, which runs as the
+-- connection's own user and can therefore create and track a domain table;
+-- this suite runs as a test role with no CREATE on public.
+-- --------------------------------------------------------------------------
+DO $$
+DECLARE
+    v_role    text;
+    v_wren    uuid := (SELECT v FROM wmw_fixture WHERE k = 'wren')::uuid;
+    v_marsh   uuid := (SELECT v FROM wmw_fixture WHERE k = 'marsh')::uuid;
+    v_tobin   uuid := (SELECT v FROM wmw_fixture WHERE k = 'tobin')::uuid;
+    v_failed  boolean;
+    v_state   text;
+    v_rows    integer;
+    v_n       integer;
+BEGIN
+    -- An operator's honest mapping, on source id 501.
+    PERFORM set_config('app.current_role', 'admin', true);
+    INSERT INTO node_source_map (node_id, source_schema, source_table, source_id)
+    VALUES (v_wren, 'wmw', 'probe', '501');
+
+    FOREACH v_role IN ARRAY ARRAY['viewer', ''] LOOP
+        PERFORM set_config('app.current_role', v_role, true);
+        IF current_setting('app.current_role', true) IS DISTINCT FROM v_role THEN
+            RAISE EXCEPTION 'Role did not read back as "%"', v_role;
+        END IF;
+
+        -- The mapping has to be visible, or the zero below is a zero for the
+        -- wrong reason.
+        SELECT count(*) INTO v_n FROM node_source_map
+        WHERE source_schema = 'wmw' AND source_table = 'probe' AND source_id = '501';
+        IF v_n <> 1 THEN
+            RAISE EXCEPTION 'Role "%" cannot see the operator mapping', v_role;
+        END IF;
+
+        -- Reproduction 1: map a source id onto a node of its choosing.
+        v_failed := false;
+        BEGIN
+            INSERT INTO node_source_map (node_id, source_schema, source_table, source_id)
+            VALUES (v_marsh, 'wmw', 'probe', '604');
+        EXCEPTION WHEN OTHERS THEN v_failed := true; v_state := SQLSTATE; END;
+        IF NOT v_failed OR v_state <> '42501' THEN
+            RAISE EXCEPTION
+                'Role "%" inserted a source mapping (failed=%, sqlstate=%)', v_role, v_failed, v_state;
+        END IF;
+        PERFORM set_config('app.current_role', 'admin', true);
+        SELECT count(*) INTO v_n FROM node_source_map
+        WHERE source_schema = 'wmw' AND source_table = 'probe' AND source_id = '604';
+        IF v_n <> 0 THEN
+            RAISE EXCEPTION 'Role "%" left a source mapping behind', v_role;
+        END IF;
+        PERFORM set_config('app.current_role', v_role, true);
+
+        -- Reproduction 2: re-point the operator's mapping.
+        v_rows := 0;
+        BEGIN
+            UPDATE node_source_map SET node_id = v_marsh
+            WHERE source_schema = 'wmw' AND source_table = 'probe' AND source_id = '501';
+            GET DIAGNOSTICS v_rows = ROW_COUNT;
+        EXCEPTION WHEN OTHERS THEN v_rows := 0; END;
+        IF v_rows <> 0 THEN
+            RAISE EXCEPTION 'Role "%" re-pointed % source mappings', v_role, v_rows;
+        END IF;
+
+        v_rows := 0;
+        BEGIN
+            DELETE FROM node_source_map
+            WHERE source_schema = 'wmw' AND source_table = 'probe' AND source_id = '501';
+            GET DIAGNOSTICS v_rows = ROW_COUNT;
+        EXCEPTION WHEN OTHERS THEN v_rows := 0; END;
+        IF v_rows <> 0 THEN
+            RAISE EXCEPTION 'Role "%" deleted % source mappings', v_role, v_rows;
+        END IF;
+
+        PERFORM set_config('app.current_role', 'admin', true);
+        SELECT count(*) INTO v_n FROM node_source_map
+        WHERE source_schema = 'wmw' AND source_table = 'probe'
+          AND source_id = '501' AND node_id = v_wren;
+        IF v_n <> 1 THEN
+            RAISE EXCEPTION 'Role "%" changed or removed the operator mapping', v_role;
+        END IF;
+    END LOOP;
+
+    -- Anti-vacuity: the roles that may write still can. link_record() is the
+    -- ordinary route, and a re-point is the raw one.
+    PERFORM set_config('app.current_role', 'team_member', true);
+    PERFORM link_record(
+        p_source_schema := 'wmw',
+        p_source_table  := 'probe',
+        p_source_id     := '700',
+        p_node_type     := 'product',
+        p_label         := 'Team member link');
+    SELECT count(*) INTO v_n FROM node_source_map
+    WHERE source_schema = 'wmw' AND source_table = 'probe' AND source_id = '700';
+    IF v_n <> 1 THEN
+        RAISE EXCEPTION 'A team_member could not link a record';
+    END IF;
+
+    UPDATE node_source_map SET node_id = v_tobin
+    WHERE source_schema = 'wmw' AND source_table = 'probe' AND source_id = '501';
+    GET DIAGNOSTICS v_rows = ROW_COUNT;
+    IF v_rows <> 1 THEN
+        RAISE EXCEPTION 'A team_member could not re-point a mapping (% rows)', v_rows;
+    END IF;
+
+    PERFORM set_config('app.current_role', 'admin', true);
+    PERFORM link_record(
+        p_source_schema := 'wmw',
+        p_source_table  := 'probe',
+        p_source_id     := '701',
+        p_node_type     := 'product',
+        p_label         := 'Admin link');
+    SELECT count(*) INTO v_n FROM node_source_map
+    WHERE source_schema = 'wmw' AND source_table = 'probe' AND source_id = '701';
+    IF v_n <> 1 THEN
+        RAISE EXCEPTION 'An admin could not link a record';
+    END IF;
+END
+$$;
+
 DO $$
 BEGIN
     RAISE NOTICE 'Who may write: all obligations passed';

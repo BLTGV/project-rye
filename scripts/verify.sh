@@ -348,7 +348,8 @@ BEGIN
           ('event_participants', 'trg_event_participants_gate_may_write'),
           ('assertions', 'trg_assertions_gate_may_write'),
           ('assertion_evidence', 'trg_assertion_evidence_gate_may_write'),
-          ('artifacts', 'trg_artifacts_gate_may_write')
+          ('artifacts', 'trg_artifacts_gate_may_write'),
+          ('node_source_map', 'trg_node_source_map_gate_may_write')
       ) required(tablename, tgname)
       WHERE NOT EXISTS (
           SELECT 1
@@ -426,7 +427,8 @@ BEGIN
           ('assertion_evidence', 'INSERT'),
           ('assertion_evidence', 'UPDATE'),
           ('assertion_evidence', 'DELETE'),
-          ('artifacts', 'INSERT'), ('artifacts', 'UPDATE'), ('artifacts', 'DELETE')
+          ('artifacts', 'INSERT'), ('artifacts', 'UPDATE'), ('artifacts', 'DELETE'),
+          ('node_source_map', 'INSERT'), ('node_source_map', 'UPDATE'), ('node_source_map', 'DELETE')
       ) required(tablename, cmd)
       WHERE NOT EXISTS (
           SELECT 1
@@ -451,7 +453,8 @@ BEGIN
            ('assertion_evidence', 'INSERT'),
            ('assertion_evidence', 'UPDATE'),
            ('assertion_evidence', 'DELETE'),
-           ('artifacts', 'INSERT'), ('artifacts', 'UPDATE'), ('artifacts', 'DELETE')
+           ('artifacts', 'INSERT'), ('artifacts', 'UPDATE'), ('artifacts', 'DELETE'),
+           ('node_source_map', 'INSERT'), ('node_source_map', 'UPDATE'), ('node_source_map', 'DELETE')
        ) required(tablename, cmd)
        WHERE NOT EXISTS (
            SELECT 1

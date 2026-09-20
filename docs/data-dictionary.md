@@ -192,14 +192,24 @@ keep current.
 | `assertions` | `trg_assertions_gate_may_write` |
 | `assertion_evidence` | `trg_assertion_evidence_gate_may_write` |
 | `artifacts` | `trg_artifacts_gate_may_write` |
+| `node_source_map` | `trg_node_source_map_gate_may_write` |
 
 On `assertions` the name is chosen so the triggers sort
 `trg_assertion_settle_gate`, `trg_assertions_gate_may_write`,
 `trg_assertions_immutable`, `trg_assertions_insert_review` — the settle gate's
 message still wins, and the shape guards still run after the role is settled.
 
-Every `INSERT`, `UPDATE`, and `DELETE` policy on `nodes`, `edges`, `events`,
-`event_participants`, `assertions`, `assertion_evidence`, and `artifacts`
+`node_source_map` is in the list because a mapping decides which node a tracked
+table's change events attach to. Before `0026` its insert policy was
+`WITH CHECK (true)` and its update policy asked only that the node be visible,
+so a `viewer` could map a source id onto a node of its choosing and have CDC
+record its own text there, or re-point an operator's mapping. Only a role that
+may write can now insert, update, or delete a mapping, by raw SQL or through
+`link_record()`. Its delete policy still narrows further to `admin` and
+`manager`, as it always did. `system:cdc` gets nothing here: it reads
+`node_source_map` and never writes it.
+
+Every `INSERT`, `UPDATE`, and `DELETE` policy on those eight tables
 carries the same conjunct as the cheaper refusal where the owner is bound by
 RLS. A `viewer` and a session with no role set may read everything they could
 read before and may write nothing, by raw SQL or through any helper, including

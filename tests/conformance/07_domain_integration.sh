@@ -39,6 +39,8 @@ DECLARE
   v_sid text;
   v_probe_id int;
   v_role_node uuid;
+  v_chosen uuid;
+  v_rows int;
   v_ev events;
   v_seen text;
   v_failed boolean;
@@ -304,6 +306,83 @@ BEGIN
   PERFORM set_config('app.current_role', 'admin', true);
   DROP TRIGGER zzz_rye_test_cdc_boom ON rye.events;
   DROP FUNCTION public._rye_test_cdc_boom();
+
+  -- ======================================================================
+  -- Obligation 16, the CDC half. A mapping decides which node a tracked
+  -- table's changes attach to, so a session that may not write must not be
+  -- able to create one or re-point one. This is the file with a real tracked
+  -- table, so it is where "and therefore no event attaches" is asserted;
+  -- tests/conformance/32_who_may_write.sql asserts the raw mapping writes.
+  -- ======================================================================
+  PERFORM set_config('app.current_role', 'admin', true);
+  INSERT INTO nodes (node_type, label, properties)
+  VALUES ('product', 'Node the non-writer picked', '{"suite":"who_may_write"}')
+  RETURNING id INTO v_chosen;
+
+  v_role_node := link_record(
+    p_source_schema := 'public',
+    p_source_table  := '_rye_test_products',
+    p_source_id     := '501',
+    p_node_type     := 'product',
+    p_label         := 'Operator mapping 501'
+  );
+
+  v_probe_id := 603;
+  FOREACH v_role IN ARRAY ARRAY['viewer', ''] LOOP
+    v_probe_id := v_probe_id + 1;
+    PERFORM set_config('app.current_role', v_role, true);
+
+    -- Map a source id of its choosing onto a node of its choosing.
+    v_failed := false;
+    BEGIN
+      INSERT INTO node_source_map (node_id, source_schema, source_table, source_id)
+      VALUES (v_chosen, 'public', '_rye_test_products', v_probe_id::text);
+    EXCEPTION WHEN OTHERS THEN v_failed := true; END;
+    IF NOT v_failed THEN
+      RAISE EXCEPTION 'Role "%" inserted a source mapping for a tracked table', v_role;
+    END IF;
+
+    -- The domain write still succeeds -- Rye never gets in the way of the
+    -- system of record -- but the row is unmapped, so nothing attaches.
+    INSERT INTO public._rye_test_products (id, name, price)
+    VALUES (v_probe_id, 'the non-writer chose this node and this text', 1.00);
+
+    -- Re-point the operator's mapping on 501.
+    v_rows := 0;
+    BEGIN
+      UPDATE node_source_map SET node_id = v_chosen
+      WHERE source_schema = 'public' AND source_table = '_rye_test_products'
+        AND source_id = '501';
+      GET DIAGNOSTICS v_rows = ROW_COUNT;
+    EXCEPTION WHEN OTHERS THEN v_rows := 0; END;
+    IF v_rows <> 0 THEN
+      RAISE EXCEPTION 'Role "%" re-pointed % mappings on a tracked table', v_role, v_rows;
+    END IF;
+
+    -- And a real change on 501 still attaches to the operator's node.
+    UPDATE public._rye_test_products SET price = price + 1 WHERE id = 1;
+
+    PERFORM set_config('app.current_role', 'admin', true);
+
+    SELECT count(*) INTO v_event_count
+    FROM events e
+    JOIN event_participants ep ON ep.event_id = e.id
+    WHERE ep.node_id = v_chosen;
+    IF v_event_count <> 0 THEN
+      RAISE EXCEPTION
+        'Role "%" attached % events to the node it picked', v_role, v_event_count;
+    END IF;
+
+    SELECT count(*) INTO v_event_count
+    FROM node_source_map
+    WHERE source_schema = 'public' AND source_table = '_rye_test_products'
+      AND source_id = '501' AND node_id = v_role_node;
+    IF v_event_count <> 1 THEN
+      RAISE EXCEPTION 'Role "%" changed the operator mapping on 501', v_role;
+    END IF;
+  END LOOP;
+
+  PERFORM set_config('app.current_role', 'admin', true);
 
   -- Cleanup
   DROP TRIGGER IF EXISTS rye_cdc__rye_test_products ON public._rye_test_products;

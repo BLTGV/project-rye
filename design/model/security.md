@@ -205,9 +205,30 @@ core tables and raises `42501` when `rye_role_may_write()` is false — triggers
 fire for a superuser, inside a definer function, and on a raw write alike. The
 triggers are `trg_nodes_gate_may_write`, `trg_edges_gate_may_write`,
 `trg_events_gate_may_write`, `trg_event_participants_gate_may_write`,
-`trg_assertions_gate_may_write`, `trg_assertion_evidence_gate_may_write`, and
-`trg_artifacts_gate_may_write`. On `assertions` the name is chosen so the
-settle gate still sorts first and the shape guards still sort after.
+`trg_assertions_gate_may_write`, `trg_assertion_evidence_gate_may_write`,
+`trg_artifacts_gate_may_write`, and `trg_node_source_map_gate_may_write`. On
+`assertions` the name is chosen so the settle gate still sorts first and the
+shape guards still sort after.
+
+**`node_source_map` follows the same rule.** A mapping decides which node a
+tracked table's change events attach to, so it is not bookkeeping. Before
+`0026` its insert policy was `WITH CHECK (true)` and its update policy asked
+only that the node be visible: a `viewer` could map a source id onto a node of
+its choosing and have CDC record its own text against that node, or re-point an
+operator's mapping. It now carries the conjunct and the trigger; its delete
+policy keeps its narrower `admin`/`manager` test on top. `system:cdc` reads it
+and never writes it, so it is refused here like every other role that is not
+inserting an event.
+
+The other supporting tables were surveyed under both owner types with a
+`viewer` and an unset session, and each refuses every insert, update, and
+delete: `access_grants`, `field_classifications`, `assertion_type_access`,
+`role_classification_access`, and all nine governance tables. Two have no RLS
+at all and are left that way deliberately, because neither changes what Rye
+records or decides: `node_merges` is the dedup audit trail `merge_nodes()`
+writes, and `crm_code_counters` is a counter for human-readable codes that
+`generate_crm_code()` bumps from inside helpers, including in sessions with no
+role.
 
 The same test stays as a conjunct on all twenty-one write policies: it is the
 cheaper refusal where the owner is bound by RLS, and it keeps `USING` and
@@ -594,9 +615,12 @@ RLS is enabled and forced on all supporting and configuration tables.
 | Operation | Who |
 |---|---|
 | SELECT | Anyone who can see the linked node (cascading visibility) |
-| INSERT | All roles |
-| UPDATE | Anyone who can see the linked node (cascading visibility) |
+| INSERT | Any role that may write (`rye_role_may_write()`) |
+| UPDATE | Any role that may write, and who can see the linked node |
 | DELETE | `admin`, `manager` |
+
+Also carries `trg_node_source_map_gate_may_write`, so the rule holds under a
+superuser owner and inside a `SECURITY DEFINER` helper. See section 2.5.
 
 ### `field_classifications`
 
