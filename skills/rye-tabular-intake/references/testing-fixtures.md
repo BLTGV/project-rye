@@ -108,6 +108,39 @@ Grouped mapped records carry a multi-row `source_set`. This is the generic many-
 
 The commit step also fingerprints each original source file with SHA1 and stores that in the Rye run metadata and source-file artifacts. Duplicate runs for the same source content and run kind are rejected unless `--allow-duplicate-source` is used.
 
+## Fixtures Under A Review Policy
+
+The smoke script reads `rye.current_assertions`, which holds accepted rows
+only, and asserts nothing about what the commits print. On an instance whose
+area review policy is `strict`, a fixture row written for the first time is
+filed as a suggestion, so it is counted nowhere in that summary and the numbers
+read lower than the record counts while the script still exits 0. That is the
+policy working, not a broken fixture. Rows an earlier open-policy run left
+accepted stay accepted and are still counted, because the commit skips a write
+whose claim is already live.
+
+To see it, run one commit by hand and read its report:
+
+```bash
+node skills/rye-tabular-intake/scripts/tabular_commit_rye.mts \
+  --role team_member \
+  --db-url "$DATABASE_URL" \
+  --input /tmp/source_rows.ndjson \
+  --run-id fixture:waiting-check
+```
+
+`assertions.waiting_for_review` is how many of the run's writes are waiting and
+`waiting_from_earlier_run` is how many of those an earlier identical run had
+already filed. Running the same input three times leaves one suggestion per
+row. The field-by-field contract is in
+[cli-contract.md](cli-contract.md#what-the-run-left-waiting).
+
+For a fixture database that demotes writes, create an `onboarding_scope` node
+with a `review_policy` of `strict`, mark it active with `scope_status`, and give
+it `registry_entry` rows keyed
+`governed_type:rye_tabular_intake_source_row` (and the `_mapped_record` and
+`_stage_record` types). Those writes need `app.current_role = 'admin'`.
+
 The default output directory is `tmp/rye-tabular-intake-smoke`.
 
 ## XLSX Coverage

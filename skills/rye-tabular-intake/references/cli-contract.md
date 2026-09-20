@@ -102,6 +102,55 @@ Output:
 - direct execution mode: one JSON summary describing the Rye run node and inserted counts
 - SQL-only mode: one PostgreSQL SQL script ending with a summary `SELECT`
 - the summary includes `source_files[].content_sha1` and `run_fingerprint_sha1`
+- both modes print the same `assertions` tally and `waiting_for_review` list
+
+### What The Run Left Waiting
+
+Every commit, in both modes, says what became of its assertion writes. The
+words are the ones `source_context_commit_rye.mts` uses, so one vocabulary
+covers both intakes.
+
+```json
+{
+  "assertions": {
+    "considered": 2,
+    "accepted": 0,
+    "waiting_for_review": 2,
+    "waiting_filed_this_run": 1,
+    "waiting_from_earlier_run": 1
+  },
+  "waiting_for_review": [
+    {
+      "assertion_id": "0a88e0fe-c8da-4952-b179-0d354ff1a137",
+      "subject_id": "4a8d02c4e4d43a9fd32b974d58d748d0c8fd3ead1f72dfc63a72f432c8f0ac25",
+      "assertion_type": "rye_tabular_intake_source_row",
+      "assertion_key": "customers:extract:2026-03-10:source_row",
+      "review_policy": "strict",
+      "still_current_assertion_id": null,
+      "filed_this_run": true
+    }
+  ]
+}
+```
+
+- `assertions.considered` is one per input record: after the run each of them
+  has exactly one live claim, so `accepted` and `waiting_for_review` add up to
+  it.
+- `assertions.accepted` counts the records whose claim is the current answer.
+- `waiting_for_review`, as a count inside `assertions` and as the list beside
+  it, counts the records the area's review policy filed as suggestions.
+- `waiting_filed_this_run` and `waiting_from_earlier_run` split that count:
+  what this run put there, and what an earlier identical run already had
+  waiting.
+- `subject_id` is the row node's `external_id` — the row key.
+- `review_policy` is read from the row's own `attrs.review_gate` and is null on
+  a row written before Rye recorded that marker.
+- `still_current_assertion_id` is the accepted claim that still answers on the
+  same tuple, and null when the claim is new and nothing stood before it.
+
+A demoted write is not a failure. The commit exits 0, the run node, row nodes,
+events, artifacts, and source mappings are written exactly as under an open
+policy, and only the assertion waits.
 
 ## When PostgreSQL Is Written
 
@@ -174,10 +223,13 @@ The emitted script:
 
 - starts a transaction
 - sets `search_path` locally
-- creates a temporary context table for generated UUIDs
+- creates a temporary context table for generated UUIDs and a temporary review
+  table holding one outcome row per record
 - applies the same duplicate-source guard unless `--allow-duplicate-source` is used
 - writes run, row, event, assertion, and artifact records
-- commits and ends with a JSON summary `SELECT`
+- reads back, after each write, what the tuple now holds
+- commits and ends with a JSON summary `SELECT` carrying the same
+  `assertions` tally and `waiting_for_review` list as direct execution
 
 If the SQL-only tool rejects duplicate source content, regenerate the script with `--allow-duplicate-source` only when the repeated import is intentional.
 
