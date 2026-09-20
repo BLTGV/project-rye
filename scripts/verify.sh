@@ -389,6 +389,41 @@ BEGIN
     RAISE EXCEPTION 'trg_crm_code_counters_gate or trg_node_merges_gate is missing';
   END IF;
 
+  -- Source-map row identity (0031). The graph points at domain rows through
+  -- node_source_map, so the key has to be the source row: keyed by node_id a
+  -- merge could not re-point the duplicate's mapping and deleted it, and the
+  -- source row lost its graph identity. One node holding several rows of one
+  -- table is the shape a merge leaves behind.
+  IF (
+      SELECT string_agg(a.attname, ',' ORDER BY k.ord)
+      FROM pg_constraint c
+      JOIN pg_class rel ON rel.oid = c.conrelid
+      JOIN pg_namespace n ON n.oid = rel.relnamespace
+      JOIN LATERAL unnest(c.conkey) WITH ORDINALITY AS k(attnum, ord) ON true
+      JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum
+      WHERE n.nspname = v_schema AND rel.relname = 'node_source_map' AND c.contype = 'p'
+  ) IS DISTINCT FROM 'source_schema,source_table,source_id' THEN
+    RAISE EXCEPTION
+      'node_source_map is not keyed by (source_schema, source_table, source_id)';
+  END IF;
+
+  IF NOT EXISTS (
+      SELECT 1
+      FROM pg_index i
+      JOIN pg_class idx ON idx.oid = i.indexrelid
+      JOIN pg_class rel ON rel.oid = i.indrelid
+      JOIN pg_namespace n ON n.oid = rel.relnamespace
+      WHERE n.nspname = v_schema
+        AND rel.relname = 'node_source_map'
+        AND idx.relname = 'idx_nsm_node'
+  ) THEN
+    RAISE EXCEPTION 'idx_nsm_node is missing: node_source_map.node_id has no index';
+  END IF;
+
+  IF to_regprocedure('rye.rye_restore_merged_source_maps()') IS NULL THEN
+    RAISE EXCEPTION 'rye_restore_merged_source_maps function missing';
+  END IF;
+
   -- Who may write: the role list is the write list, and the governance
   -- structure is admin-only. One column, one function, and one conjunct on
   -- every write policy of the seven core tables.
