@@ -13,7 +13,10 @@ appeared, or nodes may represent the same entity.
 Gardening is review-gated.
 
 - Never update existing `node_type`, `edge_type`, or `assertion_type` values.
-- Never call `merge_nodes()` directly. A merge is irreversible.
+- Never call `merge_nodes()` directly. A merge is irreversible, and the
+  database refuses it anyway: an agent-shaped session gets `42501` and a
+  sentence naming who may merge, a Rye admin or a team member. Do not retry it
+  under another role.
 - Never activate a type alias without human approval.
 - Do not treat spelling similarity alone as proof that two concepts are the
   same.
@@ -89,7 +92,8 @@ SELECT create_knowledge_candidate(
 );
 ```
 
-The proposal is not permission to merge. Report the candidate ID and the exact
+The proposal is not permission to merge, and you have none: the person who
+accepts the proposal runs the merge. Report the candidate ID and the exact
 evidence a reviewer should verify.
 
 ## Output

@@ -1,5 +1,10 @@
 # Rubric — Meridian Fence Co.
 
+The intake session runs as a Rye admin. Creating, activating, or re-pointing a
+scope and its governance edges takes `app.current_role = 'admin'`, so a run that
+attempted M1 under an agent role is refused and fails M1 for that reason — say
+so in the report rather than grading the scope's content.
+
 ## A. Database state (graded against DB after intake)
 
 ### Must capture

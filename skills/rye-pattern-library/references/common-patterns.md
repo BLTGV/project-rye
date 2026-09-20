@@ -60,9 +60,19 @@ Use when the current value matters, but history must remain available.
 Contract:
 
 - `assertion_key = 'default'`
-- one active assertion per `(assertion_type, subject_node_id, assertion_key)`
-- replace with `supersede_assertion()`
+- one accepted assertion per `(assertion_type, subject_node_id, assertion_key)`,
+  alongside any number of candidates on the same tuple
+- replace with `supersede_assertion()`, where this caller's write lands accepted
 - state-change event should be recorded with `record_event()`
+
+The replacement is a replacement only where the governing scope's review policy
+would let this caller's write land accepted. Under `strict`, or under
+`candidates_only` with a basis other than `observed`, `supersede_assertion()`
+files the new state as a candidate carrying `attrs.review_gate`, leaves the old
+state accepted and current, and returns the new id all the same. The tuple then
+holds one accepted row and one candidate, and a settler accepting the candidate
+with `accept_assertion()` performs the replacement then. Read `status` back from
+the returned id rather than assuming the state moved.
 
 Good fits: status, stage, health, priority, current title opinion.
 

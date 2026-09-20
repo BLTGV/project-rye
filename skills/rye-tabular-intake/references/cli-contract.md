@@ -88,6 +88,10 @@ Output:
 
 Input:
 - NDJSON on `--input <path>`
+- `--role <name>` required, or `RYE_SESSION_ROLE`. The Rye role the commit
+  writes under. No default: a session with no role set writes nothing, and the
+  script refuses `viewer` and any `agent:*` role because this step carries the
+  authority of a person. `team_member` is enough.
 - `--db-url <url>` or `--docker-container <name>` required
 - `--emit-sql` optional alternative to `--db-url` / `--docker-container`
 - `--run-id <value>` optional
@@ -149,6 +153,7 @@ Use `--emit-sql` when the agent cannot open a PostgreSQL connection but can exec
 
 ```bash
 node skills/rye-tabular-intake/scripts/tabular_commit_rye.mts \
+  --role team_member \
   --emit-sql \
   --input /tmp/parent-records.ndjson \
   --run-id example-domain:parents:2026-04-29 \

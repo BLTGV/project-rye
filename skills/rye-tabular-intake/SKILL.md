@@ -49,8 +49,8 @@ If the user is creating a domain-specific intake skill on top of this one, keep 
 7. Validate the import/change process before target writes when the consuming workflow needs an explicit gate:
    - `node skills/rye-import-inspector/scripts/inspect_import_run.mjs --source /tmp/source.ndjson --mapped /tmp/mapped.ndjson --change-plan /tmp/change-plan.json --metadata /tmp/import-metadata.json --phase prewrite > /tmp/import-inspection.json`
 8. Commit the intake trail into Rye:
-   - `node skills/rye-tabular-intake/scripts/tabular_commit_rye.mts --db-url "$DATABASE_URL" --input /tmp/source_rows.ndjson --run-id customer-import-2026-03-10`
-   - if only SQL execution is available: `node skills/rye-tabular-intake/scripts/tabular_commit_rye.mts --emit-sql --input /tmp/source_rows.ndjson --run-id customer-import-2026-03-10 > /tmp/rye-intake.sql`
+   - `node skills/rye-tabular-intake/scripts/tabular_commit_rye.mts --role team_member --db-url "$DATABASE_URL" --input /tmp/source_rows.ndjson --run-id customer-import-2026-03-10`
+   - if only SQL execution is available: `node skills/rye-tabular-intake/scripts/tabular_commit_rye.mts --role team_member --emit-sql --input /tmp/source_rows.ndjson --run-id customer-import-2026-03-10 > /tmp/rye-intake.sql`
 
 ## When It Writes
 
@@ -77,6 +77,10 @@ Local NDJSON, snapshot, change-plan, and SQL files are intermediate execution ar
 If the user wants to inspect, extract, map, or stage data without touching the database, stop before `tabular_commit_rye.mts`.
 
 If the user has no `DATABASE_URL` but can execute SQL through a tool such as a SQL console or Supabase MCP, use `tabular_commit_rye.mts --emit-sql`, then execute the generated SQL in one call/session. The source files referenced by the NDJSON must still be readable locally when the SQL is generated so the tool can compute source hashes.
+
+The commit step writes with the authority of a person, so it will not start without one. Pass `--role <name>`, or set `RYE_SESSION_ROLE`; there is no default. `team_member` is enough for everything this skill does, and an agent does not pick a person's role for them — ask which role to use. `viewer` and an agent role are refused, because a session with no role set or set to `viewer` writes nothing at all: every insert into `nodes`, `events`, `assertions`, `artifacts`, and `node_source_map` comes back refused. The role goes into the SQL the script runs and into the script it emits, so do not strip those lines out.
+
+`assets/postgres/link_stage_records.sql` takes the role the same way, as a psql variable: `psql "$DATABASE_URL" -v rye_role=team_member -f link_stage_records.sql`. Through a tool with no psql variables, replace `:'rye_role'` with the role in quotes.
 
 ## Runs And Duplicates
 

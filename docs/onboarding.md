@@ -304,6 +304,18 @@ scopes, and selected policy bundles portable across CLI users and agents.
 
 ## Minimal Flow
 
+Run this as a Rye admin. The scope node and the `scope_governs_subject`,
+`scope_governs_source`, and `scope_enables_plugin` edges may be created,
+changed, ended, deleted, or re-pointed only by a session whose
+`app.current_role` is `admin`, and the `scope_status`, `review_policy`, and
+`registry_entry` assertions around them are settled only by an admin too. The
+helpers below keep their signatures and are admin-only because the rows they
+write are. Set the role first:
+
+```sql
+SELECT set_config('app.current_role', 'admin', false);
+```
+
 ```sql
 SELECT create_onboarding_scope(
   p_scope_key := 'example:lead-followup',

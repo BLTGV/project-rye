@@ -86,6 +86,12 @@ Key differences from self-hosted:
 
 - Target PostgreSQL 15+.
 - Rye installs alongside existing tables. It does not modify them.
+- Anything that writes after install needs a role that may write. Set
+  `set_config('app.current_role', 'admin', false)` in the same session as a
+  seed or a fix-up: a session with no role set, and a session set to `viewer`,
+  writes nothing to the core tables or `node_source_map`. Migrations from
+  `0026` on set the role themselves, and `scripts/migrate.sh` runs each file in
+  its own session.
 - Use `link_record()` to connect existing domain table rows to the graph.
 - Use `track_table()` to attach CDC triggers for change tracking.
 - Assertion updates are function-only; verify this via `./scripts/verify.sh` and security tests.

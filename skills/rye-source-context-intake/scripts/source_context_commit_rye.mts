@@ -334,6 +334,19 @@ function buildCommitSql(records: SourceContextRecord[], runId: string, agentId: 
   lines.push("CREATE TEMP TABLE IF NOT EXISTS _rye_source_context_ref (key text PRIMARY KEY, value text NOT NULL);");
   lines.push("TRUNCATE _rye_source_context_ref;");
   lines.push("");
+  lines.push("-- Replacements the area's review policy turned into suggestions. The");
+  lines.push("-- earlier claim still stands until a person accepts the new one.");
+  lines.push("CREATE TEMP TABLE IF NOT EXISTS _rye_source_context_review (");
+  lines.push("    assertion_id uuid PRIMARY KEY,");
+  lines.push("    subject_id text NOT NULL,");
+  lines.push("    assertion_type text NOT NULL,");
+  lines.push("    assertion_key text NOT NULL,");
+  lines.push("    review_policy text,");
+  lines.push("    still_current_assertion_id uuid,");
+  lines.push("    filed_this_run boolean NOT NULL");
+  lines.push(");");
+  lines.push("TRUNCATE _rye_source_context_review;");
+  lines.push("");
   lines.push(buildRunNodeSql(runId, summary));
   lines.push("");
   lines.push(buildRunEventSql(runId, agentId, "source_context_intake_started", `Source context intake ${runId} started`, { run_id: runId, phase: "started", summary }, "started_event_id"));
@@ -356,8 +369,36 @@ function buildCommitSql(records: SourceContextRecord[], runId: string, agentId: 
   lines.push("");
   lines.push("COMMIT;");
   lines.push("");
-  lines.push(`SELECT ${sqlJson(JSON.stringify({ ok: true, run_id: runId, summary }))};`);
+  lines.push(buildResultSql(runId, summary));
   return `${lines.join("\n")}\n`;
+}
+
+function buildResultSql(runId: string, summary: Summary): string {
+  return `SELECT jsonb_build_object(
+    'ok', true,
+    'run_id', ${sqlText(runId)},
+    'summary', ${sqlJson(JSON.stringify(summary))} || jsonb_build_object(
+        'waiting_for_review', (SELECT count(*) FROM _rye_source_context_review)
+    ),
+    'waiting_for_review', COALESCE(
+        (
+            SELECT jsonb_agg(
+                jsonb_build_object(
+                    'assertion_id', r.assertion_id,
+                    'subject_id', r.subject_id,
+                    'assertion_type', r.assertion_type,
+                    'assertion_key', r.assertion_key,
+                    'review_policy', r.review_policy,
+                    'still_current_assertion_id', r.still_current_assertion_id,
+                    'filed_this_run', r.filed_this_run
+                )
+                ORDER BY r.subject_id, r.assertion_type, r.assertion_key
+            )
+            FROM _rye_source_context_review r
+        ),
+        '[]'::jsonb
+    )
+)::text;`;
 }
 
 function buildRunNodeSql(runId: string, summary: Summary): string {
@@ -680,6 +721,10 @@ DECLARE
   v_existing_id uuid;
   v_existing_claim jsonb;
   v_claim jsonb := ${sqlJson(JSON.stringify(claim))};
+  v_waiting_id uuid;
+  v_new_id uuid;
+  v_new_status text;
+  v_review_gate jsonb;
 BEGIN
   SELECT id, claim
   INTO v_existing_id, v_existing_claim
@@ -689,8 +734,46 @@ BEGIN
     AND assertion_key = ${sqlText(assertionKey)}
   LIMIT 1;
 
+  IF v_existing_id IS NOT NULL AND v_existing_claim IS NOT DISTINCT FROM v_claim THEN
+    -- Already the current answer. Nothing to write.
+    RETURN;
+  END IF;
+
+  -- A previous run may already have filed this exact claim as a suggestion.
+  -- current_valid_assertions holds accepted rows only, so it cannot see one,
+  -- and writing again would put a second identical suggestion on the tuple.
+  SELECT a.id, a.attrs->'review_gate'
+  INTO v_waiting_id, v_review_gate
+  FROM rye.assertions a
+  WHERE a.subject_node_id = v_subject_id
+    AND a.assertion_type = ${sqlText(assertionType)}
+    AND a.assertion_key = ${sqlText(assertionKey)}
+    AND a.status = 'candidate'
+    AND a.superseded_at IS NULL
+    AND a.claim IS NOT DISTINCT FROM v_claim
+  ORDER BY a.created_at, a.id
+  LIMIT 1;
+
+  IF v_waiting_id IS NOT NULL THEN
+    INSERT INTO _rye_source_context_review (
+      assertion_id, subject_id, assertion_type, assertion_key,
+      review_policy, still_current_assertion_id, filed_this_run
+    )
+    VALUES (
+      v_waiting_id,
+      ${sqlText(subjectId)},
+      ${sqlText(assertionType)},
+      ${sqlText(assertionKey)},
+      v_review_gate->>'review_policy',
+      COALESCE((v_review_gate->>'incumbent_assertion_id')::uuid, v_existing_id),
+      false
+    )
+    ON CONFLICT (assertion_id) DO NOTHING;
+    RETURN;
+  END IF;
+
   IF v_existing_id IS NULL THEN
-    PERFORM rye.record_assertion(
+    v_new_id := rye.record_assertion(
       p_assertion_type := ${sqlText(assertionType)},
       p_assertion_key := ${sqlText(assertionKey)},
       p_subject_node_id := v_subject_id,
@@ -701,8 +784,8 @@ BEGIN
         jsonb_build_object('kind', 'source', 'event_id', v_event_id)
       ]
     );
-  ELSIF v_existing_claim IS DISTINCT FROM v_claim THEN
-    PERFORM rye.supersede_assertion(
+  ELSE
+    v_new_id := rye.supersede_assertion(
       p_old_assertion_id := v_existing_id,
       p_new_assertion_type := ${sqlText(assertionType)},
       p_new_subject_node_id := v_subject_id,
@@ -715,6 +798,31 @@ BEGIN
         jsonb_build_object('kind', 'source', 'event_id', v_event_id)
       ]
     );
+  END IF;
+
+  -- The id comes back whether the write landed accepted or is waiting. The
+  -- status is the answer; attrs.review_gate is a marker supersede_assertion()
+  -- sets today and other helpers may set later, so do not depend on it.
+  SELECT a.status, a.attrs->'review_gate'
+  INTO v_new_status, v_review_gate
+  FROM rye.assertions a
+  WHERE a.id = v_new_id;
+
+  IF v_new_status IS DISTINCT FROM 'accepted' OR v_review_gate IS NOT NULL THEN
+    INSERT INTO _rye_source_context_review (
+      assertion_id, subject_id, assertion_type, assertion_key,
+      review_policy, still_current_assertion_id, filed_this_run
+    )
+    VALUES (
+      v_new_id,
+      ${sqlText(subjectId)},
+      ${sqlText(assertionType)},
+      ${sqlText(assertionKey)},
+      v_review_gate->>'review_policy',
+      COALESCE((v_review_gate->>'incumbent_assertion_id')::uuid, v_existing_id),
+      true
+    )
+    ON CONFLICT (assertion_id) DO NOTHING;
   END IF;
 END
 $rye_source_context_assertion$;`;

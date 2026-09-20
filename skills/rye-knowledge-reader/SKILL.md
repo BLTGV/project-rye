@@ -32,6 +32,11 @@ appropriate write/promotion workflow after explicit approval.
 Rye uses RLS. Include session context in every DB call, especially through
 stateless tools or transaction-mode pools.
 
+`viewer` is the role that matches this skill's boundary: it may write nothing
+at all, on any table, through any helper, so a viewer session cannot cross the
+boundary above even by accident. Use `admin` only where the reader genuinely
+needs to see everything, and say which you used.
+
 Prefer a read-only transaction when the tool supports multi-statement SQL:
 
 ```sql

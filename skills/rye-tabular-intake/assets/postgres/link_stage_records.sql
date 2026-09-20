@@ -1,5 +1,17 @@
 SET search_path = rye, public, pg_catalog;
 
+-- link_record() writes nodes and node_source_map, so this session needs a role
+-- that may write. A session with no role set writes nothing, and no role is
+-- hard-coded here: pass one in.
+--
+--   psql "$DATABASE_URL" -v rye_role=team_member -f link_stage_records.sql
+--
+-- Through a SQL tool that has no psql variables, replace :'rye_role' with the
+-- role in quotes. set_config() rather than SET, because SET app.current_role
+-- fails through some of those tools.
+SELECT set_config('app.current_role', :'rye_role', false) IS NOT NULL AS role_set;
+SELECT set_config('app.current_user_id', 'rye-tabular-intake:' || :'rye_role', false) IS NOT NULL AS user_set;
+
 SELECT rye.link_record(
     p_source_schema := 'public',
     p_source_table := 'demo_intake_stage',
