@@ -562,6 +562,7 @@ CREATE OR REPLACE FUNCTION assertions_transition_complete() RETURNS trigger
 SET search_path = rye, pg_catalog
 AS $$
 DECLARE
+    v_ended_accepted boolean;
     v_replacement assertions;
 BEGIN
     IF TG_OP = 'UPDATE'
@@ -580,11 +581,41 @@ BEGIN
     IF NEW.superseded_by IS NOT NULL
        AND (TG_OP = 'INSERT' OR OLD.superseded_by IS NULL)
     THEN
+        -- Naming a replacement is not enough. A row born already closed, or a
+        -- live candidate that reject_candidate() closes a moment later, passed
+        -- type, key and readability and still left the key with nothing.
+        --
+        -- So on the SAME subject the test is on the key, not on the named row:
+        -- that subject, type and key must still carry a readable accepted,
+        -- unsuperseded assertion. The named row need not be it. Two
+        -- record_assertion() calls on one key in one transaction leave
+        -- I -> B -> C with B superseded by commit, and the chain may pass
+        -- through anything as long as it ends somewhere current.
+        --
+        -- On a DIFFERENT subject -- the merge_nodes() shape -- the named row
+        -- itself is tested: readable, same type and key, and live at commit. A
+        -- candidate is allowed there, because a merge into a subject under
+        -- strict demotes the copy and refusing that would refuse the merge.
+        -- Residual, stated in the contract: that copy can be rejected later and
+        -- both keys are then empty, which is merge_nodes() followed by
+        -- reject_candidate(), already available through the helpers.
+        --
+        -- subject_ref is a STORED generated column and this is an AFTER
+        -- trigger, so unlike the BEFORE guards it is populated here.
+        v_ended_accepted := (TG_OP = 'UPDATE' AND OLD.status = 'accepted')
+                            OR (TG_OP = 'INSERT' AND NEW.status = 'accepted');
+
         SELECT * INTO v_replacement FROM assertions WHERE id = NEW.superseded_by;
-        -- Not visible is refused, but only for a row that was accepted: a
-        -- candidate closed with a replacement is not holding a value anyone
-        -- can lose, and reject_candidate() passes no replacement at all.
-        IF FOUND THEN
+        IF NOT FOUND THEN
+            -- Not visible is refused, but only for a row that was accepted: a
+            -- candidate closed with a replacement is not holding a value
+            -- anyone can lose, and reject_candidate() passes none at all.
+            IF v_ended_accepted THEN
+                RAISE EXCEPTION
+                    'Assertion % was ended naming replacement %, which is not readable by this caller. An assertion is not replaced by something the writer cannot see.',
+                    NEW.id, NEW.superseded_by;
+            END IF;
+        ELSE
             IF v_replacement.assertion_type IS DISTINCT FROM NEW.assertion_type
                OR v_replacement.assertion_key IS DISTINCT FROM NEW.assertion_key
             THEN
@@ -593,12 +624,31 @@ BEGIN
                     NEW.superseded_by, v_replacement.assertion_type, v_replacement.assertion_key,
                     NEW.assertion_type, NEW.assertion_key;
             END IF;
-        ELSIF (TG_OP = 'UPDATE' AND OLD.status = 'accepted')
-              OR (TG_OP = 'INSERT' AND NEW.status = 'accepted')
-        THEN
-            RAISE EXCEPTION
-                'Assertion % was ended naming replacement %, which is not readable by this caller. An assertion is not replaced by something the writer cannot see.',
-                NEW.id, NEW.superseded_by;
+
+            IF v_ended_accepted
+               AND v_replacement.subject_ref = NEW.subject_ref
+               AND NOT EXISTS (
+                   SELECT 1 FROM assertions current_row
+                   WHERE current_row.subject_ref = NEW.subject_ref
+                     AND current_row.assertion_type = NEW.assertion_type
+                     AND current_row.assertion_key = NEW.assertion_key
+                     AND current_row.status = 'accepted'
+                     AND current_row.superseded_at IS NULL
+               )
+            THEN
+                RAISE EXCEPTION
+                    'Assertion % was ended and %/% is left with no accepted assertion standing. A fact is replaced, not erased.',
+                    NEW.id, NEW.assertion_type, NEW.assertion_key;
+            END IF;
+
+            IF v_ended_accepted
+               AND v_replacement.subject_ref IS DISTINCT FROM NEW.subject_ref
+               AND v_replacement.superseded_at IS NOT NULL
+            THEN
+                RAISE EXCEPTION
+                    'Assertion % was ended naming replacement % on another subject, which is itself already closed. A fact is replaced, not erased.',
+                    NEW.id, NEW.superseded_by;
+            END IF;
         END IF;
     END IF;
 
@@ -627,7 +677,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION assertions_transition_complete() IS
-    'At commit: a promotion has an assertion_accepted event naming the row, a superseded_by names a row of the same assertion_type and assertion_key, and a narrowed effective_to has a successor accepted assertion starting where the window now ends. All three fail closed under the caller''s RLS: a row the writer cannot read back is refused, because otherwise an accepted assertion could be ended by naming an invisible replacement. Deferred because the helpers write those facts after the statement that needs them.';
+    'At commit: a promotion has an assertion_accepted event naming the row; a superseded_by names a readable row of the same assertion_type and assertion_key, and when the ended row was accepted, either that key still carries a readable accepted unsuperseded assertion (same-subject replacement) or the named row is itself live (cross-subject, the merge shape, where a candidate is allowed); and a narrowed effective_to has a successor accepted assertion starting where the window now ends. All three fail closed under the caller''s RLS: a row the writer cannot read back is refused, because otherwise an accepted assertion could be ended by naming an invisible replacement. Deferred because the helpers write those facts after the statement that needs them.';
 
 DROP TRIGGER IF EXISTS trg_assertions_transition_complete ON assertions;
 CREATE CONSTRAINT TRIGGER trg_assertions_transition_complete

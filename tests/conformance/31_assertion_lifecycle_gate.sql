@@ -1189,55 +1189,174 @@ BEGIN
     END IF;
 
     -- ==================================================================
-    -- Obligation 18. A replacement that is a CANDIDATE is allowed. The
-    -- tuple then has no accepted value and the content stands in
-    -- review_queue for an admin. "Nothing is lost" is the claim under
-    -- test, not "an accepted value always stands" -- merge_nodes() into a
-    -- strict scope reaches exactly this state, which is why the rule is
-    -- written this way.
+    -- Obligation 18. What a replacement has to be, in three cases, each
+    -- asserted on current_valid_assertions and review_queue afterwards and
+    -- not on the error alone.
+    --
+    -- Naming a replacement is not enough: a row born already closed, and a
+    -- live candidate that reject_candidate() closes a moment later, both
+    -- passed type, key and readability and left the key with nothing.
     -- ==================================================================
+    FOREACH v_role IN ARRAY v_roles LOOP
+        FOR v_attempt IN 1..2 LOOP
+            PERFORM set_config('app.current_role', 'admin', true);
+            INSERT INTO nodes (node_type, label) VALUES ('thing', 'Replacement liveness subject')
+            RETURNING id INTO v_other;
+            v_incumbent := record_assertion(
+                'liveness_probe', '{"value":"standing"}', v_other,
+                p_assertion_key := 'default', p_basis := 'assumed'
+            );
+
+            PERFORM set_config('app.current_role', v_role, true);
+            IF NOT EXISTS (SELECT 1 FROM assertions WHERE id = v_incumbent) THEN
+                RAISE EXCEPTION
+                    'Refusing to pass vacuously: role "%" cannot see the liveness incumbent', v_role;
+            END IF;
+
+            v_failed := false;
+            v_smuggled := gen_random_uuid();
+            BEGIN
+                PERFORM set_config('app.write_path', 'supersede_assertion', true);
+                PERFORM set_config('app.supersede_assertion_id', v_incumbent::text, true);
+                UPDATE assertions SET superseded_at = now(), superseded_by = v_smuggled
+                WHERE id = v_incumbent;
+                PERFORM set_config('app.write_path', '', true);
+                -- Attempt 1: born closed. Attempt 2: a live same-subject
+                -- candidate, which reject_candidate() would close later.
+                IF v_attempt = 1 THEN
+                    INSERT INTO assertions (
+                        id, assertion_type, assertion_key, status, basis,
+                        subject_node_id, claim, superseded_at
+                    ) VALUES (
+                        v_smuggled, 'liveness_probe', 'default', 'candidate', 'assumed',
+                        v_other, '{"value":"born closed"}', now()
+                    );
+                ELSE
+                    INSERT INTO assertions (
+                        id, assertion_type, assertion_key, status, basis,
+                        subject_node_id, claim
+                    ) VALUES (
+                        v_smuggled, 'liveness_probe', 'default', 'candidate', 'assumed',
+                        v_other, '{"value":"live candidate"}'
+                    );
+                END IF;
+                SET CONSTRAINTS trg_assertions_transition_complete IMMEDIATE;
+            EXCEPTION WHEN OTHERS THEN
+                v_failed := true;
+                v_msg := SQLERRM;
+            END;
+            SET CONSTRAINTS trg_assertions_transition_complete DEFERRED;
+            PERFORM set_config('app.write_path', '', true);
+            IF NOT v_failed THEN
+                RAISE EXCEPTION
+                    'Role "%" ended an accepted assertion naming a same-subject replacement that is not standing (attempt %)',
+                    v_role, v_attempt;
+            END IF;
+
+            PERFORM set_config('app.current_role', 'admin', true);
+            IF (SELECT superseded_at FROM assertions WHERE id = v_incumbent) IS NOT NULL THEN
+                RAISE EXCEPTION
+                    'Role "%" left the incumbent ended (attempt %)', v_role, v_attempt;
+            END IF;
+            IF NOT EXISTS (
+                SELECT 1 FROM current_valid_assertions
+                WHERE subject_node_id = v_other AND assertion_type = 'liveness_probe'
+            ) THEN
+                RAISE EXCEPTION
+                    'Role "%" emptied the key (attempt %)', v_role, v_attempt;
+            END IF;
+        END LOOP;
+    END LOOP;
+
+    -- The chain that must keep working: two record_assertion() calls on one
+    -- key in one transaction leave I -> B -> C, and B is superseded by
+    -- commit. The named row is not live and the write still commits, because
+    -- the test is on the key, not on the named row.
     PERFORM set_config('app.current_role', 'admin', true);
-    INSERT INTO nodes (node_type, label) VALUES ('thing', 'Candidate replacement subject')
+    INSERT INTO nodes (node_type, label) VALUES ('thing', 'Chained replacement subject')
     RETURNING id INTO v_other;
     v_incumbent := record_assertion(
-        'candidate_replacement_probe', '{"value":"standing"}', v_other,
+        'chain_probe', '{"value":"I"}', v_other,
         p_assertion_key := 'default', p_basis := 'assumed'
     );
-    v_smuggled := gen_random_uuid();
-    PERFORM set_config('app.write_path', 'supersede_assertion', true);
-    PERFORM set_config('app.supersede_assertion_id', v_incumbent::text, true);
-    UPDATE assertions SET superseded_at = now(), superseded_by = v_smuggled
-    WHERE id = v_incumbent;
-    PERFORM set_config('app.write_path', '', true);
-    INSERT INTO assertions (
-        id, assertion_type, assertion_key, status, basis, subject_node_id, claim
-    ) VALUES (
-        v_smuggled, 'candidate_replacement_probe', 'default', 'candidate', 'assumed',
-        v_other, '{"value":"waiting for review"}'
+    PERFORM record_assertion(
+        'chain_probe', '{"value":"B"}', v_other,
+        p_assertion_key := 'default', p_basis := 'assumed'
+    );
+    v_id := record_assertion(
+        'chain_probe', '{"value":"C"}', v_other,
+        p_assertion_key := 'default', p_basis := 'assumed'
     );
     SET CONSTRAINTS trg_assertions_transition_complete IMMEDIATE;
     SET CONSTRAINTS trg_assertions_transition_complete DEFERRED;
+    IF (SELECT count(*) FROM current_valid_assertions
+        WHERE subject_node_id = v_other AND assertion_type = 'chain_probe') <> 1
+    THEN
+        RAISE EXCEPTION 'The I -> B -> C chain did not leave exactly one accepted row current';
+    END IF;
+    IF (SELECT claim->>'value' FROM assertions WHERE id = v_id) <> 'C' THEN
+        RAISE EXCEPTION 'The last write in the chain is not the standing one';
+    END IF;
 
-    IF (SELECT superseded_by FROM assertions WHERE id = v_incumbent) IS DISTINCT FROM v_smuggled THEN
-        RAISE EXCEPTION 'A readable same-tuple candidate replacement was refused';
-    END IF;
-    IF EXISTS (
-        SELECT 1 FROM current_valid_assertions
-        WHERE subject_node_id = v_other AND assertion_type = 'candidate_replacement_probe'
-    ) THEN
-        RAISE EXCEPTION 'The tuple still has an accepted value after a candidate replacement';
-    END IF;
+    -- Cross-subject live candidate: allowed, and that is the merge shape.
+    -- Covered by obligation 11b above, which is merge_nodes() into a strict
+    -- scope; re-asserted here on review_queue so obligation 18 stands alone.
     IF NOT EXISTS (
         SELECT 1 FROM review_queue
-        WHERE subject_node_id = v_other AND assertion_type = 'candidate_replacement_probe'
+        WHERE subject_node_id = v_canonical AND assertion_type = 'cross_probe'
     ) THEN
-        RAISE EXCEPTION 'The candidate replacement is not standing in review_queue';
+        RAISE EXCEPTION
+            'The cross-subject candidate replacement from merge_nodes() is not in review_queue';
     END IF;
-    IF (SELECT claim FROM assertions WHERE id = v_smuggled)
-       IS DISTINCT FROM '{"value":"waiting for review"}'::jsonb
-    THEN
-        RAISE EXCEPTION 'The candidate replacement lost its content';
-    END IF;
+
+    -- Cross-subject born closed: refused. The named row on another subject is
+    -- tested directly, so a closed one ends nothing.
+    FOREACH v_role IN ARRAY v_roles LOOP
+        PERFORM set_config('app.current_role', 'admin', true);
+        INSERT INTO nodes (node_type, label) VALUES ('thing', 'Cross closed source')
+        RETURNING id INTO v_other;
+        INSERT INTO nodes (node_type, label) VALUES ('thing', 'Cross closed target')
+        RETURNING id INTO v_honest_subject;
+        v_incumbent := record_assertion(
+            'cross_closed_probe', '{"value":"standing"}', v_other,
+            p_assertion_key := 'default', p_basis := 'assumed'
+        );
+
+        PERFORM set_config('app.current_role', v_role, true);
+        v_failed := false;
+        v_smuggled := gen_random_uuid();
+        BEGIN
+            PERFORM set_config('app.write_path', 'supersede_assertion', true);
+            PERFORM set_config('app.supersede_assertion_id', v_incumbent::text, true);
+            UPDATE assertions SET superseded_at = now(), superseded_by = v_smuggled
+            WHERE id = v_incumbent;
+            PERFORM set_config('app.write_path', '', true);
+            INSERT INTO assertions (
+                id, assertion_type, assertion_key, status, basis,
+                subject_node_id, claim, superseded_at
+            ) VALUES (
+                v_smuggled, 'cross_closed_probe', 'default', 'candidate', 'assumed',
+                v_honest_subject, '{"value":"born closed elsewhere"}', now()
+            );
+            SET CONSTRAINTS trg_assertions_transition_complete IMMEDIATE;
+        EXCEPTION WHEN OTHERS THEN
+            v_failed := true;
+            v_msg := SQLERRM;
+        END;
+        SET CONSTRAINTS trg_assertions_transition_complete DEFERRED;
+        PERFORM set_config('app.write_path', '', true);
+        IF NOT v_failed THEN
+            RAISE EXCEPTION
+                'Role "%" ended an accepted assertion naming a closed replacement on another subject', v_role;
+        END IF;
+        PERFORM set_config('app.current_role', 'admin', true);
+        IF NOT EXISTS (
+            SELECT 1 FROM current_valid_assertions
+            WHERE subject_node_id = v_other AND assertion_type = 'cross_closed_probe'
+        ) THEN
+            RAISE EXCEPTION 'Role "%" emptied the key with a cross-subject closed replacement', v_role;
+        END IF;
+    END LOOP;
 
     -- The one legitimate call fail-closed refuses, pinned so the cost is a
     -- fact rather than a guess: record_assertion() with a p_classification
