@@ -590,21 +590,18 @@ $$;
 -- when the duplicate node is actually archived, and takes the earliest row per
 -- duplicate rather than the latest.
 --
--- The forged rows are planted as an ordinary writing role, which is what main
--- still allows. work/014 adds an insert guard in migration 0033; if the guard
--- is present the plant is refused, and this block says so and stops rather
--- than asserting about a row that does not exist.
+-- Since migration 0033 a writing role can no longer plant either row: the
+-- insert guard refuses a live duplicate and refuses a future-dated record. So
+-- they are planted the way an upgraded instance actually comes to hold them —
+-- written before the guard existed — by the table's owner with the user
+-- triggers off. That is what this block proves the repair survives; the
+-- assertions below are unchanged.
 -- --------------------------------------------------------------------------
 DO $$
 DECLARE
     v_canon    uuid;
     v_decoy    uuid;
     v_lost     uuid;
-    v_live     uuid;
-    v_mapped   uuid;
-    v_alive    boolean;
-    v_guarded  boolean := false;
-    v_report   jsonb;
 BEGIN
     PERFORM set_config('app.current_role', 'admin', true);
 
@@ -616,26 +613,65 @@ BEGIN
     PERFORM merge_nodes(v_lost, v_canon, 'test:source-map-merge');
     DELETE FROM node_source_map
     WHERE source_schema = 'b012' AND source_table = 'forge' AND source_id = '2';
+END
+$$;
 
-    -- The forgery: the canonical node is alive and was never merged, but a
-    -- row says it was. Following it would put the lost mapping on the decoy.
-    BEGIN
-        INSERT INTO node_merges (duplicate_id, canonical_id, merged_by)
-        VALUES (v_canon, v_decoy, 'forged');
-    EXCEPTION WHEN OTHERS THEN
-        v_guarded := true;
-    END;
+-- The plant. Under scripts/conformance.sh the suite runs under SET ROLE from
+-- a superuser login; under scripts/test-nonsuperuser-owner.sh it runs AS the
+-- owner and RESET ROLE is a no-op. Either way the owner is who returns.
+-- ALTER TABLE ... DISABLE TRIGGER raises "cannot ALTER TABLE because it has
+-- pending trigger events" once anything in the transaction wrote an assertion,
+-- so the deferred queue is drained first and re-deferred after.
+SELECT current_user AS suite_role \gset
+RESET ROLE;
+SET CONSTRAINTS ALL IMMEDIATE;
+SET CONSTRAINTS ALL DEFERRED;
+ALTER TABLE rye.node_merges DISABLE TRIGGER USER;
 
-    IF v_guarded THEN
-        RAISE NOTICE
-            'node_merges now refuses a forged row; the repair''s own untrusted-evidence rules are unchanged and untested here';
-        RETURN;
+-- The forgery: the canonical node is alive and was never merged, but a row
+-- says it was. Following it would put the lost mapping on the decoy.
+INSERT INTO rye.node_merges (duplicate_id, canonical_id, merged_by)
+SELECT c.id, d.id, 'forged'
+FROM rye.nodes c, rye.nodes d
+WHERE c.label = 'Marsh Forge Canonical' AND d.label = 'Marsh Forge Decoy';
+
+-- A second forged row on a real duplicate, dated later, pointing elsewhere:
+-- the earliest row per duplicate has to win.
+INSERT INTO rye.node_merges (duplicate_id, canonical_id, merged_at, merged_by)
+SELECT l.id, d.id, now() + interval '1 day', 'forged'
+FROM rye.nodes l, rye.nodes d
+WHERE l.label = 'Marsh Forge Lost' AND d.label = 'Marsh Forge Decoy';
+
+ALTER TABLE rye.node_merges ENABLE TRIGGER USER;
+SET ROLE :"suite_role";
+SET search_path = rye, public, pg_catalog;
+
+DO $$
+DECLARE
+    v_canon    uuid;
+    v_decoy    uuid;
+    v_lost     uuid;
+    v_live     uuid;
+    v_mapped   uuid;
+    v_alive    boolean;
+    v_report   jsonb;
+BEGIN
+    PERFORM set_config('app.current_role', 'admin', true);
+
+    SELECT id INTO v_canon FROM nodes WHERE label = 'Marsh Forge Canonical';
+    SELECT id INTO v_decoy FROM nodes WHERE label = 'Marsh Forge Decoy';
+    SELECT id INTO v_lost  FROM nodes WHERE label = 'Marsh Forge Lost';
+
+    -- Anti-vacuity: both forged rows are really there, or the assertions
+    -- below are about nothing.
+    IF NOT EXISTS (
+        SELECT 1 FROM node_merges WHERE duplicate_id = v_canon AND canonical_id = v_decoy
+    ) OR NOT EXISTS (
+        SELECT 1 FROM node_merges
+        WHERE duplicate_id = v_lost AND canonical_id = v_decoy AND merged_at > now()
+    ) THEN
+        RAISE EXCEPTION 'the forged rows were not planted; there is nothing to prove here';
     END IF;
-
-    -- A second forged row on a real duplicate, dated later, pointing
-    -- elsewhere: the earliest row per duplicate has to win.
-    INSERT INTO node_merges (duplicate_id, canonical_id, merged_at, merged_by)
-    VALUES (v_lost, v_decoy, now() + interval '1 day', 'forged');
 
     v_report := rye_restore_merged_source_maps();
 

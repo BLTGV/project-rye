@@ -342,6 +342,89 @@ Anything a person hears uses `docs/glossary.md` words. Internal identifiers —
 uuids, assertion types, step names, agent keys — stay canonical in what is
 stored and stay out of what is said.
 
+## Finding and traversing
+
+Start from `find_nodes()` when you have a name and need a node. It ranks exact
+external identity above exact label above fuzzy matching and tells you which
+one fired in `match_reason`. It does not search property values, so do not
+expect to locate a node by an attribute.
+
+```sql
+SELECT * FROM find_nodes('Acme', ARRAY['org'], 5);
+```
+
+**Semantic matching is your job, not the database's.** `find_nodes()` matches
+characters, not meaning: it handles spelling and spacing drift, and nothing
+else. It will not connect "the fence company" to `Meridian Fence & Gate`. You
+know the domain vocabulary, so expect to search more than once.
+
+Send your reformulations in one call rather than one at a time:
+
+```sql
+SELECT query, label, score, match_reason
+FROM find_nodes_batch(
+    ARRAY['Meridian Fence', 'the fence company', 'Meridian'],
+    ARRAY['org'], 3);
+```
+
+Every row is attributed to the query that produced it, so you can see which
+phrasing worked. Judge the candidates on `score` and `match_reason` — a
+`label_contains` hit at 0.40 is a much weaker signal than `external_id` at
+1.00.
+
+If nothing comes back, reformulate before you widen. `p_threshold` overrides
+the registry default per call, but a lower threshold only buys more spelling
+tolerance; it will never reach a synonym. Narrowing with `p_node_types` and
+rephrasing are the moves that work. `rye_catalog()` shows the node types
+available to rephrase against, and `rye_categories()` says what each one means
+here.
+
+Use `neighborhood()` to build context for a question about one subject. It
+returns the surrounding nodes, the edges among them, and each node's current
+accepted assertions, under an explicit budget.
+
+```sql
+SELECT neighborhood('<node_uuid>', p_max_depth := 2, p_max_nodes := 40);
+```
+
+Its knowledge comes from `current_valid_assertions`, so a candidate never
+appears there — not one you wrote as a candidate, not one a review policy
+demoted, and not one `reject_candidate()` closed. Use `review_queue` for those.
+
+Use `find_paths()` for questions about connection or cause.
+
+```sql
+SELECT node_path, edge_type_path, depth
+FROM find_paths('<from_uuid>', '<to_uuid>',
+                p_max_depth := 3,
+                p_semantics := ARRAY['causal']);
+```
+
+Pass `p_semantics := ARRAY['causal']` whenever the question is why something
+happened. Without it a path may run through `references` or `regarding` edges,
+which record that two things were mentioned together and assert nothing about
+cause. Leave `p_direction` at its default `out` for causal work; `any` answers
+"are these connected at all" and will happily return a chain backwards. Both
+arguments are closed sets — `out`, `in`, `any`, and `causal`, `structural`,
+`associative`, `temporal` — and a value outside them is refused rather than
+ignored, so a typo is an error you see, not a wider answer you do not.
+
+Depth is capped by `max_path_depth` (default 3). Asking for more silently
+clamps. Two or three hops answer most questions, and deeper traversal is where
+retrieval cost goes wrong.
+
+Pass `p_as_of` to reconstruct past connectivity. Edges honor their effective
+windows, so this is the structural counterpart to `assertions_as_of()`.
+
+These functions never write. That is why a `viewer` and a session with no role
+can call them at all — those two sessions write nothing, so a function that
+logged would refuse for them. If you want a read to count toward
+`node_salience`, call `log_agent_query()` yourself.
+
+An empty result means the path is not visible to you. It does not prove the
+path does not exist — RLS prunes traversal silently and by design. Say "no
+connection is visible under this access" rather than "there is no connection."
+
 ## Events
 
 Always create events through `record_event()`. It creates participants
@@ -703,6 +786,60 @@ Corroboration from a repeated witness is retained for audit but marked
 
 Nodes with non-empty `attrs.teams` must also set `attrs.classification`.
 Digest narrative artifacts inherit the digest assertion classification.
+
+## Before creating a node
+
+Call `resolve_node_identity()` before minting an entity you expect might
+already exist.
+
+```sql
+SELECT resolve_node_identity(
+    p_node_type := 'org',
+    p_label := 'Northwind Trading',
+    p_identity := '{"email":"ops@northwind.example"}'
+);
+```
+
+It returns a verdict and the candidates behind it:
+
+| Verdict | What it means | What to do |
+|---|---|---|
+| `match` | One node matches on external identity or a declared identity key | Reuse that node |
+| `ambiguous` | Several exact matches, or a plausible label match only | Do not guess — record a structural candidate for review |
+| `new` | Nothing matched | Create the node |
+
+A similar label never returns `match`. Similar names are not evidence of
+identity, so they arrive as `ambiguous` for a person to settle.
+
+This call is advisory. It writes nothing and blocks nothing, and no write
+helper consults it — the decision is yours. Route `ambiguous` to
+`create_knowledge_candidate()` and batch review by resolved cluster rather
+than by row, or a large import will stall on individual near-misses. Do not
+try to clean up an `ambiguous` verdict yourself. Merging is for people, and
+the rule is about the row, not the route. `merge_nodes()` refuses an
+agent-shaped session by name, and a direct write to `node_merges` is refused
+by the same sentence — as is every other merge the helper would refuse: equal
+ids, a node the governance structure touches when you are not an admin, a node
+you cannot see, a duplicate that is already archived. What a raw write can
+still reach is exactly the merge `merge_nodes()` would have performed for that
+caller, and only if it also archives the duplicate and records the
+`node_merge` event, which the record is checked against at commit. It cannot
+do more. Record the duplicate and ask a person.
+
+`new` means nothing matched *that you can see*. A node hidden from you by
+classification is not matched, so a duplicate is possible across an access
+boundary. Where that matters, run intake under a role that can see the whole
+population for the node type.
+
+Searching an old name still works. When a node was merged away, its label went
+with it, so a similar former name surfaces the node's **live survivor** as a
+candidate with `match_reason` `former_label_similarity` and the old name in
+`matched_former_label`. Like any label match, it is `ambiguous`, never `match`.
+
+Hold an id that may be stale? `resolve_merged_node(id)` follows `node_merges`
+to the surviving node. It reads under your own visibility: if a node in the
+chain is hidden from you, the answer is the last link you can see, not an
+error. A merge cycle answers too — it stops rather than raising.
 
 ## Other safe writes
 

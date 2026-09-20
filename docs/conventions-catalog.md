@@ -525,6 +525,94 @@ not write, names who can merge, and refuses a non-admin merging a node the
 governance structure touches. An agent records the duplicate and tells a
 person.
 
+## Identity Key Convention
+
+Declare what makes a node type the same entity with a `registry_entry`
+assertion keyed `identity_keys:<node_type>`, whose `claim.value` is an array:
+
+```json
+[{"property": "email",   "normalize": "lower"},
+ {"property": "website", "normalize": "domain"}]
+```
+
+Normalizers are `trim`, `lower`, `digits_only`, and `domain`. An unknown
+normalizer raises. Keep the set boring: every normalizer is a permanent
+semantic commitment, because changing it rewrites what "matched" meant for
+everything already resolved on its basis.
+
+A node matching **any** declared key is an exact candidate. Matching more than
+one node is `ambiguous`, not a merge.
+
+`identity_threshold:<node_type>` sets the trigram floor for label similarity
+(default 0.45, never below 0.3). Label similarity only ever produces
+`ambiguous`.
+
+Like every other registry entry, an identity key is configuration: only a Rye
+admin may settle one, and a caller who cannot see the entry resolves as though
+the node type had no declared keys.
+
+Resolution is advisory. `resolve_node_identity()` is a read; agents decide and
+route ambiguity to review, and `merge_nodes()` stays a human action.
+Deterministic resolution belongs only where the process is predefined —
+tabular imports with a declared key, `link_record()` mirroring of a domain
+table, connector syncs with stable external ids.
+
+A former name is searchable: an archived, merged-away node whose label is
+similar surfaces its live survivor, as `ambiguous`, with the old name in
+`matched_former_label`.
+
+A stale reference follows `resolve_merged_node()` to the surviving node.
+`node_merges` is read under the caller's own visibility, so a chain through a
+node the caller cannot see stops at the last visible link rather than
+disclosing it.
+
+`node_merges` is written by `merge_nodes()` and holds to the shape a merge
+leaves, whoever inserts the row: never an agent or `system:cdc`, `merged_at`
+equal to the transaction's `now()`, distinct ids, an unarchived duplicate with
+no earlier merge record, an unarchived canonical, no cycle, and — at commit —
+an archived duplicate and a `node_merge` event naming the pair. The lookup
+distrusts the table anyway, because rows written before that rule may be any
+shape.
+
+## Edge Semantics Convention
+
+Store the semantic class of an edge type as a `registry_entry` assertion with
+key `edge_semantics:<edge_type>` and one of these strings in `claim.value`:
+
+| Value | Meaning |
+|---|---|
+| `causal` | One thing produced, blocked, or changed another |
+| `structural` | Composition, membership, ownership, assignment |
+| `associative` | Mention, reference, topical adjacency |
+| `temporal` | Ordering without a claim of cause |
+
+Unregistered edge types resolve to `associative`. An unclassified vocabulary
+is therefore never mistaken for causation, and `find_paths(p_semantics =>
+ARRAY['causal'])` cannot walk a `references` edge to reach a conclusion. The
+same holds for a caller who cannot read the registry entry: `edge_semantics()`
+is `SECURITY INVOKER`, so blindness narrows a causal traversal rather than
+widening it.
+
+`registry_entry` is settle-gated configuration, so only an admin can make one
+of these accepted. A proposal from any other role lands as a candidate in
+`review_queue`.
+
+Core assignments: `blocks`, `triggered_by`, `affects`, and `impacted` are
+causal; `employs`, `assigned_to`, `project_member`, `depends_on`, `contains`,
+and `owns` are structural; `regarding`, `references`, `applied_to`, `targets`,
+and `adjacent_to` are associative. Plugins declare semantics for the edge types
+they contribute.
+
+## Retrieval Registry Keys
+
+| Key | Default | Effect |
+|---|---|---|
+| `max_path_depth` | `3` | Hard ceiling on traversal depth. Callers may request less, never more. |
+| `node_search_threshold` | `0.35` | Minimum trigram similarity for a `find_nodes` fuzzy match. Floors at the `pg_trgm.similarity_threshold` GUC, since the `%` operator is what keeps the GIN index usable. |
+
+Both follow the usual scope, plugin, then core precedence through
+`registry_value()`.
+
 ## Outcome Label Convention
 
 Reputation uses explicit outcomes, not ordinary supersession:

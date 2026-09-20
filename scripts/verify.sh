@@ -897,6 +897,118 @@ BEGIN
         'opportunities_active_freshness is missing or is not security_invoker (migration 0125 is missing)';
     END IF;
   END IF;
+
+  -- Advisory identity resolution and the merge-chain lookup (0033). All four
+  -- are reads: SECURITY INVOKER, each declaring its own search_path.
+  IF to_regprocedure('rye.normalize_identity_value(text, text)') IS NULL THEN
+    RAISE EXCEPTION 'normalize_identity_value function missing';
+  END IF;
+  IF to_regprocedure('rye.identity_keys(text, uuid)') IS NULL THEN
+    RAISE EXCEPTION 'identity_keys function missing';
+  END IF;
+  IF to_regprocedure('rye.resolve_node_identity(text, text, jsonb, int, uuid)') IS NULL THEN
+    RAISE EXCEPTION 'resolve_node_identity function missing';
+  END IF;
+  IF to_regprocedure('rye.resolve_merged_node(uuid)') IS NULL THEN
+    RAISE EXCEPTION 'resolve_merged_node function missing';
+  END IF;
+
+  -- Graph traversal and entry points (0032). The visibility contract
+  -- (design/proposals/rls-visibility-contract.md, D1) is a hard constraint,
+  -- so it is checked here as well as in the suites: these five read the
+  -- graph as the caller, and a definer or volatile one would be a topology
+  -- disclosure or a write.
+  IF to_regprocedure('rye.edge_semantics(text,uuid)') IS NULL
+     OR to_regprocedure('rye.find_nodes(text,text[],integer,numeric,uuid)') IS NULL
+     OR to_regprocedure('rye.find_nodes_batch(text[],text[],integer,numeric,uuid)') IS NULL
+     OR to_regprocedure('rye.find_paths(uuid,uuid,integer,text[],text[],timestamptz,text,integer,uuid)') IS NULL
+     OR to_regprocedure('rye.neighborhood(uuid,integer,text[],text[],timestamptz,text,integer,integer,uuid)') IS NULL
+  THEN
+    RAISE EXCEPTION 'graph traversal functions are missing';
+  END IF;
+
+  IF EXISTS (
+      SELECT 1
+      FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = v_schema
+        AND p.proname IN ('resolve_node_identity', 'identity_keys',
+                          'normalize_identity_value', 'resolve_merged_node')
+        AND (
+            p.prosecdef
+            OR NOT EXISTS (
+                SELECT 1
+                FROM unnest(coalesce(p.proconfig, ARRAY[]::text[])) c
+                WHERE c LIKE 'search_path=%'
+            )
+        )
+  ) THEN
+    RAISE EXCEPTION
+      'the identity functions must be SECURITY INVOKER and set their own search_path';
+  END IF;
+
+  -- node_merges is the first table 0033 reads, so its rows are held to the
+  -- shape merge_nodes() leaves: a BEFORE ROW trigger sorting after 0029's
+  -- gate, and a deferred constraint trigger for the two facts merge_nodes()
+  -- establishes after its insert.
+  IF to_regprocedure('rye.rye_node_merge_shape_gate()') IS NULL THEN
+    RAISE EXCEPTION 'rye_node_merge_shape_gate function missing';
+  END IF;
+  IF to_regprocedure('rye.rye_node_merge_shape_complete()') IS NULL THEN
+    RAISE EXCEPTION 'rye_node_merge_shape_complete function missing';
+  END IF;
+  IF EXISTS (
+      SELECT required.tgname
+      FROM (VALUES
+          ('trg_node_merges_shape', false),
+          ('trg_node_merges_shape_complete', true)
+      ) required(tgname, deferred)
+      WHERE NOT EXISTS (
+          SELECT 1
+          FROM pg_trigger tg
+          JOIN pg_class c ON c.oid = tg.tgrelid
+          JOIN pg_namespace n ON n.oid = c.relnamespace
+          WHERE n.nspname = v_schema
+            AND c.relname = 'node_merges'
+            AND tg.tgname = required.tgname
+            AND NOT tg.tgisinternal
+            AND tg.tgdeferrable = required.deferred
+            AND tg.tginitdeferred = required.deferred
+      )
+  ) THEN
+    RAISE EXCEPTION
+      'trg_node_merges_shape or trg_node_merges_shape_complete is missing or not deferred as expected';
+  END IF;
+  -- The shape gate must sort after 0029's gate, so a read-only or system:cdc
+  -- session still gets that gate's "who may write" message.
+  IF 'trg_node_merges_shape' <= 'trg_node_merges_gate' THEN
+    RAISE EXCEPTION 'the node_merges shape trigger no longer fires after the write gate';
+  END IF;
+
+  -- Identity resolution is advisory: nothing in the write path calls it.
+  IF EXISTS (
+      SELECT 1
+      FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = v_schema
+        AND p.proname <> 'resolve_node_identity'
+        AND p.prosrc LIKE '%resolve_node_identity%'
+  ) THEN
+    RAISE EXCEPTION
+      'resolve_node_identity must stay advisory; a function in the schema calls it';
+  END IF;
+
+  IF EXISTS (
+      SELECT 1
+      FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = v_schema
+        AND p.proname IN ('find_nodes', 'find_nodes_batch', 'find_paths',
+                          'neighborhood', 'edge_semantics')
+        AND (p.prosecdef OR p.provolatile = 'v')
+  ) THEN
+    RAISE EXCEPTION 'a traversal function is SECURITY DEFINER or VOLATILE; it must be neither';
+  END IF;
 END
 $$;
 SQL
