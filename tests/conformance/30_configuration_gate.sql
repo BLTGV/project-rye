@@ -807,6 +807,19 @@ BEGIN
                 'Role "%" cannot see the fixture area, so it is owed domain_not_found for a self type, got %',
                 v_role, v_answer;
         END IF;
+        -- A sighted role's baseline is checked, not merely stored: an
+        -- already-wrong baseline would make the comparison after the
+        -- attacks agree with itself and prove nothing.
+        IF NOT v_blind AND (
+               v_answer->>'step' IS DISTINCT FROM 'relationship'
+               OR v_answer->'settlers'->0->>'node_id' IS DISTINCT FROM v_john::text
+               OR v_answer->'settlers'->0->>'relationship' IS DISTINCT FROM 'self'
+               OR v_answer->'speaker'->>'is_settler' IS DISTINCT FROM 'true'
+           ) THEN
+            RAISE EXCEPTION
+                'Role "%" should be told John settles his own availability before the erase attempts, got %',
+                v_role, v_answer;
+        END IF;
     END LOOP;
     PERFORM set_config('app.current_role', 'admin', true);
 
