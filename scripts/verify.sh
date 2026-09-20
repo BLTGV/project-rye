@@ -814,6 +814,32 @@ BEGIN
   ) OR to_regclass('rye.active_disputes') IS NOT NULL THEN
     RAISE EXCEPTION 'removed v1 dispute or fact-promotion surfaces are still installed';
   END IF;
+
+  -- Graph traversal and entry points (0032). The visibility contract
+  -- (design/proposals/rls-visibility-contract.md, D1) is a hard constraint,
+  -- so it is checked here as well as in the suites: these five read the
+  -- graph as the caller, and a definer or volatile one would be a topology
+  -- disclosure or a write.
+  IF to_regprocedure('rye.edge_semantics(text,uuid)') IS NULL
+     OR to_regprocedure('rye.find_nodes(text,text[],integer,numeric,uuid)') IS NULL
+     OR to_regprocedure('rye.find_nodes_batch(text[],text[],integer,numeric,uuid)') IS NULL
+     OR to_regprocedure('rye.find_paths(uuid,uuid,integer,text[],text[],timestamptz,text,integer,uuid)') IS NULL
+     OR to_regprocedure('rye.neighborhood(uuid,integer,text[],text[],timestamptz,text,integer,integer,uuid)') IS NULL
+  THEN
+    RAISE EXCEPTION 'graph traversal functions are missing';
+  END IF;
+
+  IF EXISTS (
+      SELECT 1
+      FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = v_schema
+        AND p.proname IN ('find_nodes', 'find_nodes_batch', 'find_paths',
+                          'neighborhood', 'edge_semantics')
+        AND (p.prosecdef OR p.provolatile = 'v')
+  ) THEN
+    RAISE EXCEPTION 'a traversal function is SECURITY DEFINER or VOLATILE; it must be neither';
+  END IF;
 END
 $$;
 SQL
