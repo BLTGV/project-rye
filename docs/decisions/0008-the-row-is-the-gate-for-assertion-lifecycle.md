@@ -112,8 +112,11 @@ replacement for any caller who cannot see the whole tuple.
 change no code.** A caller who cannot read an accepted rival, because it is
 classified above the caller's level, can raw-promote a visible candidate on the
 same tuple and leave two accepted rows covering one instant. The
-inferred-displacement search has the same cause; no fixture could be built for
-it, so it is untested as well as open. An earlier draft of this record said the
+inferred-displacement search has the same cause. It was untested when this was
+written; work/011 measured it (test 31, obligation 20): the raw path cannot end
+an incumbent it cannot read, so it leaves a duplicate and displaces nothing;
+`accept_assertion()` refuses under a superuser owner and promotes under an
+RLS-bound owner. An earlier draft of this record said the
 helper reads rivals the same way, and that is false in the reference install:
 `accept_assertion()` is `SECURITY DEFINER`, so where the table owner is a
 superuser — the Docker test database — it reads past RLS and ends the hidden
