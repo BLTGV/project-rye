@@ -7,7 +7,7 @@
 # For each directory, in order:
 #   1. If node_modules is already present and stamped with the current
 #      lock file's hash, do nothing (idempotent no-op).
-#   2. Else, if the main checkout (the first entry of `git worktree list`)
+#   2. Else, if the main checkout (parent of `git rev-parse --git-common-dir`)
 #      has a node_modules for a package-lock.json with the same hash, copy
 #      it — hard-linked (cp -al) when the worktree and the main checkout
 #      share a filesystem, otherwise a full copy (cp -a). Never symlinked:
@@ -21,15 +21,25 @@
 # Never writes into the main checkout: it only ever reads there.
 # Never uses /tmp.
 set -euo pipefail
+trap 'echo "bootstrap-worktree.sh: FAILED at line ${LINENO}: ${BASH_COMMAND}" >&2' ERR
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
 DIRS=(admin site skills/rye-source-context-intake)
 
-MAIN_CHECKOUT="$(git worktree list --porcelain | awk '/^worktree /{print $2; exit}')"
-if [[ -z "$MAIN_CHECKOUT" ]]; then
-  echo "bootstrap-worktree.sh: could not determine main checkout from 'git worktree list'" >&2
+# Resolve the main checkout without a pipeline a downstream command could
+# close early: `git worktree list --porcelain | awk '...{exit}'` sends
+# git SIGPIPE the moment awk exits after its first match, which — under
+# `pipefail` — makes the whole pipeline's exit status 141 and aborts the
+# script before anything runs. It is timing dependent (git has to still be
+# writing when awk exits), so it does not fail every run. `--git-common-dir`
+# is a single command with no pipe: it always points at the main worktree's
+# .git directory, whichever worktree you run it from.
+MAIN_GIT_COMMON_DIR="$(git rev-parse --path-format=absolute --git-common-dir)"
+MAIN_CHECKOUT="$(dirname "$MAIN_GIT_COMMON_DIR")"
+if [[ -z "$MAIN_CHECKOUT" || ! -d "$MAIN_CHECKOUT" ]]; then
+  echo "bootstrap-worktree.sh: could not determine main checkout from 'git rev-parse --git-common-dir'" >&2
   exit 1
 fi
 
