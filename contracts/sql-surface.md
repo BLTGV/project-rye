@@ -33,7 +33,8 @@ client of it. This contract says what a client may depend on.
   `app.current_user_id`, `app.current_teams`, set in the same statement as
   the query when the connection is pooled. Nothing else authorizes. What each
   role may read and write in the governance tables is the section "Governance
-  tables: who reads, who writes" below.
+  tables: who reads, who writes" below; what each role may write in the seven
+  core tables is "Who may write". A session that sets no role may only read.
 
 ## Versioning
 
@@ -58,7 +59,9 @@ exist for tables passed to `track_table()`.
   retrying. Refusals are load-bearing: teams without a classification, an
   assertion without evidence when basis is not `assumed`, a supersession
   across subjects, a term outside the scope's enabled plugins, an accepted
-  configuration assertion from a caller who is not a Rye admin.
+  configuration assertion from a caller who is not a Rye admin, any write at
+  all from a `viewer` or from a session with no role set, and any write to the
+  governance structure from a caller who is not a Rye admin.
 - RLS failures are silent by construction: an invisible node yields zero rows,
   not an error, so a client reading zero rows must not conclude the row is
   absent. `INSERT ... RETURNING` on RLS-protected tables fails; use the helper.
@@ -335,6 +338,201 @@ the wrong reason:
   for an area the session cannot see. Either refusal is a refusal; the message
   is not part of this contract.
 
+## Who may write
+
+"Governance tables" above says who reads and writes the nine tables that
+describe areas and agents. This section says who writes the seven core tables,
+and it is the answer to a question the schema did not state before: a `viewer`
+and a session with no role set could insert assertions, archive a scope, and
+merge nodes. Migration `0026` closes that. Recorded in
+`docs/decisions/0009-who-may-write.md`.
+
+It narrows what some sessions could write before and bumps no version: no
+object is removed or renamed, no signature narrows, no view column changes
+meaning. A client that wrote without setting `app.current_role` will start
+being refused.
+
+### A writing session is one the role list says may write
+
+`role_classification_access` is already the instance's role list, already
+readable by every session, and already the definition of "named role" in
+"Governance tables". It gains one column, `may_write boolean NOT NULL DEFAULT
+true`, and the `viewer` row is seeded `false`. A new read-only role is a row,
+not a migration, and widening a role later is an `UPDATE`, not a migration.
+
+One published read-only helper is the whole definition, so a verifier can
+assert it directly:
+
+| helper | returns | reads |
+|---|---|---|
+| `rye_role_may_write() RETURNS boolean` | true when `app.current_role` is agent-shaped, or names a `role_classification_access` row whose `may_write` is true; false otherwise | `app.current_role` and `role_classification_access` only. Level 0 in the read order, so it is safe in any policy. |
+
+`STABLE`, `SECURITY INVOKER`. Three consequences, stated because a client will
+meet them:
+
+- **An unset role is not a writer.** It matches no row, so it may only read.
+  Every pooled client already sets `app.current_role` in the same statement as
+  its query; one that does not must start.
+- **`viewer` is not a writer**, by the seeded row, which is what the name has
+  always meant.
+- **An agent-shaped session is a writer**, decided from the session variable
+  alone without reading `agent_identities`, for the same reason the roster's
+  read rule is row-local: a policy on `nodes` may not depend on a table whose
+  own policy depends on `nodes`. `agent:*` keeps exactly the writes it has.
+
+### The matrix
+
+Every cell is the rule after `0026`. "yes" means the policy admits the write;
+the row rules in "The row is the gate, not the route" and the type rules in
+`assertion_type_access` still apply on top, and a `no` from either of those is
+still a `no`.
+
+| table | operation | admin | named role with `may_write` (incl. `team_member`) | `agent:*` | `viewer` | unset or unknown |
+|---|---|---|---|---|---|---|
+| `nodes` | INSERT | yes | yes | yes | no | no |
+| `nodes` | UPDATE | yes | yes, except governance rows | only with `app.write_path = 'update_node_properties'`, and never a governance row | no | no |
+| `nodes` | DELETE | yes | yes, except governance rows | no | no | no |
+| `edges` | INSERT | yes | yes, except governance edge types | yes, except governance edge types | no | no |
+| `edges` | UPDATE | yes | yes, except governance edge types | no | no | no |
+| `edges` | DELETE | yes | yes, except governance edge types | no | no | no |
+| `events` | INSERT | yes | yes | yes | no | no |
+| `events` | UPDATE, DELETE | no | no | no | no | no |
+| `event_participants` | INSERT | yes | yes | yes | no | no |
+| `event_participants` | UPDATE, DELETE | yes | yes | no | no | no |
+| `assertions` | INSERT | yes | yes | yes | no | no |
+| `assertions` | UPDATE | only the shapes "The row is the gate" allows | same | same | no | no |
+| `assertions` | DELETE | no | no | no | no | no |
+| `assertion_evidence` | INSERT | yes | yes | yes | no | no |
+| `assertion_evidence` | UPDATE, DELETE | no | no | no | no | no |
+| `artifacts` | INSERT | yes | yes | yes | no | no |
+| `artifacts` | UPDATE | yes | yes | no | no | no |
+| `artifacts` | DELETE | yes | yes | no | no | no |
+
+Nothing a `team_member` or an `agent:*` could write to an ordinary node, edge,
+event, assertion, or artifact is taken away. The two changes are the two
+columns on the right and the governance exception in the middle.
+
+### The governance structure is admin-only
+
+`governing_scope()` and `scope_review_policy()` decide which review policy
+covers a subject. A caller who can end what they read can turn a `strict` area
+into an open one, which undoes the review rules for helpers and raw writes
+alike. What they read, derived from the two function bodies:
+
+| what | where it is read |
+|---|---|
+| a `nodes` row with `node_type = 'onboarding_scope'` and `archived_at` null | every branch of `governing_scope()`; also the subject of the four assertion types below |
+| an `edges` row with `edge_type = 'scope_governs_subject'`, live now | branch 1, direct subject coverage, and branch 2 through a parent |
+| an `edges` row with `edge_type = 'scope_governs_source'`, live now | branch 4, coverage through the witness |
+| an `edges` row with `edge_type = 'has_step'`, live now | branch 2 only, to inherit a governed parent's scope onto its step |
+| an accepted `scope_status` assertion on the scope, `claim->>'status' = 'active'` | every branch |
+| an accepted `review_policy` assertion on the scope, key `default` | `scope_review_policy()` |
+| accepted `registry_entry` assertions with key `governed_type:<type>` | branch 3, type coverage |
+| an accepted `registry_entry` assertion with key `DEFAULT_SCOPE` | branch 5 |
+| accepted `registry_entry` assertions with key `type_alias:assertion_type:*` | `canonical_type()`, called first by `governing_scope()` |
+
+The rule: **a `nodes` row whose `node_type` is `onboarding_scope`, and an
+`edges` row whose `edge_type` is `scope_governs_subject`,
+`scope_governs_source`, or `scope_enables_plugin`, may be inserted, updated, or
+deleted only by a caller whose `app.current_role` is `admin`.** The test is
+row-local — it reads the row's own type column and no table — so it composes
+with the existing policies and cannot recurse. Because RLS applies `USING` to
+the old row and `WITH CHECK` to the new one, this covers all four verbs the
+acceptance criterion names: archiving (an `archived_at` update), ending (an
+`effective_to` update), deleting, and re-pointing (a `source_id`, `target_id`,
+or `edge_type` change, in either direction, so a non-admin can neither turn an
+ordinary edge into a governance edge nor turn a governance edge into an
+ordinary one).
+
+`scope_enables_plugin` is in the set although `governing_scope()` does not read
+it. It is what `compile_scope_policy()` and the scoped registry reads use to
+decide which vocabulary a scope permits, and
+`docs/decisions/0007-configuration-writes-need-an-admin.md` left it out of the
+settle gate for exactly the reason that it is an edge and not an assertion.
+This is the edge gate that sentence was waiting for.
+
+The four assertion types are gated the way the settle gate already gates
+configuration: `registry_entry` and `review_policy` are gated rows in
+`assertion_type_access` today, and `0026` adds `scope_status` beside them, both
+`ARRAY['admin']`. `0007` deliberately left `scope_status` ungated because
+demoting it fails open and a non-admin onboarding run would have been left
+weaker than before. That reason is gone: creating a scope node is now admin-only,
+so activating one is too, and the gate no longer costs anything it was written
+to protect.
+
+**Through the helpers.** The rule is one policy, so a helper does not escape it
+and does not need its own copy. Two helpers refuse plainly rather than letting
+RLS produce a lie:
+
+- `update_node_properties()` raises before it takes its lock, because
+  `SELECT ... FOR UPDATE` applies the `UPDATE` policy as a silent filter and
+  the caller would otherwise be told `Node % not found` about a node it can
+  see. A non-writing role and a non-admin editing an `onboarding_scope` node
+  each get a sentence saying so.
+- `merge_nodes()`, below.
+
+`create_onboarding_scope()`, `activate_onboarding_scope()`,
+`enable_plugin_for_scope()`, and `record_scope_policy()` keep their signatures
+and their bodies, and become admin-only because the rows they write are. This
+is the same arrangement as the five governance-table write helpers above: one
+rule, in the policy, with no second authorization model to drift.
+
+**What is not covered, stated rather than hidden.** `has_step` is an ordinary
+structural edge — every process step in the PM profile has one — and gating it
+would gate ordinary work. Archiving a `has_step` edge therefore still removes a
+step's *inherited* scope, and the step falls back to whatever the later
+branches give, which may be `open`. An inherited scope is weaker than a direct
+one; a subject that must stay governed gets its own `scope_governs_subject`
+edge, which is admin-only.
+
+### `merge_nodes()` is for people
+
+A merge is irreversible, it moves one subject's history onto another, and it
+crosses review policies. `merge_nodes()` refuses two kinds of caller, before it
+takes any lock:
+
+| caller | refusal, `42501` |
+|---|---|
+| `rye_role_may_write()` false — `viewer`, unset, an unknown role | `merge_nodes requires a role that may write; "%" may only read. A Rye admin or a team member merges.` |
+| agent-shaped | `merge_nodes is not available to an agent ("%"). Record the duplicate and ask a person; a Rye admin or a team member merges.` |
+
+Every other writing named role may merge, which is the item's default — `admin`
+and `team_member` both may — expressed through the role list rather than two
+names spelled into the function. A caller who is not an admin is refused a
+merge of a node the governance structure touches:
+`Merging a node a scope governs requires a Rye admin`, raised when the
+duplicate is an `onboarding_scope` node or is an endpoint of a live governance
+edge. That refusal exists because the merge would have to re-point that edge,
+which only an admin may do, and a silent zero-row `UPDATE` would leave the
+governance structure pointing at an archived node.
+
+**The refusals come before the lock.** `SELECT ... FOR UPDATE` on `nodes`
+applies `node_update_policy`'s `USING` clause as a silent filter, so under an
+`agent:*` role on an owner that RLS binds, `merge_nodes()` locked zero rows and
+raised `Duplicate node % not found` about a node the caller could see. That is
+the lock-after-gate order recorded for `score_due_predictions()` in `0024`, and
+it is why every refusal above is evaluated first. `Duplicate node % not found`
+now means the node is absent or invisible, and nothing else.
+
+### What this protects and what it does not
+
+The same boundary as "The row is the gate, not the route", and no wider. Rye's
+authorization is session variables. A caller with a raw connection can set
+`app.current_role` to `admin`, and this section does not change that. Unlike the
+row rules, **every rule here reads the role in order to permit**, because a role
+model is what it is. Two things are protected: deployments where a trusted
+backend sets the session variables and callers cannot, and well-behaved agents
+that state their role honestly. It is not a defence against a hostile caller
+with a raw connection.
+
+### What a refusal looks like
+
+As in "Governance tables": a refused `INSERT` raises `42501`,
+`new row violates row-level security policy`; a refused `UPDATE` or `DELETE`
+raises nothing and affects zero rows, so assert the row count; a helper that
+looks a row up first may refuse with its own sentence, and the two helpers named
+above do.
+
 ## Configuration writes need an admin
 
 Some assertion types are not knowledge about the world. They are Rye's own
@@ -418,6 +616,19 @@ configuration, so it does not need to be gated as configuration.
 `record_assertion()` canonicalizes before it inserts, so an alias of a gated
 type is gated.
 
+**A gated type cannot be aliased away.** A `registry_entry` whose
+`assertion_key` is `type_alias:assertion_type:<T>`, where `T` is a type with a
+`settle` row, is refused for every caller at every status — candidate included —
+because `record_assertion()` canonicalizes before it inserts, so an alias out of
+`registry_entry` or `review_policy` would route a write under the gated name to
+a type the gate does not read. It is enforced in `assertion_settle_gate_guard()`,
+the same trigger as the rest of this section, before the branch that returns
+early for a row that is not becoming accepted, and it raises
+`Cannot record a type alias from "%": it is Rye configuration, and an alias
+would route a write under that name past the settle gate`. The rule is data
+like the rest of the gate: adding a `settle` row for a new type refuses aliases
+out of it with no further migration. An alias *into* a gated type is unaffected.
+
 **Asking first.** `settle_gate(p_assertion_type text) RETURNS jsonb` answers
 `{assertion_type, gated, allowed_roles, current_role, may_settle}`. It is
 `STABLE`, `SECURITY INVOKER`, and writes nothing. A client calls it before
@@ -479,21 +690,23 @@ signal a helper can produce that a caller cannot, so the row is judged rather
 than the route. `record_assertion()` has already applied the policy, so the
 check is a no-op on its own writes.
 
-One exemption: a row is left accepted when an assertion **on the same subject,
-`assertion_type`, and `assertion_key`** is already superseded, was accepted,
-and names this row as its replacement. `supersede_assertion()`,
-`record_distillation()` and `record_assertion()` all mark the incumbent before
-inserting its replacement, and demoting the replacement would leave that key
-with no accepted value at all — the erasure this section exists to prevent. The
-exemption is a fact in the table, not a setting, and it is confined to the
-tuple whose value would otherwise be stranded. It does not carry across
-subjects: a `merge_nodes()` copy is judged by the canonical node's review
-policy, not the duplicate's, and under `strict` the copy lands as a candidate.
+**There is no exemption.** Migration `0025` left a row accepted when an
+assertion on the same subject, type, and key was already superseded, was
+accepted, and named this row as its replacement, so that a supersede-then-insert
+would not strand the key with no accepted value. Migration `0027` removes it,
+because every helper that inserts a replacement now applies the review policy
+itself and never ends an incumbent it is about to replace with a candidate. See
+"Review policy holds on every route". The consequence for a raw
+supersede-and-replace is that under a demoting policy the whole transaction is
+refused at commit rather than landing accepted: the incumbent was ended, the
+replacement was demoted, and the key carries nothing accepted. The refusal loses
+nothing. The incumbent still stands after the rollback, and
+`supersede_assertion()` records the same statement as a suggestion beside it.
 
-What is left open by the exemption is what `supersede_assertion()` already
-lets the same caller do on that same tuple, so it adds nothing. There is no
-"the incumbent pre-dates the transaction" test, because nothing in the row
-records when it was written that a caller could not also write.
+There is no "the incumbent pre-dates the transaction" test, because nothing in
+the row records when it was written that a caller could not also write. A
+`merge_nodes()` copy has always been judged by the canonical node's review
+policy, not the duplicate's, and under `strict` the copy lands as a candidate.
 
 **Refusals, and when they arrive.** Most arrive at the statement, as a raised
 error a client surfaces. Three arrive at `COMMIT`, because the fact that makes
@@ -539,7 +752,7 @@ classification from the row it replaces or from evidence the caller can already
 see. The conflict searches are the other way round and stay that way: an
 invisible accepted rival does not block a promotion, and inverting that would
 refuse every promotion to every caller who cannot see the whole tuple. What it
-costs is the sixth limit below.
+costs is the fifth limit below.
 
 **What this protects and what it does not.** Rye's authorization is session
 variables. A caller holding a raw connection can set `app.current_role` to
@@ -566,11 +779,9 @@ this section re-derives that rule rather than inventing a wider one. Who may
 accept, for every other role, is the settlement question, and `rye_settlers()`
 is advisory by contract.
 
-Six limits are stated rather than hidden. An outcome label is
+Five limits are stated rather than hidden. An outcome label is
 shape-constrained, not role-constrained, so a caller may still label an outcome
-by hand. `supersede_assertion()` does not consult the review policy, so a
-caller who supersedes and replaces an accepted row still writes an accepted
-row under `strict`; that is unchanged here and is its own item. The insert
+by hand. The insert
 check resolves the governing scope without a witness, because evidence is
 written after the assertion, so a scope reached only through
 `scope_governs_source` does not demote a raw insert. And a caller who may
@@ -581,7 +792,7 @@ the one the promoted row takes effect at, so two accepted rows may still
 overlap earlier in history; `current_valid_assertions` is protected, a
 reconstruction of a past moment is not.
 
-The sixth is the one a client is most likely to meet. **A rival the caller
+The fifth is the one a client is most likely to meet. **A rival the caller
 cannot read does not stop a raw promotion.** A caller whose role hides an
 accepted assertion — classified above its read level — can promote a visible
 candidate on the same subject, type, and key and leave two accepted rows
@@ -596,6 +807,133 @@ rejected: it would tell a caller that a row it may not see exists, it does
 nothing at all where the owner is bound by RLS, and it is the kind of route
 `design/model/deployment.md` refuses. The consequence is a duplicate, not an
 erasure, and an admin sees both rows.
+
+## Review policy holds on every route
+
+A scope's review policy says whether a write lands accepted. Two routes went
+around it. `supersede_assertion()` never consulted it, so any caller landed an
+accepted row under `strict` by superseding one. And when two scopes governed one
+subject — which is what a cross-scope `merge_nodes()` leaves behind —
+`governing_scope()` picked the lowest uuid, so a node in a strict area could
+silently become open. Migration `0027` closes both. Recorded in
+`docs/decisions/0010-review-policy-holds-on-every-route.md`.
+
+No signature changes and no view column changes meaning, so no version bump. Two
+behaviours a client depends on do change, and both are stated below.
+
+### `supersede_assertion()` files a suggestion instead of erasing one
+
+Under a scope where `record_assertion()` would land this caller's write as a
+candidate — `strict`, or `candidates_only` with a basis other than `observed` —
+`supersede_assertion()` **does not end the incumbent and does not write an
+accepted replacement.** It writes the replacement as a candidate and leaves the
+accepted incumbent standing, unsuperseded. Nothing said is lost and nothing
+standing is lost either: the tuple now carries one accepted row and one
+candidate, the candidate is in `review_queue` and `competing_candidates`, and a
+settler accepting it through `accept_assertion()` supersedes the incumbent then,
+which is the ordinary acceptance path.
+
+The predicate is the same one `record_assertion()` applies, resolved from the
+incumbent's own subject, type, and primary witness, so for the same caller and
+the same claim the two helpers agree. Where `record_assertion()` would land
+accepted, `supersede_assertion()` behaves exactly as before.
+
+**How the caller is told.** The signature does not change and neither does the
+return type: `supersede_assertion()` returns the new row's id, whether that row
+is accepted or a candidate. **The return value does not say what happened; the
+row does.** The candidate carries
+
+```
+attrs.review_gate = {
+  "pending": true,
+  "requested_status": "accepted",
+  "review_policy": "strict" | "candidates_only",
+  "scope_node_id": "<uuid or null>",
+  "incumbent_assertion_id": "<the row that still stands>"
+}
+```
+
+which is the shape `attrs.settle_gate` already uses for the other demotion, and
+the helper raises a `NOTICE` naming the incumbent and the policy for an
+interactive caller. A client that must know reads `status` or
+`attrs->'review_gate'` from the returned id, or finds the row in
+`review_queue`.
+
+**Per helper that reaches it.** Derived by grep, not memory: exactly one
+in-repo helper calls `supersede_assertion()`.
+
+| helper | what it does under a demoting policy |
+|---|---|
+| `resolve_knowledge_gap()` | files the resolved gap as a candidate. The `knowledge_gap` assertion stays open and stays in `open_gaps` until a settler accepts. The `knowledge_gap_resolved` event is still recorded — the act happened — and its properties gain `pending_review` and `review_policy` so a reader is not misled. Signature unchanged. |
+| `record_distillation()` | unchanged. It applies the policy itself and supersedes the digest incumbent only when its own write is accepted, which is what it already did. |
+| `schedule_assertion_change()` | unchanged. It reaches `record_assertion()`, not this helper, and `record_assertion()` already demotes. |
+| the profile helpers — `advance_deal_stage`, `schedule_deal_stage_change`, `advance_task_status`, `schedule_task_status_change`, `schedule_milestone_status_change`, `create_opportunity`, `create_task`, `instantiate_workflow` | unchanged. All reach `record_assertion()`; none calls `supersede_assertion()`. |
+| `accept_assertion()`, `reject_candidate()`, `merge_nodes()` | unchanged. None calls it. |
+
+**One limit, stated.** `resolve_knowledge_gap()` writes its replacement with
+basis `inferred`, and `accept_assertion()` refuses an inferred candidate that
+would displace a non-inferred accepted incumbent. So under a demoting policy, a
+gap recorded with a basis other than `inferred` produces a candidate a settler
+cannot accept. The ways out are to record gaps with basis `inferred`, which is
+what a gap is, or to `reject_candidate()` the resolution and record the resolved
+gap with `record_assertion()`. This is pre-existing behaviour of
+`accept_assertion()` that the new route makes reachable; it is not changed here.
+
+**The raw route agrees, by refusing.** A caller who raw-updates an accepted row
+to name a replacement and then inserts that replacement accepted gets the same
+answer through a different mechanism, because the insert exemption in "The row
+is the gate, not the route" is removed: the replacement is demoted like any
+other insert, the tuple then carries nothing accepted, and
+`trg_assertions_transition_complete` refuses the transaction at commit. Under a
+non-demoting policy the same shape still commits accepted, exactly as before.
+The one `0008` limit this removes is the sentence that said
+`supersede_assertion()` does not consult the review policy.
+
+### Several scopes: the most restrictive policy wins
+
+When more than one scope governs a subject, **the governing scope is the one
+whose review policy is most restrictive**, ordering `strict` above
+`candidates_only` above `open`. Ties are broken by `scope.id` as before, so the
+answer is still deterministic, and it no longer depends on which uuid happened
+to sort first.
+
+`governing_scope()` keeps its signature and still returns **one** scope id. Its
+callers use that id for more than the policy — an agent capability check, a
+scoped type resolution, a scoped registry read, and the explicit-scope mismatch
+test — so returning a set would change all of them. The scope it returns is the
+most restrictive one *within the branch that matched*. The branch order is
+unchanged and still decides first: direct `scope_governs_subject` coverage, then
+coverage inherited through `has_step`, then type coverage, then coverage through
+the witness, then `DEFAULT_SCOPE`. For an edge subject, the source endpoint
+still beats the target endpoint before restrictiveness is consulted, because
+that rule chooses which subject, not which scope. Type coverage still **raises**
+`Ambiguous governing scope for assertion type %` when two active scopes claim
+one type: that is an administrative error someone must fix, not a tie to break.
+
+Ranking is done by a new read-only helper,
+`scope_review_policy_rank(p_scope_id uuid) RETURNS int` — `0` for `strict`, `1`
+for `candidates_only`, `2` for anything else. It never raises. A scope carrying
+an unsupported policy value ranks as `open` for ordering and still raises from
+`scope_review_policy()` if it is the scope selected, which keeps today's failure
+surface exactly where it is instead of letting one broken scope refuse every
+write near it.
+
+What each caller of `governing_scope()` sees:
+
+| caller | what changes |
+|---|---|
+| `record_assertion()` | resolves the strictest governing scope. A caller passing `p_scope_node_id` for a looser scope on a subject two scopes govern now gets `Explicit scope % does not match governing scope %` where it did not before. The type is canonicalized in the strictest scope. |
+| `accept_assertion()` | an `agent:*` caller now needs `rye.authoritative.promote` for the strictest governing scope, not for whichever sorted first. A narrowing, and the intended one. |
+| `record_distillation()` | reads `digest_facets:<node_type>` from the strictest scope. |
+| the insert guard in "The row is the gate, not the route" | resolves with no witness, as before, and takes the strictest of whatever the witness-free branches produce. The witness asymmetry between the guard and `accept_assertion()` is unchanged and is still a stated limit. |
+| `agent_can_promote_in_scope()` | unchanged. It answers about the scope it is handed. |
+| `compile_scope_policy()`, `rye_agent_context()`, the CLI `--scope` option | unchanged. They take an explicit scope and never call `governing_scope()`. |
+
+**After a merge across two scopes.** `merge_nodes()` re-points the duplicate's
+`scope_governs_subject` edge onto the canonical node, so both scopes govern it
+afterwards. The surviving node now reads the stricter of the two in either id
+order, and assertions copied onto it under `strict` land as candidates in
+`review_queue`. That is the answer a test may assert without pinning uuids.
 
 ## Settlement lookup
 
