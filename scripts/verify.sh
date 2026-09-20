@@ -192,6 +192,57 @@ BEGIN
     RAISE EXCEPTION 'configuration assertion types are not settle-gated to admin';
   END IF;
 
+  -- The row is the gate, not the route: the shape rules are triggers, so a
+  -- missing trigger is a missing rule. The deferred one must stay deferred:
+  -- the helpers point an incumbent at a replacement they insert afterwards.
+  IF NOT EXISTS (
+      SELECT 1
+      FROM pg_trigger t
+      JOIN pg_class c ON c.oid = t.tgrelid
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = v_schema
+        AND c.relname = 'assertions'
+        AND t.tgname = 'trg_assertions_insert_review'
+        AND NOT t.tgisinternal
+  ) THEN
+    RAISE EXCEPTION 'trg_assertions_insert_review is missing from assertions';
+  END IF;
+
+  IF NOT EXISTS (
+      SELECT 1
+      FROM pg_trigger t
+      JOIN pg_class c ON c.oid = t.tgrelid
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = v_schema
+        AND c.relname = 'assertions'
+        AND t.tgname = 'trg_assertions_transition_complete'
+        AND NOT t.tgisinternal
+        AND t.tgdeferrable
+        AND t.tginitdeferred
+  ) THEN
+    RAISE EXCEPTION 'trg_assertions_transition_complete is missing or not initially deferred';
+  END IF;
+
+  IF NOT EXISTS (
+      SELECT 1
+      FROM pg_trigger t
+      JOIN pg_class c ON c.oid = t.tgrelid
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = v_schema
+        AND c.relname = 'assertions'
+        AND t.tgname = 'trg_assertions_immutable'
+        AND NOT t.tgisinternal
+  ) THEN
+    RAISE EXCEPTION 'trg_assertions_immutable is missing from assertions';
+  END IF;
+
+  IF to_regprocedure('rye.assertion_outcome_values()') IS NULL
+     OR to_regprocedure('rye.assertion_outcome_label_keys()') IS NULL
+     OR to_regprocedure('rye.assertion_derived_classification(uuid)') IS NULL
+  THEN
+    RAISE EXCEPTION 'assertion lifecycle gate helper functions are missing';
+  END IF;
+
   IF NOT EXISTS (
       SELECT 1
       FROM pg_class c

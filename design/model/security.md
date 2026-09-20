@@ -254,6 +254,44 @@ This pattern lets agents (and other restricted roles) perform controlled updates
 
 > **Important:** `SELECT ... FOR UPDATE` requires both the SELECT and UPDATE policies to pass. When using a write-path gate, set the flag **before** the `FOR UPDATE` lock, not after. Otherwise the locking SELECT will fail for gated roles.
 
+> **The write-path gate grants nothing.** Any caller can run the same
+> `set_config()` the helper runs, so on `assertions` the gate is a pre-filter
+> that stops a stray `UPDATE` and no more. Everything that matters is enforced
+> by triggers that re-derive their answer from the row. See
+> "The assertion lifecycle is enforced by the row" below.
+
+### 2.7 The Assertion Lifecycle Is Enforced by the Row
+
+Migration `0025` replaces `assertions_immutable_guard()` in place and adds two
+triggers. Together they decide what an assertion may become, per column, from
+`OLD`, `NEW`, rows that already exist, and `app.current_role`. No rule reads
+`app.write_path`, because any caller can set it, and no rule permits on the
+basis of a role, because any caller can claim one. There is no admin exemption.
+
+| Trigger | Timing | What it decides |
+|---|---|---|
+| `trg_assertion_settle_gate` (0023) | BEFORE INSERT OR UPDATE | Configuration types need an admin. Sorts first, and `tests/conformance/30_configuration_gate.sql` depends on that. |
+| `trg_assertions_insert_review` (0025) | BEFORE INSERT | A direct `INSERT` of an accepted row is demoted where `record_assertion()` demotes. |
+| `trg_assertions_immutable` (0025 function, 0002 trigger) | BEFORE UPDATE | The per-column rules for `status`, `superseded_at`, `superseded_by`, `effective_to`, `attrs` and `classification`. |
+| `trg_assertions_transition_complete` (0025) | AFTER INSERT OR UPDATE, deferred | The acceptance event, the replacement's type and key, and the successor of a narrowed window. Refuses at `COMMIT`. |
+
+**What this protects and what it does not.** Rye's authorization is session
+variables. A caller holding a raw connection can set `app.current_role` to
+`admin`, and nothing here changes that. Two things are protected: deployments
+where a trusted backend sets the session variables and callers cannot, and
+well-behaved agents that state their role honestly and must not be able to skip
+review by accident or by following bad instructions. It is not a defence against
+a hostile caller with a raw connection.
+
+Inside that boundary, three claims hold for any caller at all, forged role
+included, because they read no role: an accepted assertion cannot be ended
+without a replacement of the same type and key; a window cannot be narrowed
+without a successor; and `claim`, `basis`, `confidence` and the subject cannot be
+rewritten. Nothing anywhere may claim more.
+
+The full per-column table and the four stated limits are in
+`contracts/sql-surface.md`, section "The row is the gate, not the route".
+
 ---
 
 ## 3. Field-Level Redaction

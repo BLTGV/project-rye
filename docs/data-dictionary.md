@@ -954,11 +954,74 @@ BEFORE UPDATE trigger on `nodes`. Sets `updated_at = now()`.
 
 #### `assertions_immutable_guard()`
 
-BEFORE UPDATE trigger on `assertions`. Allows only narrowly gated supersession,
-candidate acceptance, and effective-window narrowing. Basis and content remain
-immutable.
+BEFORE UPDATE trigger on `assertions` (`trg_assertions_immutable`). Decides per
+column from `OLD`, `NEW`, rows that already exist, and `app.current_role`.
+`claim`, `assertion_type`, `assertion_key`, the subject columns, `asserted_at`,
+`effective_at`, `basis`, `confidence` and `created_at` never change. `status`
+moves `candidate` to `accepted` and never back, only on a live candidate that no
+other accepted unsuperseded assertion on the same tuple already covers at
+`greatest(coalesce(effective_at, now()), now())`, and an `agent:*` caller under
+`candidates_only` or `strict`, or on a `pattern_claim`, additionally needs
+`rye.authoritative.promote` for the governing scope. Only `agent:*` callers are
+policy-gated on promotion, because that is the rule `accept_assertion()` applies.
+`superseded_at` is set once
+and, on a row that was accepted, only together with a `superseded_by` naming a
+row of the same type and key. `effective_to` narrows only, to a future instant
+inside the old window. `attrs` changes only as an outcome label: no key dropped,
+no existing key's value changed outside `assertion_outcome_label_keys()`, and
+the result must name an `outcome` in `assertion_outcome_values()`.
+`classification` may only become `assertion_derived_classification()` for the
+row's own derivation evidence.
 
-**Why it exists:** Enforces the append-only contract. Without this, application code could accidentally overwrite assertion content, destroying history.
+It does not read `app.write_path`, because any caller can set it. It reads
+`app.current_role` only in order to refuse, and there is no admin exemption.
+
+**Why it exists:** Enforces the append-only contract, and the acceptance and
+supersession rules with it. The session settings the helpers use are forgeable,
+so the rules are about the row rather than the route.
+
+#### `assertions_insert_review_guard()`
+
+BEFORE INSERT trigger on `assertions` (`trg_assertions_insert_review`). A direct
+`INSERT` of an `accepted` row is judged by the same review policy
+`record_assertion()` applies, and lands as a `candidate` where that policy
+demotes. It first refuses, at any status, a row that does not carry exactly one
+subject: `assertion_has_subject` is `OR`, not `XOR`, so a row with both
+`subject_node_id` and `subject_edge_id` is insertable, `governing_scope()`
+cannot read it, and it would escape the review rules while still appearing as
+the node's row in `current_valid_assertions`. `record_assertion()` already
+refuses that shape, so nothing legitimate writes it. Nothing said is lost. One
+exemption, confined to a single tuple: a row
+is left accepted when an already superseded, formerly accepted assertion **on
+the same `subject_ref`, `assertion_type` and `assertion_key`** names it as its
+replacement, so the supersede-then-insert order the helpers use does not strand
+that key with no accepted value. The exemption does not carry across subjects,
+so a `merge_nodes()` copy is judged by the canonical node's review policy.
+
+**Why it exists:** Rye cannot tell `record_assertion()`'s insert from a raw one,
+so it judges the row. Refusing instead would break `merge_nodes()` and throw
+away what a caller said.
+
+#### `assertions_transition_complete()`
+
+`AFTER INSERT OR UPDATE` constraint trigger on `assertions`
+(`trg_assertions_transition_complete`), `DEFERRABLE INITIALLY DEFERRED`. At
+commit: a promotion has an `assertion_accepted` event naming the row, a
+`superseded_by` names a row with the same `assertion_type` and `assertion_key`,
+and a narrowed `effective_to` has a successor accepted assertion starting where
+the window now ends.
+
+All three **fail closed** under the caller's RLS: a row the writer cannot read
+back is refused, not waved through. Otherwise an accepted assertion could be
+ended by naming a replacement classified above the writer's own read level,
+which is erasure.
+
+**Why it exists:** Those three facts are written after the statement that needs
+them. `supersede_assertion()` must mark the incumbent before inserting the
+replacement, or the partial unique index on accepted unsuperseded rows rejects
+the pair. A client may therefore see one of these refusals at `COMMIT`. The one
+legitimate call this refuses is `record_assertion()` with a `p_classification`
+above the caller's own read level over an accepted incumbent.
 
 #### `assertion_settle_gate_guard()`
 
