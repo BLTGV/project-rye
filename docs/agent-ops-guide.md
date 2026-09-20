@@ -128,9 +128,9 @@ adds a member, read through `registry_value()`, scope first, then plugin, then
 core. Rye has no dedicated registry-writing helper: write it with
 `record_assertion()` as a `registry_entry` on the registry or scope node, the
 same shape `type_alias` entries use, never by touching a base table. It is not
-a claim like any other: `registry_entry` is Rye's own configuration and only a
-Rye admin settles it. See "Rye's own setup needs an admin" below. The core
-members need no entry.
+a claim like any other: `registry_entry` is part of how Rye is set up here, and
+only a Rye admin settles it. See "How Rye is set up here needs an admin" below.
+The core members need no entry.
 
 An agent choosing a claim type reuses one `rye_categories()` lists. An
 invented type, or a known one spelled differently, is in neither set, so a
@@ -185,7 +185,7 @@ Four outcomes and nothing else:
    mistake — you named no area or the wrong one. Correct the key and ask
    again. Say nothing to the person about either.
 
-### Rye's own setup needs an admin
+### How Rye is set up here needs an admin
 
 Some assertion types are not knowledge about the world. They are how Rye is set
 up here, and Rye reads them to decide how it treats every other write.
