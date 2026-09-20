@@ -820,7 +820,10 @@ never allowed.
 `record_prediction()` writes a validated inferred prediction with a witness
 and provenance event. `score_due_predictions()` scores unscored predictions
 past their horizon against the outcome tuple returned by `assertions_as_of()`
-and records `prediction_scored` events.
+and records `prediction_scored` events. It returns how many it scored, and it
+scores only predictions the calling session may read; it locks each one inside
+the `assertion_outcome` write-path gate, so the lock is not filtered away by
+`assertion_update_policy` on an install whose owner is not a superuser.
 
 #### `record_pattern()`
 
