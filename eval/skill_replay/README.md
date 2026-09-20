@@ -26,6 +26,15 @@ objects to it. Grades the accept-versus-suggest outcome and that no Rye word
 reaches either person. Its four lookup answers were executed 2026-09-19 on a
 full install; the end-to-end run waits on a runner for this directory.
 
+Designed, not yet run: `scenarios/line-retool-departure` — one interview that
+walks the agent into all four intake defects from issue 13: a departure that
+leaves an employment edge open, a summary reaching past its sources, a
+backdated handoff, and a count with no period. Its rubric grades one item per
+rule and uses `eval/intake_consistency/checks.sql` for section A evidence. Its
+`setup.sql` was executed 2026-09-20 on a full install under a non-superuser
+role and resolves `candidates_only` on the seeded subjects, so every
+non-observed agent write lands as a suggestion.
+
 ## Artifacts per scenario
 
 - `ground_truth.md` — full business reality. Grader-only. Never shown to

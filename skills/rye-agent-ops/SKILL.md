@@ -661,6 +661,185 @@ Do not insert into `events` and `event_participants` separately.
   `reject_candidate(...)` after review.
 - Do not run direct `UPDATE assertions`.
 
+## Intake Consistency: Four Rules
+
+Four defects a clean-room agent produced from realistic source material. Each
+rule is a write discipline. The reads that find breakage after the fact are in
+`skills/rye-pattern-library/references/intake-consistency-checks.md`; a fixture
+that violates all four is `eval/intake_consistency/`. The database refuses none
+of these, so the discipline is yours.
+
+The examples below are executable and run against that fixture. Each names the
+role it needs. Full versions, with what each check cannot decide, are in
+`docs/agent-ops-guide.md` under "Intake consistency".
+
+### 1. Recording a departure closes the edges it contradicts
+
+An `employs` edge or a role edge left open after an accepted departure
+contradicts the departure. Close it on the same date.
+
+You cannot. An agent-shaped session has no `UPDATE` on `edges`: the statement
+reports `UPDATE 0`, changes nothing, and raises nothing. Record the departure,
+then name the open edges to a person who can close them. Under a review policy
+your departure write is a suggestion waiting for a person, so say that too.
+
+Two things decide whether a repair is possible at all. **Get the date**: the
+repair closes each edge on the departure's `effective_at`, so a departure with
+no date is reported forever and nothing can clear it — ask the person for a
+last day before recording it. **Close and handoff are different**: membership
+and assignment end when the person leaves, but closing an `owns` or
+`responsible_for` edge leaves the thing unowned. Those need a successor named
+by a person. The list below is the `close` set, derived from
+`plugins/*/rye-plugin.json`.
+
+```sql
+-- As team_member, not as an agent.
+SELECT set_config('app.current_role', 'team_member', false);
+
+UPDATE edges e
+SET effective_to = d.departed_at
+FROM (
+    SELECT a.subject_node_id AS person_id,
+           a.effective_at    AS departed_at
+    FROM current_valid_assertions a
+    WHERE a.assertion_type = 'employment_status'
+      AND a.claim->>'status' = 'departed'
+      AND a.effective_at IS NOT NULL
+) d
+WHERE (e.source_id = d.person_id OR e.target_id = d.person_id)
+  AND e.edge_type IN ('employs', 'affiliated_with', 'reports_to', 'member_of',
+                      'assigned_to', 'project_member', 'sprint_member',
+                      'pipeline_member', 'territory_member',
+                      'primary_contact', 'secondary_contact')
+  AND e.archived_at IS NULL
+  AND e.effective_to IS NULL;
+```
+
+Edges end with `effective_to`. Never delete one.
+
+### 2. A digest asserts nothing its sources do not establish
+
+Every key in a digest claim comes from a source assertion the digest cites. If
+the material supports a detail that no accepted assertion states, record the
+assertion first, then distil. Do not carry the detail into the digest alone.
+
+```sql
+-- As an agent. Both claim keys are established by the two cited sources.
+SELECT set_config('app.current_role', 'agent:intake-fixture', false);
+
+SELECT record_distillation(
+    p_subject_node_id := (SELECT id FROM nodes WHERE label = 'Line 3 Retool'),
+    p_subject_edge_id := NULL,
+    p_assertion_key := 'status',
+    p_claim := '{"status":"blocked","blocked_on":"gearbox",
+                 "message_count":214,"peak_hour_utc":10}'::jsonb,
+    p_source_assertion_ids := ARRAY(
+        SELECT a.id FROM current_valid_assertions a
+        WHERE a.subject_node_id = (SELECT id FROM nodes WHERE label = 'Line 3 Retool')
+          AND a.assertion_type IN ('task_status', 'message_volume')
+    ),
+    p_source_event_ids := '{}'::uuid[],
+    p_status := 'accepted',
+    p_agent := 'agent:intake-fixture',
+    p_attrs := '{"source_window":{"from":"2026-09-01T00:00:00Z",
+                                  "to":"2026-09-30T00:00:00Z"}}'::jsonb
+);
+```
+
+Under a review policy this lands as a suggestion carrying `attrs.review_gate`,
+and the accepted digest stays current until a person accepts the new one. Read
+`status` from the returned id rather than assuming.
+
+### 3. An effective date and an edge window tell one story
+
+A claim about a relationship takes its `effective_at` from the edge it is
+about. Point it at the edge: `subject_edge_id`, or `attrs.edge_id` when the
+subject has to be a node. A relationship claim naming no edge checks against
+nothing.
+
+Correcting one already recorded depends on what the incumbent is now.
+
+- **Against an accepted assertion**, a date-only or attrs-only correction
+  through `record_assertion()` writes nothing: when claim, basis and confidence
+  match, it appends your evidence, returns the incumbent's id and inserts no
+  row. Use `supersede_assertion()`.
+- **Against your own suggestion** — what a demoting review policy leaves you —
+  `supersede_assertion()` raises `Only accepted assertions may be superseded;
+  reject candidates instead`, and `record_assertion()` with a different date
+  writes a *second* suggestion instead of replacing the first. Close the wrong
+  one with `reject_candidate()` and file the corrected one.
+
+An agent may call `reject_candidate()`: verified as `agent:<key>` on a full
+install, it closed the agent's own suggestion. Rejecting your own suggestion is
+housekeeping. Rejecting someone else's is a person's call.
+
+```sql
+-- As an agent. Replaces the misdated claim with one dated off the edge.
+SELECT set_config('app.current_role', 'agent:intake-fixture', false);
+
+SELECT supersede_assertion(
+    p_old_assertion_id := a.id,
+    p_new_assertion_type := a.assertion_type,
+    p_new_subject_node_id := NULL,
+    p_new_subject_edge_id := e.id,
+    p_new_claim := a.claim,
+    p_new_assertion_key := a.assertion_key,
+    p_new_effective_at := e.effective_from,
+    p_new_basis := a.basis,
+    p_new_evidence := ARRAY[jsonb_build_object(
+        'kind', 'source',
+        'event_id', (SELECT id FROM events
+                     WHERE summary LIKE 'Staffing channel:%' LIMIT 1)
+    )]
+)
+FROM assertions a
+JOIN edges e ON e.id = a.subject_edge_id
+WHERE a.assertion_type = 'assignment_status'
+  AND a.superseded_at IS NULL
+  AND a.effective_at < e.effective_from;
+```
+
+If the source says the handoff happened earlier than the edge shows, the edge
+is what changes, and that is a person's write. Say which one you believe.
+
+### 4. A derived number cites the window it was computed from
+
+A count, a rate, a peak, an average: the period it was computed over goes in
+`attrs.source_window` as `{"from": ..., "to": ...}`, ISO 8601, and that window
+contains the sources cited as evidence. Write the number as a number; a
+measurement rendered as text is invisible to the check.
+
+The rule binds whatever the basis is. A count read off an export is `observed`
+and still needs its week. Basis says how Rye came to know a number, not
+whether it was computed over a period.
+
+```sql
+-- As an agent. The replacement cites the window containing its source.
+SELECT set_config('app.current_role', 'agent:intake-fixture', false);
+
+SELECT supersede_assertion(
+    p_old_assertion_id := a.id,
+    p_new_assertion_type := a.assertion_type,
+    p_new_subject_node_id := a.subject_node_id,
+    p_new_subject_edge_id := NULL,
+    p_new_claim := a.claim,
+    p_new_assertion_key := a.assertion_key,
+    p_new_effective_at := a.effective_at,
+    p_new_basis := a.basis,
+    p_new_evidence := ARRAY[jsonb_build_object(
+        'kind', 'derivation',
+        'source_assertion_id', (SELECT s.id FROM current_valid_assertions s
+                                WHERE s.assertion_type = 'task_status'
+                                LIMIT 1)
+    )],
+    p_new_attrs := '{"source_window":{"from":"2026-09-01T00:00:00Z",
+                                      "to":"2026-09-30T00:00:00Z"}}'::jsonb
+)
+FROM assertions a
+WHERE a.assertion_type = 'throughput_estimate'
+  AND a.superseded_at IS NULL;
+```
+
 ## Plans and Future Assertions
 
 Separate **plans** from **future-effective truth**.
