@@ -138,7 +138,15 @@ review policy filed as a suggestion instead of an answer: the earlier claim, if
 there was one, is still the current one until a person accepts the new one, and
 `summary.waiting_for_review` counts them. The commit itself still succeeded.
 Report those subjects in the post-commit worklist below rather than describing
-them as updated.
+them as updated. Each entry names the policy that held it —
+`review_policy`, from the row's own `attrs.review_gate`, and null on a row
+written before Rye recorded that marker — and `still_current_assertion_id`, the
+claim that still answers, which is null when the claim is new and nothing stood
+before it.
+
+Every assertion this commit writes has basis `reported`, so under
+`candidates_only` all of them wait: that policy keeps only `observed` writes
+accepted. Expect a full `waiting_for_review` list there, not an exception.
 
 Rerunning the same input is safe. Before writing, the commit looks for a
 suggestion already waiting with the same claim on the same subject and key; if
